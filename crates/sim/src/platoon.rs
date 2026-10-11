@@ -1,7 +1,7 @@
-//! Platoons: membership and the platoon view. Platoon AI (formations, techniques, battle
-//! positions, fire distribution, drills) lives in `platoon_ai.rs`.
+//! Platoons: membership, order state and the platoon view. Behaviour is in `platoon_ai.rs`.
 
 use ai::picture::{PlatoonId, PlatoonView, SideId};
+use ai::position::Candidate;
 use sim_data::{Formation, Technique};
 
 use crate::Vec2;
@@ -11,11 +11,13 @@ use crate::world::World;
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlatoonOrder {
     None,
+    /// Formation move along a planned route. `progress` = arc length reached by each
+    /// section's virtual leader; `active` = bounding section.
     Move {
         destination: Vec2,
         route: Vec<Vec2>,
-        progress_m: f64,
-        bound: u32,
+        progress: [f64; 2],
+        active: usize,
     },
     Occupy {
         centre: Vec2,
@@ -23,6 +25,7 @@ pub enum PlatoonOrder {
         facing: f64,
         kind: PositionKind,
         assigned: bool,
+        reported: bool,
     },
     /// React to contact: halted, fighting from current positions.
     Contact,
@@ -38,11 +41,19 @@ pub struct Platoon {
     pub formation: Formation,
     pub technique: Technique,
     pub order: PlatoonOrder,
-    /// Leader heading used to orient formation slots (compass rad).
+    /// Formation heading (compass rad).
     pub heading: f64,
-    /// Last tick slot routes were re-planned.
+    /// Tick slot routes were last re-planned.
     pub replanned: u64,
     pub contact_reported: bool,
+    /// Last slot point each member was routed to.
+    pub slot_targets: Vec<Vec2>,
+    /// Battle-position assignment: (member world index, chosen position).
+    pub bp: Vec<(usize, Candidate)>,
+    /// Move to resume after a contact drill: (destination, technique).
+    pub resume: Option<(Vec2, Technique)>,
+    pub quiet_since: u64,
+    pub last_strength: u8,
 }
 
 impl Platoon {
@@ -53,8 +64,9 @@ impl Platoon {
     pub fn view(&self, w: &World) -> PlatoonView {
         let task = match &self.order {
             PlatoonOrder::None => "HALTED".to_owned(),
-            PlatoonOrder::Move { .. } => format!("MOVING ({:?}, {:?})", self.formation, self.technique).to_uppercase(),
-            PlatoonOrder::Occupy { kind, .. } => format!("OCCUPY BP ({kind:?})").to_uppercase(),
+            PlatoonOrder::Move { .. } => "MOVING".to_owned(),
+            PlatoonOrder::Occupy { reported: true, .. } => "SET IN BATTLE POSITION".to_owned(),
+            PlatoonOrder::Occupy { .. } => "OCCUPYING BATTLE POSITION".to_owned(),
             PlatoonOrder::Contact => "IN CONTACT".to_owned(),
         };
         PlatoonView {

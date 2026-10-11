@@ -34,7 +34,7 @@ pub fn step(world: &mut World, vehicles: &[VehicleDef], events: &mut Vec<Event>)
                     ai.set = true;
                 }
             }
-            Order::Move { route, segment, speed_limit, face, platoon_slot } => {
+            Order::Move { route, segment, speed_limit, face, platoon_slot, arrive } => {
                 let mv = &vehicles[vi].mobility;
                 let max = speed_limit.unwrap_or(f64::INFINITY).min(mv.max_speed_road_mps.get());
                 let p = DriveParams {
@@ -42,6 +42,7 @@ pub fn step(world: &mut World, vehicles: &[VehicleDef], events: &mut Vec<Event>)
                     max_lateral_accel: mv.max_lateral_accel_mps2.get(),
                     braking_decel: mv.braking_decel_mps2.get(),
                     pivot_threshold: 1.2,
+                    arrival_radius: *arrive,
                 };
                 let c = drive::drive(t.pos, t.heading, m.speed, route, *segment, &p);
                 *segment = c.segment;

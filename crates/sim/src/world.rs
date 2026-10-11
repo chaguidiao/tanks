@@ -43,6 +43,8 @@ pub enum Order {
         speed_limit: Option<f64>,
         face: Option<f64>,
         platoon_slot: bool,
+        /// Arrival tolerance (m).
+        arrive: f64,
     },
     /// Turn in place to a heading.
     Face {
@@ -172,9 +174,18 @@ impl World {
         id
     }
 
-    pub fn set_route(&mut self, k: usize, route: Vec<Vec2>, speed_limit: Option<f64>, face: Option<f64>, slot: bool) {
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_route(
+        &mut self,
+        k: usize,
+        route: Vec<Vec2>,
+        speed_limit: Option<f64>,
+        face: Option<f64>,
+        slot: bool,
+        arrive: f64,
+    ) {
         if let Some(ai) = &mut self.ai[k] {
-            ai.order = Order::Move { route, segment: 0, speed_limit, face, platoon_slot: slot };
+            ai.order = Order::Move { route, segment: 0, speed_limit, face, platoon_slot: slot, arrive };
             ai.set = false;
             ai.position_note = None;
         }

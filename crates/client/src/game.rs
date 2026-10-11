@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use sim::view::{Condition, ContactLevel, PerceivedWorld, PlatoonId, Task, WeaponsStatus};
-use sim::{Addressee, Command, EntityId, Event, KillKind, PositionKind, SideId, Sim};
+use sim::{Addressee, Command, EntityId, Event, KillKind, PlatoonReport, PositionKind, SideId, Sim};
 use sim_data::{DataSet, Formation, ScenarioDef, Technique};
 use terrain::BakedMap;
 use terrain::ground::Ground;
@@ -790,7 +790,25 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                 (None, true) => format!("{}: HIT, MINOR DAMAGE.", u.callsign),
             }
         }
-        Event::PlatoonReport { side, text, .. } if *side == pic.side => text.clone(),
+        Event::PlatoonReport { side, platoon, report } if *side == pic.side => {
+            let cs = game.platoon_cs(*platoon);
+            match report {
+                PlatoonReport::SetAt { pos } => format!("{cs}: SET AT GRID {}.", format::grid(*pos)),
+                PlatoonReport::NoRoute => format!("{cs}: UNABLE. NO ROUTE."),
+                PlatoonReport::SetInPosition { hull_down, turret_down, exposed, facing } => format!(
+                    "{cs}: SET IN BP. {hull_down} HULL-DOWN, {turret_down} TURRET-DOWN, {exposed} EXPOSED. ORIENTED {} MILS.",
+                    format::mils(*facing)
+                ),
+                PlatoonReport::Contact { at, toward } => format!(
+                    "{cs}: CONTACT, DIRECTION {}, {}. ACTION, ENGAGING.",
+                    format::mils(ai::drive::bearing(*at, *toward)),
+                    format::distance(((toward[0] - at[0]).powi(2) + (toward[1] - at[1]).powi(2)).sqrt())
+                ),
+                PlatoonReport::ContinuingMission => format!("{cs}: CONTACT LOST. CONTINUING MISSION."),
+                PlatoonReport::Bounding { section } => format!("{cs}: SECTION {section} BOUNDING."),
+                PlatoonReport::Strength { remaining, of } => format!("{cs}: {remaining} OF {of} VEHICLES OPERATIONAL."),
+            }
+        }
         Event::ScenarioEnd { reason, .. } => format!("ENDEX. {reason}"),
         _ => return None,
     })

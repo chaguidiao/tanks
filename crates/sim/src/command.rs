@@ -132,10 +132,39 @@ pub enum Event {
     PlatoonReport {
         side: SideId,
         platoon: PlatoonId,
-        text: String,
+        report: PlatoonReport,
     },
     ScenarioEnd {
         winner: Option<SideId>,
         reason: String,
+    },
+}
+
+/// Structured platoon reports; the client renders them as radio text.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlatoonReport {
+    SetAt {
+        pos: Vec2,
+    },
+    NoRoute,
+    SetInPosition {
+        hull_down: u8,
+        turret_down: u8,
+        exposed: u8,
+        facing: f64,
+    },
+    /// Battle drill "react to contact": halted and engaging towards `toward`.
+    Contact {
+        at: Vec2,
+        toward: Vec2,
+    },
+    ContinuingMission,
+    Bounding {
+        section: u8,
+    },
+    /// Losses: members remaining.
+    Strength {
+        remaining: u8,
+        of: u8,
     },
 }

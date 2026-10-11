@@ -19,6 +19,8 @@ pub struct DriveParams {
     pub braking_decel: f64,
     /// Above this heading error the driver slows to a crawl and pivots (rad).
     pub pivot_threshold: f64,
+    /// Distance at which the end point counts as reached (m).
+    pub arrival_radius: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -32,7 +34,7 @@ pub struct DriveCmd {
     pub arrived: bool,
 }
 
-/// Distance at which the end point counts as reached (m).
+/// Default arrival distance (m); battle-position moves use a tighter one.
 pub const ARRIVAL_RADIUS: f64 = 4.0;
 
 fn sub(a: Vec2, b: Vec2) -> Vec2 {
@@ -65,7 +67,7 @@ pub fn drive(pos: Vec2, heading: f64, speed: f64, route: &[Vec2], segment: usize
         return DriveCmd { speed: 0.0, heading, segment, arrived: true };
     };
     let to_goal = len(sub(goal, pos));
-    if to_goal < ARRIVAL_RADIUS {
+    if to_goal < p.arrival_radius {
         return DriveCmd { speed: 0.0, heading, segment, arrived: true };
     }
     // Advance the segment index while the vehicle has passed the segment's end.
@@ -75,7 +77,7 @@ pub fn drive(pos: Vec2, heading: f64, speed: f64, route: &[Vec2], segment: usize
         let ab = sub(b, a);
         let l2 = ab[0] * ab[0] + ab[1] * ab[1];
         let t = if l2 > 0.0 { ((pos[0] - a[0]) * ab[0] + (pos[1] - a[1]) * ab[1]) / l2 } else { 1.0 };
-        if t >= 1.0 || len(sub(b, pos)) < ARRIVAL_RADIUS { seg += 1 } else { break }
+        if t >= 1.0 || len(sub(b, pos)) < p.arrival_radius { seg += 1 } else { break }
     }
     // Look-ahead point: walk the path from the projection of `pos` on the current segment.
     let look = (4.0 + 1.2 * speed.abs()).clamp(5.0, 30.0);
@@ -109,7 +111,7 @@ pub fn drive(pos: Vec2, heading: f64, speed: f64, route: &[Vec2], segment: usize
     }
     // Plan the stop: v ≤ sqrt(2 a d) over the remaining path length.
     let remaining = remaining_length(pos, route, seg);
-    v = v.min(libm::sqrt(2.0 * p.braking_decel * 0.6 * (remaining - ARRIVAL_RADIUS * 0.5).max(0.0)) + 0.5);
+    v = v.min(libm::sqrt(2.0 * p.braking_decel * 0.6 * (remaining - p.arrival_radius * 0.5).max(0.0)) + 0.3);
     DriveCmd { speed: v.max(0.0), heading: desired, segment: seg, arrived: false }
 }
 
@@ -144,8 +146,13 @@ fn remaining_length(pos: Vec2, route: &[Vec2], seg: usize) -> f64 {
 mod tests {
     use super::*;
 
-    const P: DriveParams =
-        DriveParams { max_speed: 15.0, max_lateral_accel: 3.0, braking_decel: 4.0, pivot_threshold: 1.2 };
+    const P: DriveParams = DriveParams {
+        max_speed: 15.0,
+        max_lateral_accel: 3.0,
+        braking_decel: 4.0,
+        pivot_threshold: 1.2,
+        arrival_radius: ARRIVAL_RADIUS,
+    };
 
     #[test]
     fn bearing_convention_is_compass() {

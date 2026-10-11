@@ -2,7 +2,8 @@
 //!
 //! ```text
 //! client [--scenario <id>] [--map <id>] [--edit]
-//!        [--screenshot <png> [--frames <n>] [--order <callsign>:<x>,<y>] [--advance <s>]
+//!        [--screenshot <png> [--frames <n>] [--order <unit-or-platoon>:<x>,<y>] [--bp <platoon>:<x>,<y>,<deg>]
+//!         [--advance <s>]
 //!         [--zoom <m-per-px>] [--center <x>,<y>] [--layer relief|slope|traffic|cover]]
 //! ```
 
@@ -38,7 +39,8 @@ struct Opts {
     edit: bool,
     screenshot: Option<String>,
     frames: u32,
-    orders: Vec<(String, [f64; 2])>,
+    /// ("--order" | "--bp", callsign, numbers)
+    orders: Vec<(String, String, Vec<f64>)>,
     advance_s: f64,
     zoom: Option<f64>,
     center: Option<[f64; 2]>,
@@ -55,10 +57,12 @@ fn opts() -> Result<Opts, String> {
     let get = |k: &str| a.iter().position(|x| x == k).and_then(|i| a.get(i + 1)).cloned();
     let mut orders = Vec::new();
     for (i, x) in a.iter().enumerate() {
-        if x == "--order" {
-            let v = a.get(i + 1).ok_or("--order needs <callsign>:<x>,<y>")?;
-            let (cs, xy) = v.split_once(':').ok_or("--order needs <callsign>:<x>,<y>")?;
-            orders.push((cs.to_owned(), parse_xy(xy).ok_or("bad --order coordinates")?));
+        if x == "--order" || x == "--bp" {
+            let v = a.get(i + 1).ok_or("--order/--bp needs <callsign>:<numbers>")?;
+            let (cs, nums) = v.split_once(':').ok_or("--order/--bp needs <callsign>:<numbers>")?;
+            let nums: Vec<f64> =
+                nums.split(',').map(|n| n.trim().parse::<f64>().map_err(|_| "bad number")).collect::<Result<_, _>>()?;
+            orders.push((x.clone(), cs.to_owned(), nums));
         }
     }
     Ok(Opts {
@@ -144,9 +148,32 @@ fn run() -> Result<(), String> {
         None => None,
     };
     if let Some(g) = &mut game {
-        for (cs, xy) in &o.orders {
-            let id = g.picture().own.iter().find(|u| &u.callsign == cs).map(|u| u.id).ok_or(format!("no unit {cs}"))?;
-            g.order_move(id, *xy);
+        for (kind, cs, n) in &o.orders {
+            let platoon = g.picture().platoons.iter().find(|p| &p.callsign == cs).map(|p| p.id);
+            match (kind.as_str(), platoon, n.as_slice()) {
+                ("--bp", Some(p), [x, y, deg]) => {
+                    g.sel_platoon = Some(p);
+                    g.issue_bp([*x, *y], deg.to_radians());
+                }
+                ("--order", Some(p), [x, y]) => {
+                    let t = g.technique;
+                    g.sim.submit(
+                        g.side,
+                        sim::Command::PlatoonMove { platoon: p, destination: [*x, *y], formation: None, technique: t },
+                    );
+                }
+                ("--order", None, [x, y]) => {
+                    let id = g
+                        .picture()
+                        .own
+                        .iter()
+                        .find(|u| &u.callsign == cs)
+                        .map(|u| u.id)
+                        .ok_or(format!("no unit {cs}"))?;
+                    g.order_move(id, [*x, *y]);
+                }
+                _ => return Err(format!("bad {kind} {cs}:{n:?}")),
+            }
         }
         if o.advance_s > 0.0 {
             g.advance_ticks((o.advance_s * sim::TICK_HZ as f64) as u32);

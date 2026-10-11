@@ -89,7 +89,9 @@ pub(crate) fn step(
         let f_drive = (eta * power / m.speed.max(MIN_POWER_SPEED)).min(traction);
         let a_max = (f_drive - resist) / mass;
         let a_min = -(d.braking_decel_mps2.get().min(mu * G * cth)) - resist / mass;
-        let a_des = (target - m.speed) / SPEED_TAU;
+        // Accelerate smoothly; brake firmly when well above the target (drivers brake, they
+        // do not coast to a halt at a position).
+        let a_des = if target < m.speed - 0.5 { -d.braking_decel_mps2.get() } else { (target - m.speed) / SPEED_TAU };
         let a = a_des.min(a_max).max(a_min.min(a_max));
         let v_old = m.speed;
         m.speed = (m.speed + a * DT).max(0.0);

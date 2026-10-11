@@ -33,7 +33,7 @@ use terrain::hash::StableHasher;
 use terrain::path::Pathfinder;
 
 pub use ai::picture::{self as view, PerceivedWorld};
-pub use command::{Addressee, Command, Event, KillKind, PositionKind, TimedCommand};
+pub use command::{Addressee, Command, Event, KillKind, PlatoonReport, PositionKind, TimedCommand};
 pub use world::{EntityId, SideId, World};
 
 pub type Vec2 = [f64; 2];
@@ -175,6 +175,11 @@ impl Sim {
                                 heading: u.heading_deg.to_radians(),
                                 replanned: 0,
                                 contact_reported: false,
+                                slot_targets: Vec::new(),
+                                bp: Vec::new(),
+                                resume: None,
+                                quiet_since: 0,
+                                last_strength: 0,
                             });
                             platoons.last_mut().expect("pushed")
                         }
@@ -458,7 +463,7 @@ impl Sim {
                 match self.pathfinder.find(&layer.speed, cell, pos, *destination) {
                     Some(route) => {
                         let length = route.windows(2).map(|w| dist(w[0], w[1])).sum::<f64>();
-                        self.world.set_route(k, route, *speed_limit_mps, None, false);
+                        self.world.set_route(k, route, *speed_limit_mps, None, false, ai::drive::ARRIVAL_RADIUS);
                         events.push(Event::RoutePlanned { unit: *unit, length_m: length });
                     }
                     None => events.push(Event::NoRoute { unit: *unit }),
@@ -508,8 +513,12 @@ impl Sim {
                         p.formation = f;
                     }
                     p.technique = t;
-                    p.order =
-                        platoon::PlatoonOrder::Move { destination: dest, route: Vec::new(), progress_m: 0.0, bound: 0 };
+                    p.order = platoon::PlatoonOrder::Move {
+                        destination: dest,
+                        route: Vec::new(),
+                        progress: [0.0, 0.0],
+                        active: 0,
+                    };
                     p.replanned = 0;
                     p.contact_reported = false;
                     events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
@@ -529,6 +538,7 @@ impl Sim {
                     facing: *facing,
                     kind: *kind,
                     assigned: false,
+                    reported: false,
                 };
                 if let Some(p) = self.platoon_mut(c.side, *platoon) {
                     p.order = o;
