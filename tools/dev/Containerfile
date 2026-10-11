@@ -1,0 +1,29 @@
+# Tanks development image: system build dependencies only.
+# The Rust toolchain (rustup/cargo) lives in a persistent host directory mounted at /opt/rust
+# (see devbox.sh), so the image rarely needs rebuilding and toolchain versions follow
+# rust-toolchain.toml.
+FROM docker.io/library/ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        # compilers and build tools (raylib-sys builds raylib with cmake; bindgen needs libclang)
+        build-essential cmake clang libclang-dev pkg-config git curl ca-certificates \
+        # windowing: X11 + Wayland (GLFW backend)
+        libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+        libwayland-dev libxkbcommon-dev wayland-protocols \
+        # OpenGL (Mesa: hardware drivers + llvmpipe software fallback)
+        libgl1-mesa-dev libegl1-mesa-dev libgl1-mesa-dri mesa-utils \
+        # audio
+        libasound2-dev libpulse-dev \
+        # headless rendering checks (screenshots in CI / from scripts)
+        xvfb xauth \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV RUSTUP_HOME=/opt/rust/rustup \
+    CARGO_HOME=/opt/rust/cargo \
+    PATH=/opt/rust/cargo/bin:$PATH
+
+# distrobox sessions are login shells and may not inherit image ENV.
+RUN printf 'export RUSTUP_HOME=/opt/rust/rustup\nexport CARGO_HOME=/opt/rust/cargo\nexport PATH=/opt/rust/cargo/bin:$PATH\n' \
+        > /etc/profile.d/tanks-rust.sh

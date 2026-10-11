@@ -1,0 +1,6 @@
+/target/
+**/*.rs.bk
+# baked map packages are derived from authoring data
+/data/maps/*/baked/
+# local screenshots / scratch
+/out/
