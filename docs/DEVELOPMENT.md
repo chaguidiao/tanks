@@ -37,13 +37,28 @@ tools/dev/devbox.sh gui cargo run -p client          # needs a desktop session
 tools/dev/devbox.sh enter                            # interactive shell
 ```
 
+Tasks (`justfile`): `just check`, `just gen`, `just play`, `just edit`, `just screenshots`, e.g.
+`tools/dev/devbox.sh run just check` or `tools/dev/devbox.sh gui just play`.
+
+Maps are generated, not committed (`data/maps/` is gitignored): the client and `tanks-headless run`
+generate and bake a scenario's map from its recipe + seed on first use.
+
+```bash
+tools/dev/devbox.sh run cargo run --release -p headless -- gen --recipe rolling-farmland --seed 42 --id demo
+tools/dev/devbox.sh run cargo run --release -p headless -- render --map demo --layer tint --downsample 3 --out out/demo.png
+tools/dev/devbox.sh run cargo run --release -p headless -- run --scenario m1-move --seconds 600 --move 6000,5200
+```
+
+Client keys: F7 shows help. Game: LMB select, RMB move, H halt, Space pause, 1–4 speed. E toggles the
+terrain editor (1–4 brushes, 5 river, 6 road, 7 forest, Ctrl+S save).
+
 Headless rendering (screenshots without a display, Mesa llvmpipe):
 ```bash
-tools/dev/devbox.sh run xvfb-run -a cargo run -p client -- --screenshot out/m0.png
+tools/dev/devbox.sh run xvfb-run -a -s "-screen 0 1600x900x24" cargo run -p client -- --order 1-1:3000,2600 --advance 60 --screenshot out/m1.png
 ```
 
 ## Testing old-GPU compatibility
-- **OpenGL 2.1 build**: build the client with the GL 2.1 raylib feature (set up in M0).
+- **OpenGL 2.1 build**: `cargo build -p client --no-default-features --features gl21` (use a separate `CARGO_TARGET_DIR`, e.g. `target/gl21`, to avoid rebuilding raylib each switch).
 - **Software renderer**: `LIBGL_ALWAYS_SOFTWARE=1` (Mesa llvmpipe), or raylib's own software backend.
 - **Fake an older GL version on Mesa**: `MESA_GL_VERSION_OVERRIDE=2.1 MESA_GLSL_VERSION_OVERRIDE=120`. This is a smoke test, not a guarantee; real old hardware is still the final check.
 

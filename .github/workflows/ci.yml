@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages (raylib build + headless GL)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake clang libclang-dev pkg-config \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libgl1-mesa-dri libasound2-dev xvfb xauth
+      - uses: dtolnay/rust-toolchain@1.99
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy -p client --no-default-features --features gl21,debug-truth -- -D warnings
+      - name: Tests (incl. golden replay hash and bake determinism)
+        run: cargo nextest run --workspace
+      - name: Generate + bake demo map, headless run
+        run: |
+          cargo run --release -p headless -- gen --recipe rolling-farmland --seed 42 --id demo
+          cargo run --release -p headless -- run --scenario m1-move --seconds 300 --move 6000,5200
+      - name: Client screenshots (GL 3.3 and GL 2.1 under Mesa llvmpipe)
+        run: |
+          mkdir -p out
+          xvfb-run -a -s "-screen 0 1600x900x24" cargo run -p client -- --order 1-1:3000,2600 --advance 60 --screenshot out/gl33.png
+          CARGO_TARGET_DIR=target/gl21 MESA_GL_VERSION_OVERRIDE=2.1 MESA_GLSL_VERSION_OVERRIDE=120 \
+            xvfb-run -a -s "-screen 0 1600x900x24" cargo run -p client --no-default-features --features gl21 -- --screenshot out/gl21.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: out/*.png
+
+  other-os:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - run: cargo build --workspace
+      # Same golden hashes on every OS is the lockstep-determinism check.
+      - run: cargo nextest run --workspace

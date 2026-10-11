@@ -58,6 +58,7 @@ A reading list grouped by subsystem. ★ = read first. Public sources only — n
 - **Nau et al.**, "SHOP2: An HTN Planning System" (JAIR, 2003).
 - **D. Mark, *Behavioral Mathematics for Game AI*** (2009); **Mark & Dill**, "Improving AI Decision Modeling Through Utility Theory" (GDC 2010).
 - **D. Pottinger**, "Coordinated Unit Movement" / "Implementing Coordinated Movement" (Gamasutra, 1999).
+- **R. C. Coulter**, "Implementation of the Pure Pursuit Path Tracking Algorithm" (CMU-RI-TR-92-01, 1992) — route following in `ai::drive`.
 - **Botea, Müller & Schaeffer**, "Near Optimal Hierarchical Path-Finding" (HPA*, 2004).
 - **J. Orkin**, "Three States and a Plan: The AI of F.E.A.R." (GDC 2006) — GOAP, for contrast.
 - **D. Isla**, "Handling Complexity in the Halo 2 AI" (GDC 2005) — behaviour trees.

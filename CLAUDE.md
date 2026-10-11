@@ -6,7 +6,7 @@
 - Terrain, map format, generation, editor: `docs/TERRAIN.md`
 - Sources: `docs/REFERENCES.md`
 - Dev environment (container, commands): `docs/DEVELOPMENT.md`
-- Status: **pre-implementation**. Stack: **Rust sim core + raylib 6.x client (`raylib-rs`)**. Licence MIT. Next: milestone M0 (DESIGN.md §13).
+- Status: **M0, M0.5 (lean) and M1 done** (see DESIGN.md §13.1). Stack: **Rust sim core + raylib 6.x client (`raylib-rs`)**. Licence MIT. Next: milestone M2 (DESIGN.md §13).
 
 ## Architecture rules (non-negotiable)
 1. **`sim` is graphics-agnostic.** No raylib/rendering/UI types in `sim`, `terrain`, `terragen`, `ai`, `sim-data`. All raylib calls live in `client` behind a small `render` module. The client talks to the sim only via `Command` in, `Event` out, and `PerceivedWorld` reads.

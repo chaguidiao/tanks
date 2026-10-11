@@ -1,6 +1,6 @@
 # Design Document — Tanks (working title)
 
-Status: **Accepted baseline (2026-10-11)**. Nothing is implemented yet. Changes to decisions go in §14.
+Status: **Accepted baseline (2026-10-11)**. M0, M0.5 (lean) and M1 are implemented (§13.1). Changes to decisions go in §14.
 
 ---
 
@@ -470,6 +470,14 @@ Sparse: radio clicks, squelch, terse synthesised or recorded callouts (optional)
 | M7 | v1.0 | Cold War + Modern content sets, 5–8 scenarios, 4–6 vehicle types per era, packaging for Win/Linux/macOS |
 | M8 | v1.x | Real-world import (DEM/OSM), indirect fire, resupply |
 
+### 13.1 Implementation status (2026-10-11)
+
+| Milestone | Done | Deferred (tracked here) |
+|---|---|---|
+| M0 | Workspace, CI (Linux full + Windows/macOS build/test), GL 3.3 + GL 2.1 client builds, authoring/baked map format, procedural heightfield, contours (5/10/50 m), relief tint + hillshade, pan/zoom, 1 km grid | Contour/layer `RenderTexture` caching per zoom band (direct drawing is fast enough so far); TTF monospace font (raylib default font for now) |
+| M0.5 (lean) | Generation stages 1–3, 5, 6 (TERRAIN.md §3); baker with river carving, road cut/fill, forest rasterisation, mobility speed rasters; editor: raise/lower/smooth/flatten brushes on the edit layer, draw river/road/forest, undo/redo, save, re-bake; analysis views (slope, GO/SLOW-GO/NO-GO, land cover) | Stage 4 stamps, stage 7 validation, lakes, hedgerows, settlement interiors; tiled/incremental bake (full re-bake on stroke release, ~0.6 s for 8 km); background baking; `veg_density`/`canopy_height` rasters; raygui panels |
+| M1 | Tracked-vehicle mobility (power/traction/resistance on grade, soil, terrain caps, skid-steer yaw limits, fuel); Move/Halt orders; fastest-route A* on the baked speed raster with string pulling; pure-pursuit route following; pause and ×1/×2/×4/×8 time compression (more ticks); render interpolation; radio log; `PerceivedWorld` for own units; golden replay hash | Order delay (§8.2), reverse driving, HPA* (full-resolution A* is ~fast enough on 8 km maps), formation/platoon movement (M4) |
+
 ---
 
 ## 14. Decisions log
@@ -484,6 +492,10 @@ Sparse: radio clicks, squelch, terse synthesised or recorded callouts (optional)
 | 7 | Licence | **Open source, MIT** for code, data and docs (`LICENSE`). Bundled third-party assets keep their own licences (e.g., fonts under OFL) and are listed in `THIRD_PARTY.md` |
 | 8 | Language | **Rust** |
 | 9 | Name | **Tanks** (working title) |
+| 10 | Baked layers | Single zstd block per layer for now instead of 256² tiles; quantised elevation (2 cm) is applied in memory too, so a loaded bake equals a fresh bake bit-for-bit |
+| 11 | Bridges | A road over a river is an implicit bridge: water removed for at least 1.5 cells either side of the road centreline. Explicit bridge structures with MLC come with TERRAIN.md §5.2 |
+| 12 | Display images | Analysis/base images are computed on the CPU in `terrain::shade` and uploaded as textures, so the client ships no shaders yet (rule 7 trivially met) |
+| 13 | Generator randomness | `terragen` uses position-keyed hashing per stage (no RNG streams), so per-pixel stages run on threads with identical results |
 
 ### Remaining open questions
 None blocking. Development environment: see `docs/DEVELOPMENT.md`.

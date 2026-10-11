@@ -1,6 +1,6 @@
 # Terrain — Map Format, Procedural Generation, Editor & Features
 
-Status: **DRAFT for review**. Companion to `DESIGN.md` §5.
+Status: **Accepted draft**; partly implemented (see §9 and DESIGN.md §13.1). Companion to `DESIGN.md` §5.
 
 Terrain is the main character of this game: who sees whom first decides most tank fights. This document covers:
 1. how a map is stored,
@@ -291,6 +291,8 @@ Pipeline: `headless import --dem … --osm … --bbox … → maps/<id>/` (autho
 ---
 
 ## 9. Implementation order
+Done: 1, 2, 3 (implicit bridges only, no fords/lakes), 4 partly (land cover, soil, moisture, forest stands, field parcels; no hedgerows), 5 (roads and villages, no rail), 6 not started (micro-relief exists as `terrain::micro::h_micro` but is not tuned), 7 not started.
+
 1. Map format + heightfield + bake skeleton + contours/heatmap rendering (M0).
 2. Stages 1–2 (landform, erosion/hydrology) + height brushes + analysis views.
 3. Rivers (Stage 3) + water mobility + bridges/fords.
@@ -315,3 +317,4 @@ Pipeline: `headless import --dem … --osm … --bbox … → maps/<id>/` (autho
 - NATO AVT-248 NG-NRMM report (2018) — soil strength, vegetation override, slope.
 - ATP 2-01.3 — OAKOC; GO / SLOW-GO / NO-GO terrain classification.
 - Inigo Quilez's articles on fBm and domain warping (iquilezles.org).
+- Braun & Willett (2013), "A very efficient O(n), implicit and parallel method to solve the stream power equation governing fluvial incision and landscape evolution" (Geomorphology) — the erosion scheme in `terragen::hydro`.
