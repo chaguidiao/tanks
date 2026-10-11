@@ -46,6 +46,29 @@
 - AI scenario tests on small synthetic maps with explicit assertions (e.g., "all four tanks hull-down vs. threat azimuth within 120 s").
 - Validation harness in `headless` outputs CSV (Ph/Pk vs. range, time-to-detect); don't change tuning without re-running it.
 
+## Codebase map (where things live)
+- `sim-data`: `Stat<T>` (value/source/confidence), vehicle/terrain/scenario defs, `DataSet::load`. RON files use the `IMPLICIT_SOME` extension (see `ron_options()`).
+- `terrain`: `Grid`, `Heightfield` (row 0 = south, node at cell centre), `noise`, `micro::h_micro`, `contour`, `features` (GeoJSON), `geotiff`, `package::AuthoringPackage`, `bake::{bake, BakedMap}`, `mobility` (terrain caps, planning speed raster), `path::Pathfinder` (A* + string pulling), `shade` (CPU images incl. `tactical`), `png`, `hash::StableHasher`.
+- `terragen`: stages (`landform`, `hydro`, `rivers`, `cover`, `roads`), `generate()`, `workflow::ensure_map` (load-or-generate-and-bake). Recipes in `data/recipes/`.
+- `ai`: pure functions with plain inputs (no `sim` types). `drive.rs` = route following.
+- `sim`: `Sim` (`submit`/`step`/`perceived`/`truth`/`state_hash`), `world.rs` (SoA entities, `Order`, vehicle AI tick at 5 Hz), `mobility.rs` (physics), `perceived.rs`, `command.rs` (`Command`, `Event`).
+- `client`: `render.rs` is the ONLY raylib module; `view.rs` (camera, map layers), `game.rs` (sim loop, orders, radio text), `editor.rs`, `symbols.rs`, `format.rs` (grids/mils/km/h), `style.rs` (palette).
+- `headless`: `tanks-headless gen|bake|render|info|run`.
+- Status, deferred items and the next milestone: DESIGN.md §13.1. Decisions taken during implementation: DESIGN.md §14 (#10–13).
+
+## Verifying changes
+- `tools/dev/devbox.sh run just check` (fmt + clippy + nextest). Also clippy the client with `--no-default-features --features gl21,debug-truth`.
+- Visual check without a display: `xvfb-run -a -s "-screen 0 1600x900x24" target/debug/client --order 1-1:3000,2600 --advance 60 --zoom 1.2 --center 2000,1900 [--layer traffic|slope|cover] [--edit] --screenshot out/x.png`, then look at the PNG. Map rasters: `tanks-headless render --map demo --layer tint|landcover|traffic --downsample 3 --out out/x.png`.
+- The golden replay hash in `crates/sim/tests/m1.rs` breaks on any behaviour change: update it deliberately and say why in the commit.
+
+## Gotchas
+- `data/maps/` is gitignored; maps regenerate from recipe + seed. Changing generator/baker output changes the demo map; bump `bake::BAKER_VERSION` when baked output changes for the same input.
+- Baked elevation is quantised (2 cm) in memory too, so fresh and loaded bakes are bit-identical; keep it that way.
+- `serde_json` needs `float_roundtrip` for exact GeoJSON round-trips (already enabled).
+- `gen` is a reserved keyword in edition 2024.
+- Use a separate `CARGO_TARGET_DIR=target/gl21` for the GL 2.1 build to avoid rebuilding raylib.
+- Podman under WSL2 works for `devbox.sh run`.
+
 ## Visual style
 Dark, low-saturation tactical display; monospace uppercase labels; NATO symbology (MIL-STD-2525D / APP-6D); colour is never the only cue. Avoid flashy effects, bright gradients, or particle spam.
 

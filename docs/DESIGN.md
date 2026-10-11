@@ -478,6 +478,8 @@ Sparse: radio clicks, squelch, terse synthesised or recorded callouts (optional)
 | M0.5 (lean) | Generation stages 1–3, 5, 6 (TERRAIN.md §3); baker with river carving, road cut/fill, forest rasterisation, mobility speed rasters; editor: raise/lower/smooth/flatten brushes on the edit layer, draw river/road/forest, undo/redo, save, re-bake; analysis views (slope, GO/SLOW-GO/NO-GO, land cover) | Stage 4 stamps, stage 7 validation, lakes, hedgerows, settlement interiors; tiled/incremental bake (full re-bake on stroke release, ~0.6 s for 8 km); background baking; `veg_density`/`canopy_height` rasters; raygui panels |
 | M1 | Tracked-vehicle mobility (power/traction/resistance on grade, soil, terrain caps, skid-steer yaw limits, fuel); Move/Halt orders; fastest-route A* on the baked speed raster with string pulling; pure-pursuit route following; pause and ×1/×2/×4/×8 time compression (more ticks); render interpolation; radio log; `PerceivedWorld` for own units; golden replay hash | Order delay (§8.2), reverse driving, HPA* (full-resolution A* is ~fast enough on 8 km maps), formation/platoon movement (M4) |
 
+**Suggested start for M2 (Seeing):** point-to-point LOS in `terrain` (DDA over the heightfield + `h_micro`, partial visibility from several target sample heights, Beer–Lambert through forest using land cover until `veg_density`/`canopy_height` rasters exist); a viewshed tool in the client; a `sensors` subsystem in `sim` at 4 Hz using the reserved `rngs.sensors` stream; spot reports with delay/position error into `PerceivedWorld.contacts`; hostile symbols for contacts (`symbols::hostile_armour` exists). Add LOS property tests (symmetry at equal heights) and a benchmark against the < 20 µs / 4 km target (TERRAIN.md §8).
+
 ---
 
 ## 14. Decisions log
