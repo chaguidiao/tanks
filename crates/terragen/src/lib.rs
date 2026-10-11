@@ -5,8 +5,9 @@
 //! hash-based (position-keyed), so per-pixel work can run on threads without changing results.
 //!
 //! Implemented: 1 landform, 2 flow routing + stream-power/thermal erosion, 3 rivers,
-//! 5 moisture/soil/land cover with field parcels, 6 villages + road network.
-//! Not yet: lakes, stage 4 landform stamps, hedgerows, settlement interiors, stage 7 validation.
+//! 5 moisture/soil/land cover with field parcels, 6 villages + road network + building
+//! footprints.
+//! Not yet: lakes, stage 4 landform stamps, hedgerows, street grids, stage 7 validation.
 
 pub mod cover;
 pub mod hydro;
@@ -88,6 +89,14 @@ pub fn generate(
     roads::stamp_villages(&mut landcover, &villages, p.cell_m, td, stage_seed(p.seed, 7));
     features.roads =
         roads::build_network(&hf, &landcover, &features.rivers, &villages, &recipe.roads, td, features.next_id());
+    features.buildings = roads::generate_buildings(
+        &villages,
+        &features.roads,
+        &features.rivers,
+        p.size_m,
+        stage_seed(p.seed, 8),
+        features.next_id(),
+    );
     let mut pkg = AuthoringPackage::new_flat(manifest, 0.0);
     pkg.recipe_ron = recipe_ron;
     pkg.elevation_base = hf.z;

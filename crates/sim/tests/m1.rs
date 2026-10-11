@@ -223,6 +223,6 @@ fn same_commands_give_the_same_state_hash() {
     assert_eq!(h1, h2);
     assert_eq!(e1, e2);
     // Golden value: update deliberately (and say why in the commit) when behaviour changes.
-    const GOLDEN: u64 = 0xbfe3_438f_0879_258e;
+    const GOLDEN: u64 = 0x2128_3115_5f8f_8e8e;
     assert_eq!(h1, GOLDEN, "state hash changed: {h1:#018x}");
 }

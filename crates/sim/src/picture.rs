@@ -41,6 +41,8 @@ pub struct SideState {
     pub pending: Vec<PendingReport>,
     pub next_contact: u32,
     pub doctrine: DoctrinePack,
+    pub triggers: Vec<crate::control::Trigger>,
+    pub next_graphic: u32,
 }
 
 pub fn gauss(rng: &mut ChaCha8Rng) -> f64 {
@@ -52,7 +54,14 @@ pub fn gauss(rng: &mut ChaCha8Rng) -> f64 {
 
 impl SideState {
     pub fn new(side: SideId, doctrine: DoctrinePack) -> Self {
-        Self { picture: PerceivedWorld::empty(side), pending: Vec::new(), next_contact: 0, doctrine }
+        Self {
+            picture: PerceivedWorld::empty(side),
+            pending: Vec::new(),
+            next_contact: 0,
+            doctrine,
+            triggers: Vec::new(),
+            next_graphic: 0,
+        }
     }
 
     /// Queue a report of `target` seen by `observer`.

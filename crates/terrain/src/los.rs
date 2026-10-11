@@ -72,7 +72,7 @@ pub fn sight(g: &Ground, from: Vec2, eye_agl: f64, to: Vec2, heights: &[f64]) ->
         let (x, y) = (from[0] + dx * t, from[1] + dy * t);
         let near = s < MICRO_RANGE || s > d - MICRO_RANGE;
         let bulge = s * (d - s) * (1.0 - REFRACTION_K) / (2.0 * EARTH_R);
-        let ground = if near { g.height(x, y) } else { g.macro_height(x, y) } + bulge;
+        let ground = if near { g.height(x, y) } else { g.macro_height(x, y) } + bulge + g.building(x, y);
         let mut all_blocked = true;
         for (h, vis) in heights.iter().zip(visible.iter_mut()) {
             if !*vis {
@@ -123,6 +123,7 @@ pub fn viewshed(g: &Ground, obs: Vec2, eye_agl: f64, target_agl: f64, radius: f6
             }
             let bulge = s * s * (1.0 - REFRACTION_K) / (2.0 * EARTH_R);
             let ground = if s < MICRO_RANGE { g.height(x, y) } else { g.macro_height(x, y) } - bulge;
+            let building = g.building(x, y);
             let target_slope = (ground + target_agl - z0) / s;
             let (canopy, kk) = g.canopy(x, y);
             let vis = target_slope >= max_slope && optical < 4.0;
@@ -133,7 +134,7 @@ pub fn viewshed(g: &Ground, obs: Vec2, eye_agl: f64, target_agl: f64, radius: f6
                 out.set(i, j, cur.max(v));
             }
             // Obstruction for points beyond: ground, or canopy top once deep in vegetation.
-            let obstruct = ground + if canopy > 0.0 { canopy } else { 0.0 };
+            let obstruct = ground + canopy.max(building);
             max_slope = max_slope.max((obstruct - z0) / s);
             if canopy > 0.0 {
                 optical += kk * step * 0.5;

@@ -128,6 +128,22 @@ impl DataSet {
         load_ron(&root.join("scenarios").join(format!("{id}.ron")))
     }
 
+    /// Write a scenario to `data/scenarios/<id>.ron` (scenario editor). Returns the path.
+    pub fn save_scenario(root: &Path, def: &ScenarioDef) -> Result<PathBuf, DataError> {
+        let path = root.join("scenarios").join(format!("{}.ron", def.id));
+        let err = |message: String| DataError { path: path.clone(), message };
+        let text = ron_options()
+            .to_string_pretty(def, ron::ser::PrettyConfig::default().struct_names(false))
+            .map_err(|e| err(e.to_string()))?;
+        std::fs::write(&path, text).map_err(|e| err(e.to_string()))?;
+        Ok(path)
+    }
+
+    /// Vehicles in service in `year` (era is data).
+    pub fn vehicles_in_service(&self, year: i32) -> impl Iterator<Item = &VehicleDef> {
+        self.vehicles.iter().filter(move |v| v.in_service.contains(year))
+    }
+
     pub fn vehicle(&self, id: &str) -> Option<&VehicleDef> {
         self.vehicles.iter().find(|v| v.id == id)
     }

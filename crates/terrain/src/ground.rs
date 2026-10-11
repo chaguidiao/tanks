@@ -50,6 +50,12 @@ impl<'a> Ground<'a> {
         self.macro_height(x, y) + micro::h_micro(x, y, self.seed, self.class(x, y).micro)
     }
 
+    /// Building height above ground at a point (0 if none).
+    pub fn building(&self, x: f64, y: f64) -> f64 {
+        let (i, j) = self.map.elevation.cell_of(x, y);
+        self.map.building_height.get(i, j) as f64
+    }
+
     /// (canopy height above ground, attenuation per metre) at a point.
     pub fn canopy(&self, x: f64, y: f64) -> (f64, f64) {
         let c = self.class(x, y);

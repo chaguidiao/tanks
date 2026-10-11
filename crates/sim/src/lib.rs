@@ -12,6 +12,7 @@
 //! reports → gunnery → impacts → mobility → pictures.
 
 pub mod command;
+pub mod control;
 pub mod gunnery;
 pub mod mobility;
 pub mod picture;
@@ -313,16 +314,46 @@ impl Sim {
     /// Queue an order over the radio net: it takes effect after the side's doctrinal order
     /// delay (DESIGN.md §8.2). Logged for replay.
     pub fn submit(&mut self, side: SideId, cmd: Command) {
-        self.incoming.push(TimedCommand { tick: self.tick, side, cmd, immediate: false });
+        self.incoming.push(TimedCommand { tick: self.tick, side, cmd, immediate: false, generated: false });
     }
 
     /// Pre-planned order (code word, trigger, planning phase): no radio delay.
     pub fn submit_immediate(&mut self, side: SideId, cmd: Command) {
-        self.incoming.push(TimedCommand { tick: self.tick, side, cmd, immediate: true });
+        self.incoming.push(TimedCommand { tick: self.tick, side, cmd, immediate: true, generated: false });
     }
 
     pub fn command_log(&self) -> &[TimedCommand] {
         &self.log
+    }
+
+    /// Commands given from outside the simulation (player/scripts): the replay input.
+    pub fn player_log(&self) -> Vec<TimedCommand> {
+        self.log.iter().filter(|c| !c.generated).cloned().collect()
+    }
+
+    /// Apply submitted control measures (graphics, triggers) now without advancing time, so
+    /// they show during a planning phase. Orders stay queued for the next step. Control
+    /// measures draw no random numbers, so a replay that applies them in `step` at the same
+    /// tick reaches the same state.
+    pub fn settle(&mut self) {
+        let (control, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.incoming).into_iter().partition(|c| {
+            matches!(c.cmd, Command::AddGraphic { .. } | Command::RemoveGraphic { .. } | Command::AddTrigger { .. })
+        });
+        self.incoming = rest;
+        let mut events = Vec::new();
+        for c in control {
+            self.log.push(c.clone());
+            self.apply(&c, &mut events);
+        }
+        for side in self.sides.iter_mut() {
+            side.picture.triggers = control::views(&side.triggers);
+        }
+        self.update_pictures();
+    }
+
+    /// Re-inject a logged command (replays). Call before `step` at the command's tick.
+    pub fn inject(&mut self, c: TimedCommand) {
+        self.incoming.push(c);
     }
 
     pub fn perceived(&self, side: SideId) -> &PerceivedWorld {
@@ -340,7 +371,11 @@ impl Sim {
 
         // 1. Orders: draw radio delays in submission order, then deliver due orders.
         for c in std::mem::take(&mut self.incoming) {
-            let delay = if c.immediate {
+            let control = matches!(
+                c.cmd,
+                Command::AddGraphic { .. } | Command::RemoveGraphic { .. } | Command::AddTrigger { .. }
+            );
+            let delay = if c.immediate || control {
                 0
             } else {
                 let d = &self.sides[c.side.0 as usize].doctrine;
@@ -355,6 +390,27 @@ impl Sim {
         self.pending = keep;
         for (_, c) in due {
             self.apply(&c, &mut events);
+        }
+
+        // 1b. Triggers (1 Hz): release contingency orders as code words.
+        if tick.is_multiple_of(PLATOON_AI_EVERY) {
+            for si in 0..self.sides.len() {
+                let pic = &self.pictures[si];
+                let mut fire = Vec::new();
+                for t in self.sides[si].triggers.iter_mut().filter(|t| !t.fired) {
+                    if control::met(pic, t) {
+                        t.fired = true;
+                        fire.push((t.id, t.then.clone()));
+                    }
+                }
+                for (id, cmd) in fire {
+                    let side = SideId(si as u8);
+                    events.push(Event::TriggerFired { side, id });
+                    self.incoming.push(TimedCommand { tick, side, cmd, immediate: true, generated: true });
+                }
+                let views = control::views(&self.sides[si].triggers);
+                self.sides[si].picture.triggers = views;
+            }
         }
 
         // 2a. Commander AI (orders go over the radio net like the player's).
@@ -380,7 +436,7 @@ impl Sim {
                         },
                         ai::commander::Order::Halt { platoon } => Command::Halt { to: Addressee::Platoon(platoon) },
                     };
-                    self.incoming.push(TimedCommand { tick, side, cmd, immediate: tick == 0 });
+                    self.incoming.push(TimedCommand { tick, side, cmd, immediate: tick == 0, generated: true });
                 }
             }
         }
@@ -461,7 +517,13 @@ impl Sim {
         for f in fired {
             let p = &f.projectile;
             let r = dist(p.from, p.to);
-            events.push(Event::Fired { unit: self.world.id[f.shooter], range_m: r });
+            events.push(Event::Fired {
+                unit: self.world.id[f.shooter],
+                range_m: r,
+                from: p.from,
+                to: p.to,
+                hit: p.outcome.hit,
+            });
             let shooter_side = self.world.side[f.shooter];
             for side in self.sides.iter_mut() {
                 let own = side.picture.side == shooter_side;
@@ -623,6 +685,29 @@ impl Sim {
                     p.replanned = 0;
                 }
             }
+            Command::AddGraphic { graphic } => {
+                let s = &mut self.sides[c.side.0 as usize];
+                s.next_graphic += 1;
+                let mut g = graphic.clone();
+                g.id = s.next_graphic;
+                s.picture.graphics.push(g);
+            }
+            Command::RemoveGraphic { id } => {
+                self.sides[c.side.0 as usize].picture.graphics.retain(|g| g.id != *id);
+            }
+            Command::AddTrigger { condition, then } => {
+                let s = &mut self.sides[c.side.0 as usize];
+                let sign = control::reference_sign(&s.picture, condition);
+                let id = s.triggers.len() as u32 + 1;
+                s.triggers.push(control::Trigger {
+                    id,
+                    condition: condition.clone(),
+                    then: (**then).clone(),
+                    fired: false,
+                    reference_sign: sign,
+                });
+                s.picture.triggers = control::views(&s.triggers);
+            }
             Command::OccupyPosition { platoon, centre, radius_m, facing, kind } => {
                 let o = platoon::PlatoonOrder::Occupy {
                     centre: *centre,
@@ -664,9 +749,67 @@ impl Sim {
                 h.f64(c.pos[1]);
             }
         }
+        for s in &self.sides {
+            h.u64(s.triggers.iter().filter(|t| t.fired).count() as u64);
+        }
         for r in [&self.rngs.mobility, &self.rngs.sensors, &self.rngs.gunnery, &self.rngs.ai, &self.rngs.comms] {
             h.u64(r.get_word_pos() as u64);
         }
         h.finish()
+    }
+}
+
+/// A recorded game: scenario id plus the external command log. Re-simulating it reproduces the
+/// game exactly (determinism), which is what the after-action review and replays rely on.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Replay {
+    pub scenario: String,
+    pub commands: Vec<TimedCommand>,
+    pub final_tick: u64,
+    pub final_hash: u64,
+    /// Sides played by a human (commander AI switched off).
+    #[serde(default)]
+    pub player_sides: Vec<SideId>,
+}
+
+impl Replay {
+    pub fn record(sim: &Sim) -> Self {
+        let player_sides = (0..sim.commanders.len())
+            .filter(|&si| sim.commanders[si].is_some() && !sim.ai_enabled[si])
+            .map(|si| SideId(si as u8))
+            .collect();
+        Self {
+            scenario: sim.scenario.id.clone(),
+            commands: sim.player_log(),
+            final_tick: sim.tick,
+            final_hash: sim.state_hash(),
+            player_sides,
+        }
+    }
+
+    pub fn to_ron(&self) -> String {
+        ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default()).unwrap_or_default()
+    }
+
+    pub fn from_ron(s: &str) -> Result<Self, String> {
+        ron::from_str(s).map_err(|e| e.to_string())
+    }
+
+    /// Re-simulate on a fresh `Sim` to the recorded tick, calling `each` after every step.
+    pub fn play(&self, sim: &mut Sim, mut each: impl FnMut(&Sim, &[Event])) {
+        for &s in &self.player_sides {
+            sim.set_ai_enabled(s, false);
+        }
+        let mut cmds = self.commands.clone();
+        cmds.sort_by_key(|c| c.tick);
+        let mut next = 0;
+        while sim.tick() < self.final_tick {
+            while next < cmds.len() && cmds[next].tick <= sim.tick() {
+                sim.inject(cmds[next].clone());
+                next += 1;
+            }
+            let ev = sim.step();
+            each(sim, &ev);
+        }
     }
 }

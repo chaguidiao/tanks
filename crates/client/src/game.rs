@@ -6,12 +6,16 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use sim::view::{Condition, ContactLevel, PerceivedWorld, PlatoonId, Task, WeaponsStatus};
+use sim::view::{
+    Condition, ContactLevel, Graphic, GraphicKind as SimGraphic, PerceivedWorld, PlatoonId, Task, TriggerCondition,
+    WeaponsStatus,
+};
 use sim::{Addressee, Command, EndReason, EntityId, Event, KillKind, PlatoonReport, PositionKind, SideId, Sim};
 use sim_data::{DataSet, Formation, ScenarioDef, Technique};
 use terrain::BakedMap;
 use terrain::ground::Ground;
 
+use crate::aar::{AarView, Recorder};
 use crate::format;
 use crate::render::{Frame, Input, Key, P2, Rgba};
 use crate::style;
@@ -37,7 +41,31 @@ pub enum Tool {
         b: Option<[f64; 2]>,
         result: Option<(bool, f64)>,
     },
+    /// Draw a control measure.
+    Graphic {
+        kind: DrawKind,
+        points: Vec<[f64; 2]>,
+    },
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrawKind {
+    PhaseLine,
+    Objective,
+    Trp,
+}
+
+/// How the next order is issued (DESIGN.md §8.2 contingency orders).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderMode {
+    Now,
+    /// Execute when an enemy is reported across the most recent phase line.
+    OnEnemyCrossing,
+    /// Execute five minutes from now.
+    InFiveMinutes,
+}
+
+const PL_NAMES: [&str; 8] = ["RED", "BLUE", "GREEN", "AMBER", "BLACK", "WHITE", "GOLD", "SILVER"];
 
 /// A graphic the player drew with an order (dashed until acknowledged).
 #[derive(Debug, Clone)]
@@ -77,6 +105,12 @@ pub struct Game {
     pub log: VecDeque<(String, String)>,
     bp_count: u32,
     pub ended: Option<String>,
+    /// Planning phase: the clock is stopped and orders take effect at H-hour without delay.
+    pub planning: bool,
+    pub order_mode: OrderMode,
+    pub recorder: Recorder,
+    pub aar: Option<AarView>,
+    counts: [u32; 3],
 }
 
 impl Game {
@@ -101,6 +135,11 @@ impl Game {
             log: VecDeque::new(),
             bp_count: 0,
             ended: None,
+            planning: true,
+            order_mode: OrderMode::Now,
+            recorder: Recorder::default(),
+            aar: None,
+            counts: [0; 3],
         };
         if let Some((id, p)) = g.picture().own.first().map(|u| (u.id, u.platoon)) {
             g.sel_unit = Some(id);
@@ -108,7 +147,7 @@ impl Game {
         }
         g.capture_prev();
         let name = g.scenario.name.clone();
-        g.radio(format!("{name}. PAUSED. SPACE TO START. F7 HELP."));
+        g.radio(format!("{name}. PLANNING: ISSUE ORDERS, DRAW GRAPHICS (G), ENTER TO EXECUTE. F7 HELP."));
         Ok(g)
     }
 
@@ -141,13 +180,54 @@ impl Game {
     }
 
     pub fn order_move(&mut self, unit: EntityId, dest: [f64; 2]) {
-        self.sim.submit(self.side, Command::Move { unit, destination: dest, speed_limit_mps: None });
+        self.order(Command::Move { unit, destination: dest, speed_limit_mps: None });
+    }
+
+    /// Most recently drawn phase line (trigger reference).
+    fn last_phase_line(&self) -> Option<&Graphic> {
+        self.picture().graphics.iter().rev().find(|g| matches!(g.kind, SimGraphic::PhaseLine { .. }))
+    }
+
+    /// Issue an order according to the planning phase and the current order mode.
+    pub fn order(&mut self, cmd: Command) {
+        if self.planning && self.order_mode == OrderMode::Now {
+            self.sim.submit_immediate(self.side, cmd);
+            return;
+        }
+        match self.order_mode {
+            OrderMode::Now => self.sim.submit(self.side, cmd),
+            OrderMode::OnEnemyCrossing => match self.last_phase_line().map(|g| (g.id, g.label.clone())) {
+                Some((line, label)) => {
+                    self.sim.submit_immediate(
+                        self.side,
+                        Command::AddTrigger { condition: TriggerCondition::EnemyCrosses { line }, then: Box::new(cmd) },
+                    );
+                    self.sim.settle();
+                    self.radio(format!("CONTINGENCY SET: ON ENEMY CROSSING {label}."));
+                }
+                None => {
+                    self.radio("NO PHASE LINE DRAWN (G). ORDER SENT NOW.".into());
+                    self.sim.submit(self.side, cmd);
+                }
+            },
+            OrderMode::InFiveMinutes => {
+                let t = self.sim.time_s() + 300.0;
+                self.sim.submit_immediate(
+                    self.side,
+                    Command::AddTrigger { condition: TriggerCondition::AtTime { time_s: t }, then: Box::new(cmd) },
+                );
+                self.sim.settle();
+                self.radio(format!("CONTINGENCY SET: AT {}.", format::clock(self.sim.clock_s() + 300.0)));
+            }
+        }
+        self.order_mode = OrderMode::Now;
     }
 
     pub fn advance_ticks(&mut self, n: u32) {
         for _ in 0..n {
             self.capture_prev();
             let events = self.sim.step();
+            self.recorder.observe(&self.sim, &events);
             for e in events {
                 self.on_event(&e);
             }
@@ -173,8 +253,63 @@ impl Game {
 
     pub fn update(&mut self, inp: &Input, cam: &Camera, over_ui: bool) -> GameFx {
         let mut fx = GameFx::default();
-        if inp.hit(Key::Space) {
+        if inp.hit(Key::F(8)) {
+            self.aar = match self.aar {
+                Some(_) => None,
+                None => {
+                    self.open_aar();
+                    self.aar.take()
+                }
+            };
+        }
+        if let Some(a) = &mut self.aar {
+            a.update(inp, &self.recorder);
+            if inp.ctrl && inp.hit(Key::Char('r')) {
+                let rep = sim::Replay::record(&self.sim);
+                let path = format!("out/replay-{}.ron", self.scenario.id);
+                let msg = std::fs::create_dir_all("out")
+                    .and_then(|_| std::fs::write(&path, rep.to_ron()))
+                    .map_or_else(|e| format!("REPLAY SAVE FAILED: {e}"), |_| format!("REPLAY SAVED: {path}"));
+                self.radio(msg);
+            }
+            return fx;
+        }
+        if self.planning {
+            let finishing_line = matches!(self.tool, Tool::Graphic { kind: DrawKind::PhaseLine, .. });
+            if inp.hit(Key::Enter) && !finishing_line {
+                self.execute();
+            }
+            if inp.hit(Key::Space) {
+                self.radio("PLANNING PHASE: PRESS ENTER TO EXECUTE.".into());
+            }
+        } else if inp.hit(Key::Space) {
             self.paused = !self.paused;
+        }
+        if inp.hit(Key::Char('k')) {
+            self.order_mode = match self.order_mode {
+                OrderMode::Now => OrderMode::OnEnemyCrossing,
+                OrderMode::OnEnemyCrossing => OrderMode::InFiveMinutes,
+                OrderMode::InFiveMinutes => OrderMode::Now,
+            };
+        }
+        if inp.hit(Key::Char('g')) {
+            self.tool = match &self.tool {
+                Tool::Graphic { kind: DrawKind::PhaseLine, .. } => {
+                    Tool::Graphic { kind: DrawKind::Objective, points: vec![] }
+                }
+                Tool::Graphic { kind: DrawKind::Objective, .. } => {
+                    Tool::Graphic { kind: DrawKind::Trp, points: vec![] }
+                }
+                Tool::Graphic { kind: DrawKind::Trp, .. } => Tool::None,
+                _ => Tool::Graphic { kind: DrawKind::PhaseLine, points: vec![] },
+            };
+        }
+        if let Tool::Graphic { kind: DrawKind::PhaseLine, points } = self.tool.clone()
+            && inp.hit(Key::Enter)
+            && points.len() >= 2
+        {
+            self.add_phase_line(points);
+            self.tool = Tool::Graphic { kind: DrawKind::PhaseLine, points: vec![] };
         }
         for (k, _) in SPEEDS.iter().enumerate() {
             if inp.hit(Key::Num(k as u8 + 1)) {
@@ -231,7 +366,7 @@ impl Game {
         {
             let i = Formation::ALL.iter().position(|f| *f == v.formation).unwrap_or(0);
             let f = Formation::ALL[(i + 1) % Formation::ALL.len()];
-            self.sim.submit(self.side, Command::SetFormation { platoon: p, formation: f });
+            self.order(Command::SetFormation { platoon: p, formation: f });
             let cs = self.platoon_cs(p);
             self.radio(format!("TO {cs}: CHANGE FORMATION, {}.", format_formation(f)));
         }
@@ -253,13 +388,13 @@ impl Game {
                 WeaponsStatus::Tight => WeaponsStatus::Hold,
                 WeaponsStatus::Hold => WeaponsStatus::Free,
             };
-            self.sim.submit(self.side, Command::WeaponsControl { to, status: next });
+            self.order(Command::WeaponsControl { to, status: next });
             self.radio(format!("WEAPONS {}.", format!("{next:?}").to_uppercase()));
         }
         if inp.hit(Key::Char('h'))
             && let Some(to) = self.addressee()
         {
-            self.sim.submit(self.side, Command::Halt { to });
+            self.order(Command::Halt { to });
         }
 
         let world = cam.to_world(inp.mouse);
@@ -280,6 +415,26 @@ impl Game {
                     let r = self.los(a, world);
                     self.tool = Tool::Los { a: Some(a), b: Some(world), result: Some(r) };
                 }
+                Tool::Graphic { kind, mut points } => match kind {
+                    DrawKind::PhaseLine => {
+                        points.push(world);
+                        self.tool = Tool::Graphic { kind, points };
+                    }
+                    DrawKind::Objective if points.is_empty() => self.tool = Tool::Graphic { kind, points: vec![world] },
+                    DrawKind::Objective => {
+                        self.counts[1] += 1;
+                        let r =
+                            ((world[0] - points[0][0]).powi(2) + (world[1] - points[0][1]).powi(2)).sqrt().max(50.0);
+                        let label = format!("OBJ {}", (b'A' + ((self.counts[1] - 1) % 26) as u8) as char);
+                        self.add_graphic(label, SimGraphic::Objective { centre: points[0], radius: r });
+                        self.tool = Tool::Graphic { kind, points: vec![] };
+                    }
+                    DrawKind::Trp => {
+                        self.counts[2] += 1;
+                        let label = format!("TRP {}", self.counts[2]);
+                        self.add_graphic(label, SimGraphic::Trp { at: world });
+                    }
+                },
             }
         }
         if !over_ui && inp.right_pressed {
@@ -310,7 +465,7 @@ impl Game {
                 }
             }
         }
-        if !self.paused {
+        if !self.paused && !self.planning {
             self.acc += inp.frame_time as f64 * SPEEDS[self.speed] as f64;
             let n = ((self.acc / sim::DT) as u32).min(MAX_TICKS_PER_FRAME);
             self.acc -= n as f64 * sim::DT;
@@ -318,6 +473,36 @@ impl Game {
             self.advance_ticks(n);
         }
         fx
+    }
+
+    /// Draw the next phase line (PL RED, PL BLUE, ...).
+    pub fn add_phase_line(&mut self, points: Vec<[f64; 2]>) {
+        self.counts[0] += 1;
+        let label = format!("PL {}", PL_NAMES[(self.counts[0] as usize - 1) % PL_NAMES.len()]);
+        self.add_graphic(label, SimGraphic::PhaseLine { points });
+    }
+
+    /// Leave the planning phase (H-hour).
+    pub fn execute(&mut self) {
+        if self.planning {
+            self.planning = false;
+            self.paused = false;
+            self.radio("EXECUTE. H-HOUR.".into());
+        }
+    }
+
+    pub fn open_aar(&mut self) {
+        self.paused = true;
+        self.aar = Some(AarView::new(&self.recorder));
+    }
+
+    fn add_graphic(&mut self, label: String, kind: SimGraphic) {
+        self.sim.submit_immediate(
+            self.side,
+            Command::AddGraphic { graphic: Graphic { id: 0, label: label.clone(), kind } },
+        );
+        self.radio(format!("GRAPHIC {label} DISTRIBUTED."));
+        self.sim.settle();
     }
 
     pub fn issue_bp(&mut self, centre: [f64; 2], facing: f64) {
@@ -379,7 +564,7 @@ impl Game {
             .filter(|(_, d)| *d < 20.0 * 20.0)
             .min_by(|a, b| a.1.total_cmp(&b.1));
         if let Some((cid, _)) = c {
-            self.sim.submit(self.side, Command::Engage { unit: u, contact: cid });
+            self.order(Command::Engage { unit: u, contact: cid });
             self.radio("ENGAGE THAT TARGET.".into());
         }
     }
@@ -433,7 +618,15 @@ impl Game {
     }
 
     pub fn draw_world(&self, f: &mut Frame, cam: &Camera, mouse: P2) {
+        if let Some(a) = &self.aar {
+            a.draw_world(f, cam, &self.recorder);
+            return;
+        }
         let pic = self.picture();
+        let pl = self.last_phase_line().map(|g| g.id);
+        for g in &pic.graphics {
+            symbols::graphic(f, cam, g, Some(g.id) == pl && self.order_mode == OrderMode::OnEnemyCrossing);
+        }
         for g in &self.graphics {
             match &g.kind {
                 GraphicKind::Bp { centre, radius, facing, label } => {
@@ -556,6 +749,24 @@ impl Game {
                 let facing = centre.map_or(0.0, |c| ai::drive::bearing(c, cam.to_world(mouse)));
                 symbols::battle_position(f, cam, c, self.bp_radius, facing, "BP", false);
             }
+            Tool::Graphic { kind, points } => {
+                let m = cam.to_world(mouse);
+                match kind {
+                    DrawKind::PhaseLine if !points.is_empty() => {
+                        let mut pts: Vec<P2> = points.iter().map(|&p| cam.to_screen(p)).collect();
+                        pts.push(mouse);
+                        for w in pts.windows(2) {
+                            f.line(w[0], w[1], 1.5, style::EDIT_CURSOR);
+                        }
+                    }
+                    DrawKind::Objective if !points.is_empty() => {
+                        let r =
+                            (((m[0] - points[0][0]).powi(2) + (m[1] - points[0][1]).powi(2)).sqrt() / cam.mpp) as f32;
+                        f.circle_lines(cam.to_screen(points[0]), r, style::EDIT_CURSOR);
+                    }
+                    _ => f.circle_lines(mouse, 4.0, style::EDIT_CURSOR),
+                }
+            }
             Tool::Los { a: Some(a), b, result } => {
                 let b = b.unwrap_or_else(|| cam.to_world(mouse));
                 let c = match result {
@@ -601,8 +812,18 @@ impl Game {
     }
 
     pub fn draw_ui(&self, f: &mut Frame, screen: P2) {
+        if let Some(a) = &self.aar {
+            a.draw_ui(f, screen, &self.recorder, self.sim.side_names(), self.scenario.start_time_s as f64);
+            return;
+        }
         let side = &self.sim.side_names()[self.side.0 as usize];
-        let state = if self.paused { "PAUSED".to_owned() } else { format!("X{}", SPEEDS[self.speed]) };
+        let state = if self.planning {
+            "PLANNING - ENTER TO EXECUTE".to_owned()
+        } else if self.paused {
+            "PAUSED".to_owned()
+        } else {
+            format!("X{}", SPEEDS[self.speed])
+        };
         let top = format!("{}   {}   {}   {}", format::clock(self.sim.clock_s()), state, side, self.scenario.name);
         f.text(&top, 10.0, 6.0, style::FONT_L - 4, if self.paused { style::AMBER } else { style::TEXT });
         let tool = match &self.tool {
@@ -611,7 +832,23 @@ impl Game {
             Tool::BattlePosition { .. } => "BP: CLICK THREAT DIRECTION".into(),
             Tool::Viewshed => "VIEWSHED: CLICK OBSERVER POINT  (V/ESC CLOSE)".into(),
             Tool::Los { .. } => "LOS: CLICK TWO POINTS".into(),
+            Tool::Graphic { kind: DrawKind::PhaseLine, .. } => {
+                "PHASE LINE: CLICK POINTS, ENTER TO FINISH (G NEXT TOOL)".into()
+            }
+            Tool::Graphic { kind: DrawKind::Objective, .. } => {
+                "OBJECTIVE: CLICK CENTRE, CLICK EDGE (G NEXT TOOL)".into()
+            }
+            Tool::Graphic { kind: DrawKind::Trp, .. } => "TRP: CLICK POINTS (G CLOSE)".into(),
         };
+        let mode = match self.order_mode {
+            OrderMode::Now => String::new(),
+            OrderMode::OnEnemyCrossing => format!(
+                "NEXT ORDER: ON ENEMY CROSSING {}",
+                self.last_phase_line().map_or("(NO PL)".into(), |g| g.label.clone())
+            ),
+            OrderMode::InFiveMinutes => "NEXT ORDER: AT +5 MIN".into(),
+        };
+        f.text(&mode, 560.0, 24.0, style::FONT_L - 8, style::SELECT);
         f.text(&tool, 560.0, 8.0, style::FONT_L - 8, style::AMBER);
 
         if let Some(end) = &self.ended {
@@ -649,12 +886,29 @@ impl Game {
         } else {
             lines.push(("NO UNIT SELECTED".into(), style::TEXT_DIM));
         }
+        for t in pic.triggers.iter().rev().take(3) {
+            let cond = match &t.condition {
+                TriggerCondition::EnemyCrosses { line } => {
+                    format!("ENEMY X {}", pic.graphic(*line).map_or("PL".into(), |g| g.label.clone()))
+                }
+                TriggerCondition::FriendlyCrosses { line, .. } => {
+                    format!("OWN X {}", pic.graphic(*line).map_or("PL".into(), |g| g.label.clone()))
+                }
+                TriggerCondition::AtTime { time_s } => {
+                    format!("AT {}", format::clock(self.scenario.start_time_s as f64 + time_s))
+                }
+            };
+            lines.push((
+                format!("CW {}: {cond} -> {}{}", t.id, t.order, if t.fired { " (EXECUTED)" } else { "" }),
+                style::TEXT_DIM,
+            ));
+        }
         let contacts = pic.live_contacts().count();
         lines.push((
             format!("CONTACTS {contacts}   KILLS {}", pic.contacts.iter().filter(|c| c.destroyed).count()),
             style::TEXT_DIM,
         ));
-        for (k, (l, c)) in lines.iter().take(11).enumerate() {
+        for (k, (l, c)) in lines.iter().take(12).enumerate() {
             f.text(l, px + 10.0, py + 8.0 + k as f32 * 19.0, style::FONT_L - 8, *c);
         }
 
@@ -806,6 +1060,10 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                 (None, false) => format!("{}: HIT, NO PENETRATION.", u.callsign),
                 (None, true) => format!("{}: HIT, MINOR DAMAGE.", u.callsign),
             }
+        }
+        Event::TriggerFired { side, id } if *side == pic.side => {
+            let t = pic.triggers.iter().find(|t| t.id == *id)?;
+            format!("CODE WORD {}: EXECUTE {}.", id, t.order)
         }
         Event::PlatoonReport { side, platoon, report } if *side == pic.side => {
             let cs = game.platoon_cs(*platoon);

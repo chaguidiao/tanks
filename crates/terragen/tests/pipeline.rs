@@ -86,3 +86,17 @@ fn rivers_flow_downhill_and_carve_water() {
     let wet = baked.water_depth.data.iter().filter(|&&d| d > 0.2).count();
     assert!(wet > 50, "carved channels hold water ({wet} cells)");
 }
+
+#[test]
+fn villages_get_building_footprints_that_block_movement() {
+    let (ds, pkg) = small(5);
+    let n = pkg.features.buildings.len();
+    eprintln!("buildings {n}, roads {}", pkg.features.roads.len());
+    assert!(n > 10, "villages should be built up ({n} buildings)");
+    let baked = bake(&pkg, &ds.terrain, &workflow::mobility_classes(&ds));
+    let b = &pkg.features.buildings[0];
+    let c = [b.ring.iter().map(|p| p[0]).sum::<f64>() / 4.0, b.ring.iter().map(|p| p[1]).sum::<f64>() / 4.0];
+    let (i, j) = baked.elevation.cell_of(c[0], c[1]);
+    assert!(baked.building_height.get(i, j) > 4.0);
+    assert_eq!(baked.mobility[0].speed.get(i, j), 0, "buildings are no-go");
+}

@@ -127,6 +127,10 @@ const KEYMAP: &[(KeyboardKey, Key)] = &[
     (KeyboardKey::KEY_X, Key::Char('x')),
     (KeyboardKey::KEY_DELETE, Key::Delete),
     (KeyboardKey::KEY_H, Key::Char('h')),
+    (KeyboardKey::KEY_K, Key::Char('k')),
+    (KeyboardKey::KEY_O, Key::Char('o')),
+    (KeyboardKey::KEY_U, Key::Char('u')),
+    (KeyboardKey::KEY_C, Key::Char('c')),
     (KeyboardKey::KEY_S, Key::Char('s')),
     (KeyboardKey::KEY_W, Key::Char('w')),
     (KeyboardKey::KEY_Y, Key::Char('y')),
@@ -272,6 +276,25 @@ impl Frame<'_> {
 
     pub fn ellipse_lines(&mut self, p: P2, rx: f32, ry: f32, c: Rgba) {
         self.d.draw_ellipse_lines(p[0] as i32, p[1] as i32, rx, ry, Color::from(c));
+    }
+
+    /// Filled convex polygon (any winding).
+    pub fn poly(&mut self, pts: &[P2], c: Rgba) {
+        if pts.len() < 3 {
+            return;
+        }
+        let area: f32 = (0..pts.len())
+            .map(|i| {
+                let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+                a[0] * b[1] - b[0] * a[1]
+            })
+            .sum();
+        // raylib's triangle fan wants counter-clockwise order on screen (y down).
+        let mut vs: Vec<Vector2> = pts.iter().map(|&p| v(p)).collect();
+        if area > 0.0 {
+            vs.reverse();
+        }
+        self.d.draw_triangle_fan(&vs, Color::from(c));
     }
 
     pub fn text(&mut self, s: &str, x: f32, y: f32, size: i32, c: Rgba) {

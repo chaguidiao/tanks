@@ -1,16 +1,18 @@
 //! Tanks client: tactical map display, game mode and terrain editor.
 //!
 //! ```text
-//! client [--scenario <id>] [--map <id>] [--edit]
+//! client [--scenario <id>] [--map <id>] [--edit] [--scenario-editor]
 //!        [--screenshot <png> [--frames <n>] [--order <unit-or-platoon>:<x>,<y>] [--bp <platoon>:<x>,<y>,<deg>]
-//!         [--advance <s>]
+//!         [--pl -:<x>,<y>,<x>,<y>..] [--advance <s>] [--aar] [--save-replay <ron>]
 //!         [--zoom <m-per-px>] [--center <x>,<y>] [--layer relief|slope|traffic|cover]]
 //! ```
 
+mod aar;
 mod editor;
 mod format;
 mod game;
 mod render;
+mod scenedit;
 mod style;
 mod symbols;
 mod view;
@@ -25,18 +27,23 @@ use terrain::{AuthoringPackage, BakedMap};
 use crate::editor::Editor;
 use crate::game::Game;
 use crate::render::{Gfx, Input, Key};
+use crate::scenedit::ScenarioEditor;
 use crate::view::{BaseLayer, Camera, MapView};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Game,
     Editor,
+    Scenario,
 }
 
 struct Opts {
     scenario: Option<String>,
     map: Option<String>,
     edit: bool,
+    scenario_editor: bool,
+    aar: bool,
+    save_replay: Option<String>,
     screenshot: Option<String>,
     frames: u32,
     /// ("--order" | "--bp", callsign, numbers)
@@ -57,7 +64,7 @@ fn opts() -> Result<Opts, String> {
     let get = |k: &str| a.iter().position(|x| x == k).and_then(|i| a.get(i + 1)).cloned();
     let mut orders = Vec::new();
     for (i, x) in a.iter().enumerate() {
-        if x == "--order" || x == "--bp" {
+        if x == "--order" || x == "--bp" || x == "--pl" {
             let v = a.get(i + 1).ok_or("--order/--bp needs <callsign>:<numbers>")?;
             let (cs, nums) = v.split_once(':').ok_or("--order/--bp needs <callsign>:<numbers>")?;
             let nums: Vec<f64> =
@@ -69,6 +76,9 @@ fn opts() -> Result<Opts, String> {
         scenario: get("--scenario"),
         map: get("--map"),
         edit: a.iter().any(|x| x == "--edit"),
+        scenario_editor: a.iter().any(|x| x == "--scenario-editor"),
+        aar: a.iter().any(|x| x == "--aar"),
+        save_replay: get("--save-replay"),
         screenshot: get("--screenshot"),
         frames: get("--frames").and_then(|v| v.parse().ok()).unwrap_or(6),
         orders,
@@ -90,6 +100,7 @@ struct App {
     mode: Mode,
     game: Option<Game>,
     editor: Option<Editor>,
+    scenario_editor: Option<ScenarioEditor>,
     map_changed: bool,
     help: bool,
     last_input: Input,
@@ -155,6 +166,9 @@ fn run() -> Result<(), String> {
                     g.sel_platoon = Some(p);
                     g.issue_bp([*x, *y], deg.to_radians());
                 }
+                ("--pl", _, pts) if pts.len() >= 4 && pts.len() % 2 == 0 => {
+                    g.add_phase_line(pts.chunks(2).map(|c| [c[0], c[1]]).collect());
+                }
                 ("--order", Some(p), [x, y]) => {
                     let t = g.technique;
                     g.sim.submit(
@@ -176,7 +190,14 @@ fn run() -> Result<(), String> {
             }
         }
         if o.advance_s > 0.0 {
+            g.execute();
             g.advance_ticks((o.advance_s * sim::TICK_HZ as f64) as u32);
+        }
+        if let Some(path) = &o.save_replay {
+            std::fs::write(path, sim::Replay::record(&g.sim).to_ron()).map_err(|e| format!("{path}: {e}"))?;
+        }
+        if o.aar {
+            g.open_aar();
         }
     }
 
@@ -191,12 +212,18 @@ fn run() -> Result<(), String> {
         mode: Mode::Game,
         game,
         editor: None,
+        scenario_editor: None,
         map_changed: false,
         help: false,
         last_input: Input::default(),
     };
     if o.edit || app.game.is_none() {
         app.enter_editor()?;
+    } else if o.scenario_editor
+        && let Some(g) = &app.game
+    {
+        app.scenario_editor = Some(ScenarioEditor::new(g.scenario.clone(), &app.ds));
+        app.mode = Mode::Scenario;
     }
 
     let mut frame = 0u32;
@@ -268,6 +295,7 @@ impl App {
         let over_ui = match self.mode {
             Mode::Game => self.game.as_ref().is_some_and(|g| g.over_ui(inp.mouse, inp.screen)),
             Mode::Editor => self.editor.as_ref().is_some_and(|e| e.over_ui(inp.mouse)),
+            Mode::Scenario => self.scenario_editor.as_ref().is_some_and(|e| e.over_ui(inp.mouse)),
         };
 
         // Camera: wheel zooms about the cursor; middle-drag or arrow keys pan.
@@ -307,7 +335,19 @@ impl App {
             match self.mode {
                 Mode::Game => self.enter_editor()?,
                 Mode::Editor => self.leave_editor()?,
+                Mode::Scenario => {}
             }
+        }
+        if inp.hit(Key::F(9))
+            && self.mode == Mode::Game
+            && let Some(g) = &mut self.game
+        {
+            g.paused = true;
+            self.scenario_editor = Some(ScenarioEditor::new(g.scenario.clone(), &self.ds));
+            self.mode = Mode::Scenario;
+            self.last_input = inp;
+            self.draw();
+            return Ok(());
         }
 
         match self.mode {
@@ -338,6 +378,31 @@ impl App {
                 }
                 if fx.save {
                     self.save();
+                }
+            }
+            Mode::Scenario => {
+                let ed = self.scenario_editor.as_mut().expect("scenario editor exists in scenario mode");
+                let fx = ed.update(&inp, &self.cam, &self.ds, over_ui);
+                if fx.save {
+                    match sim_data::DataSet::save_scenario(&self.data_dir, &ed.def) {
+                        Ok(p) => {
+                            ed.unsaved = false;
+                            ed.status = format!("SAVED {}", p.display());
+                        }
+                        Err(e) => ed.status = format!("SAVE FAILED: {e}"),
+                    }
+                }
+                if fx.play {
+                    let def = ed.def.clone();
+                    match Game::new(def, self.ds.clone(), self.map.clone()) {
+                        Ok(mut g) => {
+                            g.log.push_back((String::new(), "SCENARIO EDITED. RESTARTED.".into()));
+                            self.game = Some(g);
+                            self.scenario_editor = None;
+                            self.mode = Mode::Game;
+                        }
+                        Err(e) => ed.status = format!("CANNOT START: {e}"),
+                    }
                 }
             }
         }
@@ -372,11 +437,17 @@ impl App {
         let inp = &self.last_input;
         let (cam, view, map, ds) = (&self.cam, &self.view, &self.map, &self.ds);
         let (mode, game, editor, help) = (self.mode, &self.game, &self.editor, self.help);
+        let scenario_editor = &self.scenario_editor;
         self.gfx.frame(|f| {
             f.clear(style::BG);
             view.draw(f, cam, map);
-            if let Some(g) = game {
+            if mode != Mode::Scenario
+                && let Some(g) = game
+            {
                 g.draw_world(f, cam, inp.mouse);
+            }
+            if let Some(e) = scenario_editor.as_ref().filter(|_| mode == Mode::Scenario) {
+                e.draw_world(f, cam);
             }
             if mode == Mode::Editor
                 && let Some(e) = editor
@@ -392,6 +463,11 @@ impl App {
                 Mode::Editor => {
                     if let Some(e) = editor {
                         e.draw_ui(f, inp.screen);
+                    }
+                }
+                Mode::Scenario => {
+                    if let Some(e) = scenario_editor {
+                        e.draw_ui(f, inp.screen, ds);
                     }
                 }
             }
@@ -438,10 +514,14 @@ fn help_overlay(f: &mut render::Frame, screen: [f32; 2]) {
         "GAME    LMB SELECT PLATOON (CTRL: SINGLE TANK)  RMB MOVE  CTRL+RMB ENGAGE CONTACT  TAB NEXT PLATOON",
         "        F FORMATION  T TECHNIQUE  B BATTLE POSITION ([ ] RADIUS)  W WEAPONS CONTROL  H HALT",
         "        SPACE PAUSE  1-4 SPEED X1 X2 X4 X8   V VIEWSHED  L LINE OF SIGHT",
-        "EDITOR  E TOGGLE  1-4 BRUSHES  5 RIVER  6 ROAD  7 FOREST  [ ] RADIUS  - = RATE",
+        "PLAN    ENTER EXECUTE (PLANNING PHASE)  G GRAPHICS (PL/OBJ/TRP)  K CONTINGENCY MODE FOR NEXT ORDER",
+        "        F8 AFTER-ACTION REVIEW (CTRL+R SAVE REPLAY)",
+        "SCENARIO F9 EDIT/PLAY  P PLACE  LMB DRAG  R ROTATE  DEL REMOVE  TAB SIDE  V VEHICLE  N PLATOON",
+        "        O OBJECTIVE  Y/U YEAR  T START TIME  CTRL+S SAVE",
+        "EDITOR  E TOGGLE  1-4 BRUSHES  5 RIVER  6 ROAD  7 FOREST  8 BUILDING  DEL DELETE  [ ] RADIUS  - = RATE",
         "        CTRL+Z/Y UNDO/REDO  B BAKE  CTRL+S SAVE",
     ];
-    let (w, h) = (760.0, lines.len() as f32 * 20.0 + 20.0);
+    let (w, h) = (900.0, lines.len() as f32 * 20.0 + 20.0);
     let (x, y) = ((screen[0] - w) / 2.0, (screen[1] - h) / 2.0);
     f.rect(x, y, w, h, style::PANEL);
     f.rect_lines(x, y, w, h, style::PANEL_EDGE);

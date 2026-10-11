@@ -16,6 +16,7 @@ const USAGE: &str = "usage: tanks-headless <command> [options]
   info    --map <id>                                                   print map statistics
   probe   --map <id> --at <x,y[;x,y..]>                                terrain at points
   run     --scenario <id> [--seconds <s>] [--move <x,y>]               run a scenario headless
+  replay  --file <replay.ron>                                          re-simulate a replay, verify its hash
   duel    [--shooter <id>] [--target <id>] [--ranges 500,1000,..] [--trials <n>] [--aspect front|side]
           [--out <csv>]                                                Monte-Carlo duel validation harness
 
@@ -131,6 +132,7 @@ fn run(cmd: &str, a: Args) -> Result<(), String> {
             }
         }
         "duel" => duel(&ds, &a)?,
+        "replay" => replay(&data, &ds, &a)?,
         _ => return Err(format!("unknown command '{cmd}'\n{USAGE}")),
     }
     Ok(())
@@ -173,10 +175,11 @@ fn print_info(b: &BakedMap) {
     );
     println!("elevation  {lo:.1} .. {hi:.1} m");
     println!(
-        "features   {} rivers, {} roads, {} forests",
+        "features   {} rivers, {} roads, {} forests, {} buildings",
         b.features.rivers.len(),
         b.features.roads.len(),
-        b.features.forests.len()
+        b.features.forests.len(),
+        b.features.buildings.len()
     );
     println!(
         "contours   {} lines, {} points",
@@ -188,6 +191,38 @@ fn print_info(b: &BakedMap) {
         println!("mobility   {:<12} no-go {:.1} %", l.class.id, nogo * 100.0);
     }
     println!("hash       input {:016x} output {:016x}", b.input_hash, b.output_hash());
+}
+
+/// Re-simulate a saved replay (client CTRL+R) and check it reaches the recorded state hash.
+fn replay(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), String> {
+    use std::sync::Arc;
+
+    let path = a.req("--file")?;
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let rep = sim::Replay::from_ron(&text)?;
+    let sc = DataSet::load_scenario(data, &rep.scenario).map_err(|e| e.to_string())?;
+    let map = Arc::new(workflow::ensure_map(data, ds, &sc.map, |s| eprintln!("{s}")).map_err(|e| e.to_string())?);
+    let mut sim = sim::Sim::new(&sc, Arc::new(ds.clone()), map).map_err(|e| e.to_string())?;
+    let t = Instant::now();
+    rep.play(&mut sim, |s, ev| {
+        for e in ev {
+            if matches!(e, sim::Event::ScenarioEnd { .. } | sim::Event::TriggerFired { .. }) {
+                println!("t={:7.1}s  {e:?}", s.time_s());
+            }
+        }
+    });
+    let hash = sim.state_hash();
+    println!(
+        "replayed {} commands, {} ticks in {:.1} s; hash {hash:#018x} (recorded {:#018x})",
+        rep.commands.len(),
+        rep.final_tick,
+        t.elapsed().as_secs_f64(),
+        rep.final_hash
+    );
+    if hash != rep.final_hash {
+        return Err("replay diverged from the recording".into());
+    }
+    Ok(())
 }
 
 fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), String> {

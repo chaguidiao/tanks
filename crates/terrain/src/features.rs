@@ -12,6 +12,30 @@ pub struct Features {
     pub rivers: Vec<River>,
     pub roads: Vec<Road>,
     pub forests: Vec<Forest>,
+    pub buildings: Vec<Building>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BuildingClass {
+    Wood,
+    Masonry,
+    Concrete,
+    Industrial,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BuildingProps {
+    pub height_m: f32,
+    pub class: BuildingClass,
+}
+
+/// Building footprint (TERRAIN.md §5.4).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Building {
+    pub id: u32,
+    pub ring: Vec<Vec2>,
+    pub props: BuildingProps,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -144,6 +168,19 @@ impl Features {
                 .collect(),
         )?;
         write_collection(
+            &dir.join("buildings.geojson"),
+            self.buildings
+                .iter()
+                .map(|b| {
+                    let mut ring = b.ring.clone();
+                    if let Some(&first) = ring.first() {
+                        ring.push(first);
+                    }
+                    (b.id, Geometry::Polygon { coordinates: vec![ring] }, b.props.clone())
+                })
+                .collect(),
+        )?;
+        write_collection(
             &dir.join("forests.geojson"),
             self.forests
                 .iter()
@@ -183,7 +220,21 @@ impl Features {
                 _ => Err(TerrainError::io(&p, "expected Polygon")),
             })
             .collect::<Result<_>>()?;
-        Ok(Self { rivers, roads, forests })
+        let p = dir.join("buildings.geojson");
+        let buildings = read_collection::<BuildingProps>(&p)?
+            .into_iter()
+            .map(|(id, g, props)| match g {
+                Geometry::Polygon { mut coordinates } if !coordinates.is_empty() => {
+                    let mut ring = coordinates.swap_remove(0);
+                    if ring.len() > 1 && ring.first() == ring.last() {
+                        ring.pop();
+                    }
+                    Ok(Building { id, ring, props })
+                }
+                _ => Err(TerrainError::io(&p, "expected Polygon")),
+            })
+            .collect::<Result<_>>()?;
+        Ok(Self { rivers, roads, forests, buildings })
     }
 
     /// Next free feature id (ids are unique across all feature kinds).
@@ -191,6 +242,7 @@ impl Features {
         let r = self.rivers.iter().map(|f| f.id);
         let d = self.roads.iter().map(|f| f.id);
         let f = self.forests.iter().map(|f| f.id);
-        r.chain(d).chain(f).max().map_or(1, |m| m + 1)
+        let b = self.buildings.iter().map(|b| b.id);
+        r.chain(d).chain(f).chain(b).max().map_or(1, |m| m + 1)
     }
 }

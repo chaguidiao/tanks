@@ -133,3 +133,44 @@ pub fn selection(f: &mut Frame, p: P2) {
         f.line([cx, cy], [cx, cy + dy * l], 1.5, c);
     }
 }
+
+/// Control-measure graphics (MIL-STD-2525D tactical graphics, simplified).
+pub fn graphic(f: &mut Frame, cam: &Camera, g: &sim::view::Graphic, highlight: bool) {
+    use sim::view::GraphicKind;
+    let c = if highlight { style::SELECT } else { Rgba(200, 200, 200, 230) };
+    match &g.kind {
+        GraphicKind::PhaseLine { points } => {
+            let pts: Vec<P2> = points.iter().map(|&p| cam.to_screen(p)).collect();
+            for w in pts.windows(2) {
+                f.line(w[0], w[1], 2.0, c);
+            }
+            for p in [pts.first(), pts.last()].into_iter().flatten() {
+                f.text(&g.label, p[0] + 4.0, p[1] - 14.0, style::FONT, c);
+            }
+        }
+        GraphicKind::Objective { centre, radius } => {
+            let n = 40;
+            let pts: Vec<P2> = (0..=n)
+                .map(|k| {
+                    let a = k as f64 / n as f64 * std::f64::consts::TAU;
+                    cam.to_screen([centre[0] + radius * a.sin(), centre[1] + radius * a.cos()])
+                })
+                .collect();
+            for w in pts.windows(2) {
+                f.line(w[0], w[1], 2.0, c);
+            }
+            let p = cam.to_screen(*centre);
+            f.text(&g.label, p[0] - 16.0, p[1] - 5.0, style::FONT_L - 8, c);
+        }
+        GraphicKind::Trp { at } => {
+            let p = cam.to_screen(*at);
+            f.circle_lines(p, 6.0, c);
+            f.line([p[0] - 8.0, p[1]], [p[0] + 8.0, p[1]], 1.0, c);
+            f.line([p[0], p[1] - 8.0], [p[0], p[1] + 8.0], 1.0, c);
+            f.text(&g.label, p[0] + 9.0, p[1] + 2.0, style::FONT, c);
+        }
+        GraphicKind::BattlePosition { centre, radius, facing } => {
+            battle_position(f, cam, *centre, *radius, *facing, &g.label, true)
+        }
+    }
+}

@@ -10,3 +10,5 @@ terrain.workspace = true
 ai.workspace = true
 libm.workspace = true
 rand_chacha.workspace = true
+serde.workspace = true
+ron.workspace = true

@@ -163,6 +163,15 @@ impl AuthoringPackage {
             h.u8(r.props.class as u8);
             h.f32(r.props.width_m);
         }
+        for b in &f.buildings {
+            h.u32(b.id);
+            b.ring.iter().for_each(|p| {
+                h.f64(p[0]);
+                h.f64(p[1])
+            });
+            h.f32(b.props.height_m);
+            h.u8(b.props.class as u8);
+        }
         for r in &f.forests {
             h.u32(r.id);
             r.ring.iter().for_each(|p| {

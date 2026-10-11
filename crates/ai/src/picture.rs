@@ -1,18 +1,20 @@
 //! What a side knows (DESIGN.md §6.2). The player UI and every AI read only these types;
 //! they carry no ground-truth identities for enemy vehicles (CLAUDE.md rule 3).
 
+use serde::{Deserialize, Serialize};
+
 pub type Vec2 = [f64; 2];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct EntityId(pub u32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct SideId(pub u8);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct PlatoonId(pub u32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ContactId(pub u32);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,7 +27,7 @@ pub enum Task {
     Engaging,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum WeaponsStatus {
     Hold,
     Tight,
@@ -107,6 +109,43 @@ pub struct PlatoonView {
     pub task: String,
 }
 
+/// Control measures (DESIGN.md §8.4; MIL-STD-2525D tactical graphics).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GraphicKind {
+    PhaseLine { points: Vec<Vec2> },
+    Objective { centre: Vec2, radius: f64 },
+    Trp { at: Vec2 },
+    BattlePosition { centre: Vec2, radius: f64, facing: f64 },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Graphic {
+    /// Assigned by the simulation (ignored when submitted).
+    pub id: u32,
+    pub label: String,
+    pub kind: GraphicKind,
+}
+
+/// Condition of a contingency order (code word / trigger, DESIGN.md §8.2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TriggerCondition {
+    /// A reported enemy is across the phase line (on the friendly side of it).
+    EnemyCrosses { line: u32 },
+    /// The platoon's centroid has crossed the phase line.
+    FriendlyCrosses { line: u32, platoon: PlatoonId },
+    /// At a scenario time (s).
+    AtTime { time_s: f64 },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriggerView {
+    pub id: u32,
+    pub condition: TriggerCondition,
+    /// Short description of the order it releases.
+    pub order: String,
+    pub fired: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PerceivedWorld {
     pub side: SideId,
@@ -116,6 +155,8 @@ pub struct PerceivedWorld {
     pub platoons: Vec<PlatoonView>,
     pub contacts: Vec<Contact>,
     pub shots: Vec<ShotView>,
+    pub graphics: Vec<Graphic>,
+    pub triggers: Vec<TriggerView>,
 }
 
 impl PerceivedWorld {
@@ -128,6 +169,8 @@ impl PerceivedWorld {
             platoons: Vec::new(),
             contacts: Vec::new(),
             shots: Vec::new(),
+            graphics: Vec::new(),
+            triggers: Vec::new(),
         }
     }
 
@@ -141,6 +184,10 @@ impl PerceivedWorld {
 
     pub fn contact(&self, id: ContactId) -> Option<&Contact> {
         self.contacts.iter().find(|c| c.id == id)
+    }
+
+    pub fn graphic(&self, id: u32) -> Option<&Graphic> {
+        self.graphics.iter().find(|g| g.id == id)
     }
 
     /// Live (not reported destroyed) contacts.

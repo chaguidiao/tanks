@@ -241,3 +241,120 @@ fn chaikin(p: &[Vec2]) -> Vec<Vec2> {
     out.push(*p.last().unwrap());
     out
 }
+
+/// Stage 6b — settlement interiors (TERRAIN.md §3, simplified): building footprints along the
+/// roads that pass through each village, plus loose infill. Footprints are oriented to the
+/// nearest road; sizes and heights by position hash (farmsteads and houses, 1–3 storeys).
+pub fn generate_buildings(
+    villages: &[Village],
+    roads: &[Road],
+    rivers: &[River],
+    size_m: f64,
+    seed: u64,
+    first_id: u32,
+) -> Vec<terrain::features::Building> {
+    use terrain::features::{Building, BuildingClass, BuildingProps};
+
+    let near_line = |p: Vec2, pts: &[Vec2], r: f64| -> Option<(f64, f64)> {
+        // (distance, direction of the closest segment)
+        let mut best: Option<(f64, f64)> = None;
+        for w in pts.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let l2 = dx * dx + dy * dy;
+            if l2 == 0.0 {
+                continue;
+            }
+            let t = (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0);
+            let d = dist(p, [a[0] + dx * t, a[1] + dy * t]);
+            if d <= r && best.is_none_or(|bb| d < bb.0) {
+                best = Some((d, libm::atan2(dx, dy)));
+            }
+        }
+        best
+    };
+    let mut out: Vec<Building> = Vec::new();
+    let mut centres: Vec<Vec2> = Vec::new();
+    let mut try_place = |c: Vec2, dir: f64, n: u64, out: &mut Vec<Building>| {
+        if c[0] < 20.0 || c[1] < 20.0 || c[0] > size_m - 20.0 || c[1] > size_m - 20.0 {
+            return;
+        }
+        if centres.iter().any(|q| dist(*q, c) < 16.0) {
+            return;
+        }
+        if roads.iter().any(|r| near_line(c, &r.points, r.props.width_m as f64 / 2.0 + 7.0).is_some()) {
+            return;
+        }
+        if rivers.iter().any(|r| near_line(c, &r.points, 20.0).is_some()) {
+            return;
+        }
+        let h = |k: u64| noise::hash01(n as i64, k as i64, seed);
+        let (len, dep) = (9.0 + 6.0 * h(1), 7.0 + 4.0 * h(2));
+        let (s, co) = (libm::sin(dir), libm::cos(dir));
+        let (f, r) = ([s, co], [co, -s]);
+        let corner = |a: f64, b: f64| [c[0] + f[0] * a + r[0] * b, c[1] + f[1] * a + r[1] * b];
+        let ring = vec![
+            corner(len / 2.0, dep / 2.0),
+            corner(len / 2.0, -dep / 2.0),
+            corner(-len / 2.0, -dep / 2.0),
+            corner(-len / 2.0, dep / 2.0),
+        ];
+        let height = 4.5 + 4.5 * h(3);
+        let class = if h(4) < 0.15 { BuildingClass::Wood } else { BuildingClass::Masonry };
+        centres.push(c);
+        out.push(Building {
+            id: first_id + out.len() as u32,
+            ring,
+            props: BuildingProps { height_m: height as f32, class },
+        });
+    };
+    let mut n = 0u64;
+    for v in villages {
+        // Frontage along roads through the village.
+        for r in roads {
+            for w in r.points.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                let len = dist(a, b);
+                let dir = libm::atan2(b[0] - a[0], b[1] - a[1]);
+                let steps = (len / 20.0).ceil() as usize;
+                for k in 0..steps {
+                    let t = (k as f64 + 0.5) / steps as f64;
+                    let p = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+                    if dist(p, v.pos) > v.radius * 1.05 {
+                        continue;
+                    }
+                    for side in [-1.0, 1.0] {
+                        n += 1;
+                        if noise::hash01(n as i64, 9, seed) < 0.25 {
+                            continue; // gaps between plots
+                        }
+                        let off = r.props.width_m as f64 / 2.0 + 12.0;
+                        let c = [p[0] + libm::cos(dir) * off * side, p[1] - libm::sin(dir) * off * side];
+                        try_place(c, dir, n, &mut out);
+                    }
+                }
+            }
+        }
+        // Loose infill (farmsteads, back plots).
+        let step = 30.0;
+        let k = (v.radius / step).ceil() as i64;
+        for j in -k..=k {
+            for i in -k..=k {
+                n += 1;
+                let jx = noise::hash01(i, j, seed ^ 0xb1) - 0.5;
+                let jy = noise::hash01(i, j, seed ^ 0xb2) - 0.5;
+                let c = [v.pos[0] + (i as f64 + jx) * step, v.pos[1] + (j as f64 + jy) * step];
+                if dist(c, v.pos) > v.radius * 0.75 || noise::hash01(i, j, seed ^ 0xb3) < 0.45 {
+                    continue;
+                }
+                let dir = roads
+                    .iter()
+                    .filter_map(|r| near_line(c, &r.points, 200.0))
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+                    .map_or(noise::hash01(i, j, seed ^ 0xb4) * std::f64::consts::PI, |x| x.1);
+                try_place(c, dir, n, &mut out);
+            }
+        }
+    }
+    out
+}

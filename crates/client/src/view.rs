@@ -236,7 +236,26 @@ fn polyline(f: &mut Frame, cam: &Camera, pts: &[[f64; 2]], width: f32, c: crate:
     }
 }
 
+fn draw_buildings(f: &mut Frame, cam: &Camera, baked: &BakedMap) {
+    if cam.mpp > 4.0 {
+        return;
+    }
+    let v = cam.view();
+    for b in &baked.features.buildings {
+        let Some(p0) = b.ring.first() else { continue };
+        if p0[0] < v[0] - 30.0 || p0[0] > v[2] + 30.0 || p0[1] < v[1] - 30.0 || p0[1] > v[3] + 30.0 {
+            continue;
+        }
+        let pts: Vec<P2> = b.ring.iter().map(|&p| cam.to_screen(p)).collect();
+        f.poly(&pts, style::BUILDING);
+        for k in 0..pts.len() {
+            f.line(pts[k], pts[(k + 1) % pts.len()], 1.0, style::BUILDING_EDGE);
+        }
+    }
+}
+
 fn draw_features(f: &mut Frame, cam: &Camera, baked: &BakedMap) {
+    draw_buildings(f, cam, baked);
     for r in &baked.features.rivers {
         let w = r.props.width_m.iter().copied().fold(0.0f32, f32::max) as f64;
         polyline(f, cam, &r.points, ((w / cam.mpp) as f32).max(1.2), style::WATER);

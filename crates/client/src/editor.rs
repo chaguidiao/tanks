@@ -1,11 +1,15 @@
 //! Terrain editor (TERRAIN.md §4), M0.5 basics: height brushes on the non-destructive edit
-//! layer, draw river / road / forest features, undo/redo, save and re-bake.
+//! layer, draw river / road / forest / building features, delete features, undo/redo, save
+//! and re-bake.
 //!
 //! Brushes preview live on the baked elevation; releasing the mouse re-bakes the whole map
 //! (contours, carving, mobility). Incremental per-tile baking comes later.
 
 use sim_data::TerrainData;
-use terrain::features::{Forest, ForestKind, ForestProps, River, RiverProps, Road, RoadClass, RoadProps};
+use terrain::features::{
+    Building, BuildingClass, BuildingProps, Forest, ForestKind, ForestProps, River, RiverProps, Road, RoadClass,
+    RoadProps,
+};
 use terrain::shade::CellRect;
 use terrain::{AuthoringPackage, BakedMap, Features, Heightfield};
 
@@ -22,11 +26,15 @@ pub enum Tool {
     River,
     Road,
     Forest,
+    Building,
 }
 
+/// Default footprint width of a hand-placed building (m): a typical rural house.
+const BUILDING_WIDTH_M: f64 = 9.0;
+
 impl Tool {
-    pub const ALL: [Tool; 7] =
-        [Tool::Raise, Tool::Lower, Tool::Smooth, Tool::Flatten, Tool::River, Tool::Road, Tool::Forest];
+    pub const ALL: [Tool; 8] =
+        [Tool::Raise, Tool::Lower, Tool::Smooth, Tool::Flatten, Tool::River, Tool::Road, Tool::Forest, Tool::Building];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -37,6 +45,7 @@ impl Tool {
             Tool::River => "RIVER",
             Tool::Road => "ROAD",
             Tool::Forest => "FOREST",
+            Tool::Building => "BUILDING",
         }
     }
 
@@ -149,6 +158,9 @@ impl Editor {
         if !inp.ctrl && inp.hit(Key::Char('b')) {
             fx.rebake = true;
         }
+        if inp.hit(Key::Delete) && !over_ui {
+            fx.rebake |= self.delete_feature(cam.to_world(inp.mouse), 12.0 * cam.mpp);
+        }
 
         let world = cam.to_world(inp.mouse);
         if self.tool.is_brush() {
@@ -182,6 +194,10 @@ impl Editor {
         } else {
             if inp.left_pressed && !over_ui {
                 self.drawing.push(world);
+                // Buildings take two clicks: centre, then the end of the long axis.
+                if self.tool == Tool::Building && self.drawing.len() == 2 {
+                    fx.rebake |= self.finish_feature();
+                }
             }
             if inp.hit(Key::Backspace) {
                 self.drawing.pop();
@@ -288,8 +304,67 @@ impl Editor {
         Some(CellRect { i0: i0.saturating_sub(1), j0: j0.saturating_sub(1), i1: (i1 + 1).min(w), j1: (j1 + 1).min(h) })
     }
 
+    /// Remove the feature nearest `at` (within `tol` m of its line, or inside its area).
+    fn delete_feature(&mut self, at: [f64; 2], tol: f64) -> bool {
+        let f = &self.pkg.features;
+        let mut best: Option<(f64, u8, usize)> = None;
+        let mut consider = |d: f64, kind: u8, k: usize| {
+            if d <= tol && best.is_none_or(|(b, _, _)| d < b) {
+                best = Some((d, kind, k));
+            }
+        };
+        for (k, r) in f.rivers.iter().enumerate() {
+            consider(polyline_dist(&r.points, at, false), 0, k);
+        }
+        for (k, r) in f.roads.iter().enumerate() {
+            consider(polyline_dist(&r.points, at, false), 1, k);
+        }
+        for (k, b) in f.buildings.iter().enumerate() {
+            consider(if inside(&b.ring, at) { 0.0 } else { polyline_dist(&b.ring, at, true) }, 2, k);
+        }
+        // Forests last and only by their edge or interior at a lower priority than small features.
+        for (k, fo) in f.forests.iter().enumerate() {
+            consider(if inside(&fo.ring, at) { tol } else { polyline_dist(&fo.ring, at, true) }, 3, k);
+        }
+        let Some((_, kind, k)) = best else {
+            self.status = "NO FEATURE UNDER CURSOR".into();
+            return false;
+        };
+        let before = self.pkg.features.clone();
+        let f = &mut self.pkg.features;
+        let what = match kind {
+            0 => {
+                f.rivers.remove(k);
+                "RIVER"
+            }
+            1 => {
+                f.roads.remove(k);
+                "ROAD"
+            }
+            2 => {
+                f.buildings.remove(k);
+                "BUILDING"
+            }
+            _ => {
+                f.forests.remove(k);
+                "FOREST"
+            }
+        };
+        let after = self.pkg.features.clone();
+        self.push(EditOp::Features { before, after });
+        self.status = format!("{what} DELETED");
+        true
+    }
+
     fn finish_feature(&mut self) -> bool {
         let min = if self.tool == Tool::Forest { 3 } else { 2 };
+        if self.tool == Tool::Building {
+            // Also accept ENTER after one click: default 12 m long, east-west.
+            if self.drawing.len() == 1 {
+                let c = self.drawing[0];
+                self.drawing.push([c[0] + 6.0, c[1]]);
+            }
+        }
         if self.drawing.len() < min {
             self.status = format!("{}: NEED {min} POINTS", self.tool.label());
             return false;
@@ -318,6 +393,25 @@ impl Editor {
                 points: pts,
                 props: RoadProps { class: RoadClass::Secondary, width_m: 5.0 },
             }),
+            Tool::Building => {
+                let (c, e) = (pts[0], pts[1]);
+                let (dx, dy) = (e[0] - c[0], e[1] - c[1]);
+                let half_l = (dx * dx + dy * dy).sqrt().max(4.0);
+                let (ux, uy) = if half_l > 0.0 { (dx / half_l, dy / half_l) } else { (1.0, 0.0) };
+                let (vx, vy) = (-uy * BUILDING_WIDTH_M / 2.0, ux * BUILDING_WIDTH_M / 2.0);
+                let (ax, ay) = (ux * half_l, uy * half_l);
+                let ring = vec![
+                    [c[0] - ax - vx, c[1] - ay - vy],
+                    [c[0] + ax - vx, c[1] + ay - vy],
+                    [c[0] + ax + vx, c[1] + ay + vy],
+                    [c[0] - ax + vx, c[1] - ay + vy],
+                ];
+                self.pkg.features.buildings.push(Building {
+                    id,
+                    ring,
+                    props: BuildingProps { height_m: 7.0, class: BuildingClass::Masonry },
+                });
+            }
             Tool::Forest => self.pkg.features.forests.push(Forest {
                 id,
                 ring: pts,
@@ -352,7 +446,7 @@ impl Editor {
     }
 
     pub fn draw_ui(&self, f: &mut Frame, screen: P2) {
-        let (x, y, w, h) = (10.0, 40.0, 190.0, 230.0);
+        let (x, y, w, h) = (10.0, 40.0, 190.0, 248.0);
         f.rect(x, y, w, h, style::PANEL);
         f.rect_lines(x, y, w, h, style::PANEL_EDGE);
         f.text("TERRAIN EDITOR", x + 10.0, y + 8.0, style::FONT_L - 6, style::AMBER);
@@ -373,10 +467,12 @@ impl Editor {
             if self.unsaved { "UNSAVED  CTRL+S".to_owned() } else { "SAVED".to_owned() },
         ];
         for (k, l) in info.iter().enumerate() {
-            f.text(l, x + 10.0, y + 166.0 + k as f32 * 18.0, style::FONT_L - 8, style::TEXT_DIM);
+            f.text(l, x + 10.0, y + 184.0 + k as f32 * 18.0, style::FONT_L - 8, style::TEXT_DIM);
         }
         let hint = if self.tool.is_brush() {
-            "LMB PAINT  CTRL+Z/Y UNDO/REDO  B BAKE  E EXIT"
+            "LMB PAINT  DEL DELETE FEATURE  CTRL+Z/Y UNDO/REDO  B BAKE  E EXIT"
+        } else if self.tool == Tool::Building {
+            "LMB CENTRE, LMB END OF LONG AXIS  DEL DELETE FEATURE  ESC CANCEL  E EXIT"
         } else {
             "LMB ADD POINT  ENTER FINISH  BKSP UNDO POINT  ESC CANCEL  E EXIT"
         };
@@ -385,8 +481,39 @@ impl Editor {
     }
 
     pub fn over_ui(&self, s: P2) -> bool {
-        s[0] < 200.0 && s[1] > 40.0 && s[1] < 270.0
+        s[0] < 200.0 && s[1] > 40.0 && s[1] < 288.0
     }
+}
+
+fn seg_dist(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> f64 {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let l2 = dx * dx + dy * dy;
+    let t = if l2 > 0.0 { (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+    ((a[0] + t * dx - p[0]).powi(2) + (a[1] + t * dy - p[1]).powi(2)).sqrt()
+}
+
+fn polyline_dist(pts: &[[f64; 2]], p: [f64; 2], closed: bool) -> f64 {
+    let mut d = f64::INFINITY;
+    for w in pts.windows(2) {
+        d = d.min(seg_dist(w[0], w[1], p));
+    }
+    if closed && pts.len() > 2 {
+        d = d.min(seg_dist(pts[pts.len() - 1], pts[0], p));
+    }
+    d
+}
+
+/// Even-odd point-in-polygon test.
+fn inside(ring: &[[f64; 2]], p: [f64; 2]) -> bool {
+    let mut c = false;
+    let n = ring.len();
+    for i in 0..n {
+        let (a, b) = (ring[i], ring[(i + n - 1) % n]);
+        if (a[1] > p[1]) != (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0] {
+            c = !c;
+        }
+    }
+    c
 }
 
 /// Re-bake helper used by the app (kept here so the editor owns its package).

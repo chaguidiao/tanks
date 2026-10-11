@@ -20,7 +20,7 @@ use crate::raster;
 use crate::{AuthoringPackage, Features, Grid, Heightfield, MapManifest, Result, TerrainError};
 
 /// Bump when baker output changes for the same input.
-pub const BAKER_VERSION: u32 = 1;
+pub const BAKER_VERSION: u32 = 2;
 
 /// Elevation quantisation step (m) in the baked package.
 pub const ELEVATION_STEP: f64 = 0.02;
@@ -41,6 +41,8 @@ pub struct BakedMap {
     pub soil: Grid<u8>,
     /// Water depth (m), quantised to centimetres.
     pub water_depth: Grid<f32>,
+    /// Building height above ground (m, decimetre steps); 0 = no building.
+    pub building_height: Grid<f32>,
     pub mobility: Vec<MobilityLayer>,
     pub contours: Vec<ContourLine>,
     pub features: Features,
@@ -61,6 +63,9 @@ impl BakedMap {
         h.write(&self.landcover.data);
         h.write(&self.soil.data);
         for &v in &self.water_depth.data {
+            h.f32(v);
+        }
+        for &v in &self.building_height.data {
             h.f32(v);
         }
         for m in &self.mobility {
@@ -281,6 +286,16 @@ pub fn bake(pkg: &AuthoringPackage, td: &TerrainData, classes: &[MobilityClass])
         }
     }
 
+    // Buildings: footprint cells carry the building height (LOS obstruction, no-go).
+    let mut buildings = Grid::new(w, h, 0.0f32);
+    for b in &pkg.features.buildings {
+        let hgt = (libm::round(b.props.height_m as f64 * 10.0) / 10.0) as f32;
+        raster::fill_polygon(&b.ring, cell, w, h, |i, j| {
+            let k = j * w + i;
+            buildings.data[k] = buildings.data[k].max(hgt);
+        });
+    }
+
     // Quantise so in-memory bakes equal loaded bakes bit-for-bit.
     for v in hf.z.data.iter_mut() {
         *v = (libm::round(*v as f64 / ELEVATION_STEP) * ELEVATION_STEP) as f32;
@@ -291,7 +306,15 @@ pub fn bake(pkg: &AuthoringPackage, td: &TerrainData, classes: &[MobilityClass])
 
     let mobility = classes
         .iter()
-        .map(|c| MobilityLayer { class: c.clone(), speed: mobility::speed_raster(c, td, &hf, &landcover, &water) })
+        .map(|c| {
+            let mut speed = mobility::speed_raster(c, td, &hf, &landcover, &water);
+            for (v, b) in speed.data.iter_mut().zip(&buildings.data) {
+                if *b > 0.0 {
+                    *v = 0;
+                }
+            }
+            MobilityLayer { class: c.clone(), speed }
+        })
         .collect();
     let contours = contour::extract(&hf, &ContourSpec::default());
 
@@ -302,6 +325,7 @@ pub fn bake(pkg: &AuthoringPackage, td: &TerrainData, classes: &[MobilityClass])
         landcover,
         soil,
         water_depth: water,
+        building_height: buildings,
         mobility,
         contours,
         features: pkg.features.clone(),
@@ -390,6 +414,8 @@ impl BakedMap {
         write_layer(&dir.join("soil.bin"), w, h, &self.soil.data)?;
         let wd = self.water_depth.map(|v| libm::round(v as f64 * 100.0).clamp(0.0, 65535.0) as u16);
         write_layer(&dir.join("water_depth.bin"), w, h, &u16_bytes(&wd))?;
+        let bh = self.building_height.map(|v| libm::round(v as f64 * 10.0).clamp(0.0, 65535.0) as u16);
+        write_layer(&dir.join("buildings.bin"), w, h, &u16_bytes(&bh))?;
         for m in &self.mobility {
             write_layer(&md.join(format!("{}.bin", m.class.id)), w, h, &m.speed.data)?;
         }
@@ -433,6 +459,7 @@ impl BakedMap {
         let q = u16_grid(&dir.join("elevation.bin"))?;
         let z = q.map(|v| ((man.elevation_offset_steps + v as i64) as f64 * ELEVATION_STEP) as f32);
         let wd = u16_grid(&dir.join("water_depth.bin"))?.map(|v| (v as f64 / 100.0) as f32);
+        let bh = u16_grid(&dir.join("buildings.bin"))?.map(|v| (v as f64 / 10.0) as f32);
         let mut mobility = Vec::new();
         for c in &man.mobility_classes {
             mobility.push(MobilityLayer {
@@ -451,6 +478,7 @@ impl BakedMap {
             landcover: u8_grid(&dir.join("landcover.bin"))?,
             soil: u8_grid(&dir.join("soil.bin"))?,
             water_depth: wd,
+            building_height: bh,
             mobility,
             contours: read_contours(&dir.join("contours.bin"))?,
             features: Features::load(&dir.join("features"))?,

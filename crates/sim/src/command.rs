@@ -1,23 +1,24 @@
-use ai::picture::{ContactId, ContactLevel, PlatoonId, WeaponsStatus};
+use ai::picture::{ContactId, ContactLevel, Graphic, PlatoonId, TriggerCondition, WeaponsStatus};
+use serde::{Deserialize, Serialize};
 use sim_data::{Formation, Technique};
 
 use crate::{EntityId, SideId, Vec2};
 
 /// Who an order is addressed to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Addressee {
     Unit(EntityId),
     Platoon(PlatoonId),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PositionKind {
     HullDown,
     TurretDown,
 }
 
 /// Orders into the simulation. Intent-level: platoon and vehicle AI decide how to execute them.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Command {
     /// Move a single vehicle to a point by the fastest route.
     Move {
@@ -56,9 +57,21 @@ pub enum Command {
         unit: EntityId,
         contact: ContactId,
     },
+    /// Draw a control measure (not a radio order: no delay).
+    AddGraphic {
+        graphic: Graphic,
+    },
+    RemoveGraphic {
+        id: u32,
+    },
+    /// Contingency order: `then` is executed without radio delay when the condition is met.
+    AddTrigger {
+        condition: TriggerCondition,
+        then: Box<Command>,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TimedCommand {
     /// Tick the order was given.
     pub tick: u64,
@@ -66,6 +79,9 @@ pub struct TimedCommand {
     pub cmd: Command,
     /// Pre-planned (code-word / trigger / planning-phase) orders take effect without radio delay.
     pub immediate: bool,
+    /// Issued by the simulation itself (commander AI, triggers): not re-injected on replay.
+    #[serde(default)]
+    pub generated: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +132,13 @@ pub enum Event {
     Fired {
         unit: EntityId,
         range_m: f64,
+        from: Vec2,
+        to: Vec2,
+        hit: bool,
+    },
+    TriggerFired {
+        side: SideId,
+        id: u32,
     },
     /// Own vehicle observed its round strike.
     ShotResult {
