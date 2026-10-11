@@ -18,3 +18,4 @@ sim-data.workspace = true
 terrain.workspace = true
 terragen.workspace = true
 sim.workspace = true
+ai.workspace = true

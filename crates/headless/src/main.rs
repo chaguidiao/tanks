@@ -15,6 +15,8 @@ const USAGE: &str = "usage: tanks-headless <command> [options]
   render  --map <id> --layer <tint|shade|slope|traffic|landcover> [--class <vehicle>] [--downsample <n>] --out <png>
   info    --map <id>                                                   print map statistics
   run     --scenario <id> [--seconds <s>] [--move <x,y>]               run a scenario headless
+  duel    [--shooter <id>] [--target <id>] [--ranges 500,1000,..] [--trials <n>] [--aspect front|side]
+          [--out <csv>]                                                Monte-Carlo duel validation harness
 
 Options: --data <dir> (default: ./data or $TANKS_DATA)";
 
@@ -110,6 +112,7 @@ fn run(cmd: &str, a: Args) -> Result<(), String> {
             eprintln!("wrote {}", out.display());
         }
         "run" => run_scenario(&data, &ds, &a)?,
+        "duel" => duel(&ds, &a)?,
         _ => return Err(format!("unknown command '{cmd}'\n{USAGE}")),
     }
     Ok(())
@@ -172,7 +175,7 @@ fn print_info(b: &BakedMap) {
 fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), String> {
     use std::sync::Arc;
 
-    use sim::{Command, Event, SideId, Sim};
+    use sim::{Command, SideId, Sim};
 
     let id = a.req("--scenario")?;
     let sc = DataSet::load_scenario(data, id).map_err(|e| e.to_string())?;
@@ -190,16 +193,8 @@ fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), St
     let ticks = (seconds * sim::TICK_HZ as f64) as u64;
     for _ in 0..ticks {
         for e in sim.step() {
-            let name = |u| sim.perceived(blue).unit(u).map_or("?".to_owned(), |o| o.callsign.clone());
-            let msg = match &e {
-                Event::RoutePlanned { length_m, .. } => format!("route planned, {length_m:.0} m"),
-                Event::NoRoute { .. } => "no route".into(),
-                Event::Arrived { .. } => "arrived".into(),
-                Event::Halted { .. } => "halted".into(),
-                Event::Stuck { .. } => "stuck".into(),
-                Event::OutOfFuel { .. } => "out of fuel".into(),
-            };
-            println!("t={:7.1}s  {:<4} {msg}", sim.time_s(), name(e.unit()));
+            let msg = format!("{e:?}");
+            println!("t={:7.1}s  {msg}", sim.time_s());
         }
     }
     let wall = t.elapsed().as_secs_f64();
@@ -215,5 +210,157 @@ fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), St
     }
     println!("ticks {ticks}  wall {wall:.2} s  ({:.0}x real time)", seconds / wall.max(1e-9));
     println!("state hash {:016x}", sim.state_hash());
+    Ok(())
+}
+
+/// Duel validation harness (CLAUDE.md testing): stationary shooter vs. stationary target on
+/// flat open ground by day; the target holds fire. Writes one CSV row per range.
+fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
+    use std::fmt::Write as _;
+    use std::sync::Arc;
+
+    use sim::view::{Condition, WeaponsStatus};
+    use sim::{Addressee, Command, EntityId, Event, SideId, Sim};
+    use sim_data::{MapRef, ScenarioDef, SideDef, UnitDef};
+    use terrain::mobility::MobilityClass;
+    use terrain::{AuthoringPackage, MapManifest};
+
+    let shooter = a.get("--shooter").unwrap_or("bulwark_a1").to_owned();
+    let target = a.get("--target").unwrap_or("kurgan_b").to_owned();
+    let trials: u64 = a.get("--trials").unwrap_or("200").parse().map_err(|_| "bad --trials")?;
+    let ranges: Vec<f64> = a
+        .get("--ranges")
+        .unwrap_or("500,1000,1500,2000,2500,3000,3500")
+        .split(',')
+        .map(|r| r.trim().parse::<f64>().map_err(|_| format!("bad range '{r}'")))
+        .collect::<Result<_, _>>()?;
+    let side_on = a.get("--aspect") == Some("side");
+    let max_r = ranges.iter().copied().fold(0.0, f64::max);
+    let h_cells = ((max_r + 800.0) / 4.0) as usize;
+    let m = MapManifest {
+        id: "duel".into(),
+        name: "duel".into(),
+        width_cells: 200,
+        height_cells: h_cells,
+        cell_size_m: 4.0,
+        seed: 1,
+        recipe: None,
+    };
+    let mut pkg = AuthoringPackage::new_flat(m, 100.0);
+    pkg.landcover.data.fill(ds.terrain.landcover_id("road").ok_or("no road class")?); // no micro-relief
+    let classes: Vec<MobilityClass> = ds.vehicles.iter().map(MobilityClass::from).collect();
+    let map = Arc::new(terrain::bake(&pkg, &ds.terrain, &classes));
+    let data = Arc::new(ds.clone());
+
+    let mut csv = String::from(
+        "range_m,trials,mean_detect_s,mean_first_shot_s,ph_first_round,ph_all_rounds,p_pen_given_hit,kill_within_120s,mean_time_to_kill_s,mean_rounds_to_kill\n",
+    );
+    for &r in &ranges {
+        let (mut det, mut det_n, mut first, mut first_n) = (0.0, 0, 0.0, 0);
+        let (mut fr_hit, mut fr_n, mut hits, mut shots, mut pens) = (0, 0, 0, 0, 0);
+        let (mut kills, mut ttk, mut rtk) = (0, 0.0, 0.0);
+        for trial in 0..trials {
+            let sc = ScenarioDef {
+                id: "duel".into(),
+                name: "duel".into(),
+                date: (1990, 6, 1),
+                start_time_s: 10 * 3600,
+                map: MapRef { id: "duel".into(), recipe: String::new(), seed: 1, size_m: 0.0 },
+                seed: trial + 1,
+                sides: vec![
+                    SideDef {
+                        name: "A".into(),
+                        doctrine: "western-combined".into(),
+                        tech_year: None,
+                        units: vec![UnitDef {
+                            callsign: "S".into(),
+                            vehicle: shooter.clone(),
+                            position: [400.0, 200.0],
+                            heading_deg: 0.0,
+                            platoon: None,
+                        }],
+                    },
+                    SideDef {
+                        name: "B".into(),
+                        doctrine: "generic-opfor".into(),
+                        tech_year: None,
+                        units: vec![UnitDef {
+                            callsign: "T".into(),
+                            vehicle: target.clone(),
+                            position: [400.0, 200.0 + r],
+                            heading_deg: if side_on { 90.0 } else { 180.0 },
+                            platoon: None,
+                        }],
+                    },
+                ],
+            };
+            let mut sim = Sim::new(&sc, data.clone(), map.clone())?;
+            sim.submit_immediate(
+                SideId(1),
+                Command::WeaponsControl { to: Addressee::Unit(EntityId(2)), status: WeaponsStatus::Hold },
+            );
+            let mut seen = false;
+            let mut rounds = 0;
+            for _ in 0..(120 * sim::TICK_HZ) {
+                for e in sim.step() {
+                    match e {
+                        Event::Fired { unit: EntityId(1), .. } => {
+                            if rounds == 0 {
+                                first += sim.time_s();
+                                first_n += 1;
+                            }
+                            rounds += 1;
+                        }
+                        Event::ShotResult { unit: EntityId(1), hit, .. } => {
+                            shots += 1;
+                            if hit {
+                                hits += 1;
+                            }
+                            if rounds == 1 && shots > 0 {
+                                fr_n += 1;
+                                if hit {
+                                    fr_hit += 1;
+                                }
+                            }
+                        }
+                        Event::Hit { unit: EntityId(2), penetrated, .. } if penetrated => pens += 1,
+                        _ => {}
+                    }
+                }
+                if !seen && !sim.perceived(SideId(0)).contacts.is_empty() {
+                    seen = true;
+                    det += sim.time_s();
+                    det_n += 1;
+                }
+                if matches!(sim.truth().condition[1], Condition::Destroyed | Condition::FirepowerKill) {
+                    kills += 1;
+                    ttk += sim.time_s();
+                    rtk += rounds as f64;
+                    break;
+                }
+            }
+        }
+        let div = |a: f64, b: usize| if b > 0 { a / b as f64 } else { f64::NAN };
+        let _ = writeln!(
+            csv,
+            "{r:.0},{trials},{:.1},{:.1},{:.3},{:.3},{:.3},{:.3},{:.1},{:.2}",
+            div(det, det_n),
+            div(first, first_n),
+            div(fr_hit as f64, fr_n),
+            div(hits as f64, shots),
+            div(pens as f64, hits),
+            kills as f64 / trials as f64,
+            div(ttk, kills),
+            div(rtk, kills)
+        );
+    }
+    match a.get("--out") {
+        Some(p) => {
+            std::fs::write(p, &csv).map_err(|e| e.to_string())?;
+            eprintln!("wrote {p}");
+            print!("{csv}");
+        }
+        None => print!("{csv}"),
+    }
     Ok(())
 }

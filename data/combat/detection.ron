@@ -1,0 +1,15 @@
+// Detection model constants (DESIGN.md §6.1).
+(
+    n50_detect: (value: 1.0, source: "Johnson (1958), Analysis of Image Forming Systems: detection 1.0 cycles", confidence: high),
+    n50_recognise: (value: 4.0, source: "Johnson (1958): recognition 4.0 cycles", confidence: high),
+    n50_identify: (value: 6.4, source: "Johnson (1958): identification 6.4 cycles", confidence: high),
+    acquire_tau_s: (value: 3.4, source: "NVESD ACQUIRE model: mean acquisition time 3.4 / P∞ s", confidence: medium),
+    moving_target_factor: (value: 1.5, source: "estimate", confidence: estimate, notes: "Motion and dust draw the eye."),
+    firing_target_factor: (value: 6.0, source: "estimate", confidence: estimate, notes: "Muzzle flash, blast and obscuration cue observers."),
+    observer_moving_factor: (value: 0.5, source: "estimate", confidence: estimate, notes: "Crews search poorly on the move."),
+    light_day: (value: 1.0, source: "reference", confidence: high),
+    light_twilight: (value: 0.35, source: "estimate", confidence: estimate),
+    light_night: (value: 0.005, source: "estimate", confidence: estimate, notes: "Unlit night: direct optics are useless beyond a few hundred metres. Moonlight and illumination come later."),
+    max_range_m: (value: 6000.0, source: "estimate", confidence: estimate),
+    track_timeout_s: (value: 15.0, source: "estimate", confidence: estimate),
+)

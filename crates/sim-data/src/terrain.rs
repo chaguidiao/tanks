@@ -13,6 +13,10 @@ pub struct LandCoverDef {
     pub speed_factor: Stat<f64>,
     /// Micro-relief amplitude used by `h_micro` (m).
     pub micro_relief_m: Stat<f64>,
+    /// Height of vegetation/obstructions above ground that sight lines must pass (m).
+    pub canopy_height_m: Stat<f64>,
+    /// Beer–Lambert attenuation inside the canopy volume (per metre of path).
+    pub attenuation_per_m: Stat<f64>,
     #[serde(default)]
     pub is_forest: bool,
     #[serde(default)]

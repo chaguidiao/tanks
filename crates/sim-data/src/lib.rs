@@ -3,6 +3,8 @@
 //! Every numeric stat is a [`Stat`] carrying its source and confidence (CLAUDE.md data rules).
 //! Units are SI throughout (m, s, kg, W, rad).
 
+pub mod combat;
+pub mod doctrine;
 pub mod scenario;
 pub mod stat;
 pub mod terrain;
@@ -10,6 +12,8 @@ pub mod vehicle;
 
 use std::path::{Path, PathBuf};
 
+pub use combat::*;
+pub use doctrine::*;
 pub use scenario::*;
 pub use stat::*;
 pub use terrain::*;
@@ -44,29 +48,80 @@ pub fn ron_options() -> ron::Options {
 #[derive(Debug, Clone)]
 pub struct DataSet {
     pub vehicles: Vec<VehicleDef>,
+    pub ammo: Vec<AmmoDef>,
+    pub doctrine: Vec<DoctrinePack>,
+    pub detection: DetectionModel,
+    pub damage: DamageTables,
+    pub penetration: PenetrationModel,
     pub terrain: TerrainData,
+}
+
+fn ron_files(dir: &Path) -> Result<Vec<PathBuf>, DataError> {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| DataError { path: dir.to_owned(), message: e.to_string() })?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "ron"))
+        .collect();
+    paths.sort();
+    Ok(paths)
 }
 
 impl DataSet {
     pub fn load(root: &Path) -> Result<Self, DataError> {
         let mut vehicles = Vec::new();
-        let vdir = root.join("vehicles");
-        let mut paths: Vec<PathBuf> = std::fs::read_dir(&vdir)
-            .map_err(|e| DataError { path: vdir.clone(), message: e.to_string() })?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().is_some_and(|x| x == "ron"))
-            .collect();
-        paths.sort();
-        for p in paths {
+        for p in ron_files(&root.join("vehicles"))? {
             vehicles.push(load_ron::<VehicleDef>(&p)?);
         }
         vehicles.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut ammo = Vec::new();
+        for p in ron_files(&root.join("ammo"))? {
+            ammo.push(load_ron::<AmmoDef>(&p)?);
+        }
+        ammo.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut doctrine = Vec::new();
+        let ddir = root.join("doctrine");
+        let mut packs: Vec<PathBuf> = std::fs::read_dir(&ddir)
+            .map_err(|e| DataError { path: ddir.clone(), message: e.to_string() })?
+            .filter_map(|e| e.ok().map(|e| e.path().join("doctrine.ron")))
+            .filter(|p| p.exists())
+            .collect();
+        packs.sort();
+        for p in packs {
+            doctrine.push(load_ron::<DoctrinePack>(&p)?);
+        }
         let terrain = TerrainData {
             landcover: load_ron(&root.join("terrain/landcover.ron"))?,
             soils: load_ron(&root.join("terrain/soils.ron"))?,
         };
         terrain.validate().map_err(|message| DataError { path: root.join("terrain"), message })?;
-        Ok(Self { vehicles, terrain })
+        let ds = Self {
+            vehicles,
+            ammo,
+            doctrine,
+            detection: load_ron(&root.join("combat/detection.ron"))?,
+            damage: load_ron(&root.join("combat/damage.ron"))?,
+            penetration: load_ron(&root.join("combat/penetration.ron"))?,
+            terrain,
+        };
+        for v in &ds.vehicles {
+            for l in &v.armament.load {
+                if ds.ammo(&l.ammo).is_none() {
+                    return Err(DataError {
+                        path: root.join("vehicles"),
+                        message: format!("{}: unknown ammo '{}'", v.id, l.ammo),
+                    });
+                }
+            }
+        }
+        Ok(ds)
+    }
+
+    pub fn ammo(&self, id: &str) -> Option<&AmmoDef> {
+        self.ammo.iter().find(|a| a.id == id)
+    }
+
+    pub fn doctrine_pack(&self, id: &str) -> Option<&DoctrinePack> {
+        self.doctrine.iter().find(|d| d.id == id)
     }
 
     pub fn load_scenario(root: &Path, id: &str) -> Result<ScenarioDef, DataError> {

@@ -243,7 +243,7 @@ impl App {
             Mode::Editor => self.editor.as_ref().is_some_and(|e| e.over_ui(inp.mouse)),
         };
 
-        // Camera: wheel zooms about the cursor; middle-drag or arrows/WASD pan.
+        // Camera: wheel zooms about the cursor; middle-drag or arrow keys pan.
         if inp.wheel != 0.0 {
             self.cam.zoom_at(inp.mouse, if inp.wheel > 0.0 { 1.0 / 1.25 } else { 1.25 });
         }
@@ -251,19 +251,11 @@ impl App {
             self.cam.pan_px(inp.mouse_delta);
         }
         let pan = 600.0 * inp.frame_time;
-        let typing = self.mode == Mode::Editor;
         for (k, d) in
             [(Key::Left, [pan, 0.0]), (Key::Right, [-pan, 0.0]), (Key::Up, [0.0, pan]), (Key::Down, [0.0, -pan])]
         {
             if inp.down(k) {
                 self.cam.pan_px(d);
-            }
-        }
-        if !typing && !inp.ctrl {
-            for (k, d) in [('a', [pan, 0.0]), ('d', [-pan, 0.0]), ('w', [0.0, pan]), ('s', [0.0, -pan])] {
-                if inp.down(Key::Char(k)) {
-                    self.cam.pan_px(d);
-                }
             }
         }
 
@@ -294,7 +286,14 @@ impl App {
         match self.mode {
             Mode::Game => {
                 if let Some(g) = &mut self.game {
-                    g.update(&inp, &self.cam, over_ui);
+                    let fx = g.update(&inp, &self.cam, over_ui);
+                    if fx.clear_overlay {
+                        self.view.overlay = None;
+                    }
+                    if let Some((rgba, w, h, ox, oy, step)) = fx.viewshed {
+                        let tex = self.gfx.texture(w, h, &rgba);
+                        self.view.overlay = Some((tex, [ox, oy, ox + w as f64 * step, oy + h as f64 * step]));
+                    }
                 }
             }
             Mode::Editor => {
@@ -350,7 +349,7 @@ impl App {
             f.clear(style::BG);
             view.draw(f, cam, map);
             if let Some(g) = game {
-                g.draw_world(f, cam);
+                g.draw_world(f, cam, inp.mouse);
             }
             if mode == Mode::Editor
                 && let Some(e) = editor
@@ -407,9 +406,11 @@ fn status_line(f: &mut render::Frame, inp: &Input, cam: &Camera, map: &BakedMap,
 
 fn help_overlay(f: &mut render::Frame, screen: [f32; 2]) {
     let lines = [
-        "MAP     WHEEL ZOOM   MMB DRAG / ARROWS / WASD PAN",
+        "MAP     WHEEL ZOOM   MMB DRAG / ARROWS PAN",
         "LAYERS  F1 RELIEF  F2 SLOPE  F3 GO/NO-GO  F4 LAND COVER  F5 CONTOURS  F6 GRID",
-        "GAME    LMB SELECT  RMB MOVE  H HALT  TAB NEXT UNIT  SPACE PAUSE  1-4 SPEED X1 X2 X4 X8",
+        "GAME    LMB SELECT PLATOON (CTRL: SINGLE TANK)  RMB MOVE  CTRL+RMB ENGAGE CONTACT  TAB NEXT PLATOON",
+        "        F FORMATION  T TECHNIQUE  B BATTLE POSITION ([ ] RADIUS)  W WEAPONS CONTROL  H HALT",
+        "        SPACE PAUSE  1-4 SPEED X1 X2 X4 X8   V VIEWSHED  L LINE OF SIGHT",
         "EDITOR  E TOGGLE  1-4 BRUSHES  5 RIVER  6 ROAD  7 FOREST  [ ] RADIUS  - = RATE",
         "        CTRL+Z/Y UNDO/REDO  B BAKE  CTRL+S SAVE",
     ];

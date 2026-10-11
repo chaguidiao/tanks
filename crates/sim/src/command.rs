@@ -1,30 +1,89 @@
+use ai::picture::{ContactId, ContactLevel, PlatoonId, WeaponsStatus};
+use sim_data::{Formation, Technique};
+
 use crate::{EntityId, SideId, Vec2};
 
-/// Orders into the simulation. Intent-level: the vehicle AI decides how to execute them.
+/// Who an order is addressed to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Addressee {
+    Unit(EntityId),
+    Platoon(PlatoonId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PositionKind {
+    HullDown,
+    TurretDown,
+}
+
+/// Orders into the simulation. Intent-level: platoon and vehicle AI decide how to execute them.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
-    /// Move to a point by the fastest route on the planning grid.
+    /// Move a single vehicle to a point by the fastest route.
     Move {
         unit: EntityId,
         destination: Vec2,
         speed_limit_mps: Option<f64>,
     },
     Halt {
+        to: Addressee,
+    },
+    /// Platoon movement in a formation using a movement technique (ATP 3-20.15 ch. 3).
+    PlatoonMove {
+        platoon: PlatoonId,
+        destination: Vec2,
+        formation: Option<Formation>,
+        technique: Technique,
+    },
+    SetFormation {
+        platoon: PlatoonId,
+        formation: Formation,
+    },
+    /// Occupy a battle position (ATP 3-20.15 ch. 5): circle area, threat direction (compass rad).
+    OccupyPosition {
+        platoon: PlatoonId,
+        centre: Vec2,
+        radius_m: f64,
+        facing: f64,
+        kind: PositionKind,
+    },
+    WeaponsControl {
+        to: Addressee,
+        status: WeaponsStatus,
+    },
+    /// Micro-order: engage a known contact.
+    Engage {
         unit: EntityId,
+        contact: ContactId,
     },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimedCommand {
+    /// Tick the order was given.
     pub tick: u64,
     pub side: SideId,
     pub cmd: Command,
+    /// Pre-planned (code-word / trigger / planning-phase) orders take effect without radio delay.
+    pub immediate: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KillKind {
+    Mobility,
+    Firepower,
+    Catastrophic,
+    Crew,
 }
 
 /// Structured events out of the simulation. The client turns them into radio text (brevity,
-/// grids, mils) in the display layer.
+/// grids, mils) in the display layer. Each event is addressed to one side.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
+    OrderReceived {
+        side: SideId,
+        to: Addressee,
+    },
     RoutePlanned {
         unit: EntityId,
         length_m: f64,
@@ -38,24 +97,45 @@ pub enum Event {
     Halted {
         unit: EntityId,
     },
-    /// Could not make progress (slope beyond traction, bogged) for several seconds.
     Stuck {
         unit: EntityId,
     },
     OutOfFuel {
         unit: EntityId,
     },
-}
-
-impl Event {
-    pub fn unit(&self) -> EntityId {
-        match *self {
-            Event::RoutePlanned { unit, .. }
-            | Event::NoRoute { unit }
-            | Event::Arrived { unit }
-            | Event::Halted { unit }
-            | Event::Stuck { unit }
-            | Event::OutOfFuel { unit } => unit,
-        }
-    }
+    /// A spot report reached the side's picture.
+    SpotReport {
+        side: SideId,
+        reporter: EntityId,
+        contact: ContactId,
+        level: ContactLevel,
+        new: bool,
+        range_m: f64,
+    },
+    /// Own vehicle fired.
+    Fired {
+        unit: EntityId,
+        range_m: f64,
+    },
+    /// Own vehicle observed its round strike.
+    ShotResult {
+        unit: EntityId,
+        hit: bool,
+        kill: Option<KillKind>,
+    },
+    /// Own vehicle was hit.
+    Hit {
+        unit: EntityId,
+        penetrated: bool,
+        kill: Option<KillKind>,
+    },
+    PlatoonReport {
+        side: SideId,
+        platoon: PlatoonId,
+        text: String,
+    },
+    ScenarioEnd {
+        winner: Option<SideId>,
+        reason: String,
+    },
 }

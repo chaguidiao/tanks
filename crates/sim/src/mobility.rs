@@ -42,7 +42,12 @@ pub(crate) fn step(
 ) {
     let hf = &map.elevation;
     for k in 0..world.len() {
+        let movable = world.can_move(k);
         let (Some(m), Some(vi)) = (&mut world.mobility[k], world.vehicle[k]) else { continue };
+        if !movable {
+            m.speed = 0.0;
+            continue;
+        }
         let def = &vehicles[vi];
         let d = &def.mobility;
         let class = MobilityClass::from(def);

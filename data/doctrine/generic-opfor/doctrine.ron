@@ -1,0 +1,34 @@
+// Red baseline: a neutral, plausible opposing doctrine (DESIGN.md §9.4). Echeloned attack with
+// march -> pre-battle -> battle formation deployment (after FM 100-2-1 (1984) and TC 7-100.2
+// (2011) in outline), centralised control, three-tank platoons.
+(
+    id: "generic-opfor",
+    name: "GENERIC OPFOR",
+    source: "FM 100-2-1 (1984) ch. 5; TC 7-100.2 (2011)",
+    formations: [
+        (formation: column, slots: [(0.0, 0.0), (0.0, -1.0), (0.0, -2.0), (0.0, -3.0)]),
+        (formation: staggered_column, slots: [(0.0, 0.0), (0.5, -1.0), (0.0, -2.0), (0.5, -3.0)]),
+        (formation: wedge, slots: [(0.0, 0.0), (1.0, -1.0), (-1.0, -1.0), (0.0, -2.0)]),
+        (formation: vee, slots: [(0.0, 0.0), (1.0, 1.0), (-1.0, 1.0), (0.0, -1.0)]),
+        (formation: line, slots: [(0.0, 0.0), (1.0, 0.0), (-1.0, 0.0), (2.0, 0.0)]),
+        (formation: echelon_left, slots: [(0.0, 0.0), (-1.0, -1.0), (-2.0, -2.0), (-3.0, -3.0)]),
+        (formation: echelon_right, slots: [(0.0, 0.0), (1.0, -1.0), (2.0, -2.0), (3.0, -3.0)]),
+    ],
+    default_formation: column,
+    spacing_m: (value: 75.0, source: "FM 100-2-1 (1984): 50-100 m between tanks in battle formation", confidence: medium),
+    bound_length_m: (value: 800.0, source: "estimate", confidence: estimate),
+    overwatch_distance_m: (value: 300.0, source: "estimate", confidence: estimate),
+    report_delay_min_s: (value: 5.0, source: "estimate", confidence: estimate),
+    report_delay_max_s: (value: 20.0, source: "estimate", confidence: estimate),
+    order_delay_min_s: (value: 10.0, source: "estimate", confidence: estimate),
+    order_delay_max_s: (value: 30.0, source: "estimate", confidence: estimate),
+    engagement_range_m: (value: 2500.0, source: "estimate", confidence: estimate),
+    halt_on_contact: false,
+    bp_dispersion_m: (value: 90.0, source: "estimate", confidence: estimate),
+    prebattle_distance_m: (value: 4000.0, source: "FM 100-2-1 (1984): pre-battle formation ~4-6 km from the enemy", confidence: low),
+    battle_distance_m: (value: 1500.0, source: "FM 100-2-1 (1984): battle formation ~1-2 km from the enemy", confidence: low),
+    march_formation: column,
+    prebattle_formation: column,
+    battle_formation: line,
+    break_off_losses: (value: 0.67, source: "estimate", confidence: estimate),
+)

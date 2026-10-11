@@ -37,6 +37,7 @@ pub enum Key {
     RightBracket,
     Minus,
     Equal,
+    Delete,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -99,6 +100,8 @@ const KEYMAP: &[(KeyboardKey, Key)] = &[
     (KeyboardKey::KEY_F5, Key::F(5)),
     (KeyboardKey::KEY_F6, Key::F(6)),
     (KeyboardKey::KEY_F7, Key::F(7)),
+    (KeyboardKey::KEY_F8, Key::F(8)),
+    (KeyboardKey::KEY_F9, Key::F(9)),
     (KeyboardKey::KEY_ONE, Key::Num(1)),
     (KeyboardKey::KEY_TWO, Key::Num(2)),
     (KeyboardKey::KEY_THREE, Key::Num(3)),
@@ -112,6 +115,17 @@ const KEYMAP: &[(KeyboardKey, Key)] = &[
     (KeyboardKey::KEY_B, Key::Char('b')),
     (KeyboardKey::KEY_D, Key::Char('d')),
     (KeyboardKey::KEY_E, Key::Char('e')),
+    (KeyboardKey::KEY_F, Key::Char('f')),
+    (KeyboardKey::KEY_G, Key::Char('g')),
+    (KeyboardKey::KEY_L, Key::Char('l')),
+    (KeyboardKey::KEY_M, Key::Char('m')),
+    (KeyboardKey::KEY_N, Key::Char('n')),
+    (KeyboardKey::KEY_P, Key::Char('p')),
+    (KeyboardKey::KEY_R, Key::Char('r')),
+    (KeyboardKey::KEY_T, Key::Char('t')),
+    (KeyboardKey::KEY_V, Key::Char('v')),
+    (KeyboardKey::KEY_X, Key::Char('x')),
+    (KeyboardKey::KEY_DELETE, Key::Delete),
     (KeyboardKey::KEY_H, Key::Char('h')),
     (KeyboardKey::KEY_S, Key::Char('s')),
     (KeyboardKey::KEY_W, Key::Char('w')),
@@ -124,10 +138,6 @@ const HELD: &[(KeyboardKey, Key)] = &[
     (KeyboardKey::KEY_DOWN, Key::Down),
     (KeyboardKey::KEY_LEFT, Key::Left),
     (KeyboardKey::KEY_RIGHT, Key::Right),
-    (KeyboardKey::KEY_W, Key::Char('w')),
-    (KeyboardKey::KEY_A, Key::Char('a')),
-    (KeyboardKey::KEY_S, Key::Char('s')),
-    (KeyboardKey::KEY_D, Key::Char('d')),
 ];
 
 impl Gfx {

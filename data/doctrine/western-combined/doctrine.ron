@@ -1,0 +1,34 @@
+// Blue baseline doctrine: ATP 3-20.15 Tank Platoon (2025) / FM 17-15 (1996).
+// Formation slots are (right, forward) in units of spacing_m, vehicle order 1 (PL), 2 (PL's
+// wingman), 3 (PSG's wingman), 4 (PSG).
+(
+    id: "western-combined",
+    name: "WESTERN COMBINED ARMS",
+    source: "ATP 3-20.15 (2025) ch. 3; FM 17-15 (1996) ch. 2",
+    formations: [
+        (formation: column, slots: [(0.0, 0.0), (0.0, -1.0), (0.0, -2.0), (0.0, -3.0)]),
+        (formation: staggered_column, slots: [(0.0, 0.0), (0.5, -1.0), (0.0, -2.0), (0.5, -3.0)]),
+        (formation: wedge, slots: [(0.0, 0.0), (1.0, -1.0), (-2.0, -1.0), (-1.0, -0.5)]),
+        (formation: vee, slots: [(0.0, 0.0), (1.0, 0.0), (-2.0, 0.0), (-1.0, -1.0)]),
+        (formation: line, slots: [(0.0, 0.0), (1.0, 0.0), (-2.0, 0.0), (-1.0, 0.0)]),
+        (formation: echelon_left, slots: [(0.0, 0.0), (-1.0, -1.0), (-3.0, -3.0), (-2.0, -2.0)]),
+        (formation: echelon_right, slots: [(0.0, 0.0), (1.0, -1.0), (3.0, -3.0), (2.0, -2.0)]),
+    ],
+    default_formation: wedge,
+    spacing_m: (value: 100.0, source: "ATP 3-20.15 (2025): 50-100 m between vehicles, terrain dependent", confidence: medium),
+    bound_length_m: (value: 600.0, source: "FM 17-15 (1996): bounds within supporting range of the overwatch", confidence: estimate),
+    overwatch_distance_m: (value: 300.0, source: "estimate", confidence: estimate),
+    report_delay_min_s: (value: 3.0, source: "estimate", confidence: estimate, notes: "Contact report over voice net."),
+    report_delay_max_s: (value: 12.0, source: "estimate", confidence: estimate),
+    order_delay_min_s: (value: 5.0, source: "estimate", confidence: estimate, notes: "Company to platoon by voice, acknowledged."),
+    order_delay_max_s: (value: 20.0, source: "estimate", confidence: estimate),
+    engagement_range_m: (value: 3000.0, source: "estimate", confidence: estimate),
+    halt_on_contact: true,
+    bp_dispersion_m: (value: 120.0, source: "ATP 3-20.15 (2025): dispersed positions within the BP", confidence: estimate),
+    prebattle_distance_m: (value: 4000.0, source: "estimate", confidence: estimate),
+    battle_distance_m: (value: 2000.0, source: "estimate", confidence: estimate),
+    march_formation: column,
+    prebattle_formation: wedge,
+    battle_formation: line,
+    break_off_losses: (value: 0.5, source: "estimate", confidence: estimate),
+)

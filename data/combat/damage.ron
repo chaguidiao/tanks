@@ -1,0 +1,31 @@
+// Damage outcomes per hit category (DESIGN.md §7.4). Simplified tables until the internal
+// component model exists; all values are estimates informed by Ogorkiewicz (1991) and
+// open discussions of WWII/Gulf War tank losses.
+(
+    turret_penetration: (
+        catastrophic: (value: 0.30, source: "estimate", confidence: estimate),
+        firepower: (value: 0.40, source: "estimate", confidence: estimate),
+        mobility: (value: 0.0, source: "estimate", confidence: estimate),
+        crew: (value: 0.25, source: "estimate", confidence: estimate),
+    ),
+    hull_front_penetration: (
+        catastrophic: (value: 0.30, source: "estimate", confidence: estimate),
+        firepower: (value: 0.15, source: "estimate", confidence: estimate),
+        mobility: (value: 0.35, source: "estimate", confidence: estimate),
+        crew: (value: 0.20, source: "estimate", confidence: estimate),
+    ),
+    hull_side_rear_penetration: (
+        catastrophic: (value: 0.30, source: "estimate", confidence: estimate),
+        firepower: (value: 0.05, source: "estimate", confidence: estimate),
+        mobility: (value: 0.55, source: "estimate", confidence: estimate, notes: "Engine and transmission."),
+        crew: (value: 0.10, source: "estimate", confidence: estimate),
+    ),
+    non_penetration: (
+        catastrophic: (value: 0.0, source: "estimate", confidence: estimate),
+        firepower: (value: 0.02, source: "estimate", confidence: estimate),
+        mobility: (value: 0.03, source: "estimate", confidence: estimate, notes: "Track or road-wheel damage."),
+        crew: (value: 0.02, source: "estimate", confidence: estimate),
+    ),
+    exposed_stowage_factor: (value: 2.0, source: "Zaloga, T-72 (Osprey, 1993): carousel cook-offs", confidence: low),
+    non_penetration_sights: (value: 0.1, source: "estimate", confidence: estimate),
+)

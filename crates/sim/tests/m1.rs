@@ -48,7 +48,13 @@ fn scenario(year: i32, pos: [f64; 2], heading_deg: f64) -> ScenarioDef {
             name: "BLUE".into(),
             doctrine: "western-combined".into(),
             tech_year: None,
-            units: vec![UnitDef { callsign: "1-1".into(), vehicle: "bulwark_a1".into(), position: pos, heading_deg }],
+            units: vec![UnitDef {
+                callsign: "1-1".into(),
+                vehicle: "bulwark_a1".into(),
+                position: pos,
+                heading_deg,
+                platoon: None,
+            }],
         }],
     }
 }
@@ -69,7 +75,7 @@ fn reaches_governed_speed_on_a_paved_road() {
     let ds = data();
     let map = baked(&flat_pkg(1000, 40, "road", "paved", &ds), &ds);
     let mut sim = Sim::new(&scenario(1990, [20.0, 80.0], 90.0), ds.clone(), map).unwrap();
-    sim.submit(BLUE, Command::Move { unit: TANK, destination: [3900.0, 80.0], speed_limit_mps: None });
+    sim.submit_immediate(BLUE, Command::Move { unit: TANK, destination: [3900.0, 80.0], speed_limit_mps: None });
     run(&mut sim, 40.0);
     let v = sim.perceived(BLUE).unit(TANK).unwrap().speed;
     let governed = ds.vehicle("bulwark_a1").unwrap().mobility.max_speed_road_mps.get();
@@ -89,7 +95,7 @@ fn climb_speed_matches_power_limited_formula() {
     }
     let map = baked(&pkg, &ds);
     let mut sim = Sim::new(&scenario(1990, [120.0, 40.0], 0.0), ds.clone(), map).unwrap();
-    sim.submit(BLUE, Command::Move { unit: TANK, destination: [120.0, 1550.0], speed_limit_mps: None });
+    sim.submit_immediate(BLUE, Command::Move { unit: TANK, destination: [120.0, 1550.0], speed_limit_mps: None });
     run(&mut sim, 60.0);
     let v = sim.perceived(BLUE).unit(TANK).unwrap().speed;
     let m = &ds.vehicle("bulwark_a1").unwrap().mobility;
@@ -118,7 +124,7 @@ fn slope_beyond_limit_has_no_route() {
     }
     let map = baked(&pkg, &ds);
     let mut sim = Sim::new(&scenario(1990, [120.0, 100.0], 0.0), ds, map).unwrap();
-    sim.submit(BLUE, Command::Move { unit: TANK, destination: [120.0, 700.0], speed_limit_mps: None });
+    sim.submit_immediate(BLUE, Command::Move { unit: TANK, destination: [120.0, 700.0], speed_limit_mps: None });
     let ev = run(&mut sim, 1.0);
     assert!(ev.contains(&Event::NoRoute { unit: TANK }), "{ev:?}");
 }
@@ -146,7 +152,7 @@ fn move_order_routes_over_the_bridge_and_arrives() {
     let ds = data();
     let map = river_map(&ds);
     let mut sim = Sim::new(&scenario(1990, [200.0, 200.0], 0.0), ds.clone(), map.clone()).unwrap();
-    sim.submit(BLUE, Command::Move { unit: TANK, destination: [200.0, 1000.0], speed_limit_mps: None });
+    sim.submit_immediate(BLUE, Command::Move { unit: TANK, destination: [200.0, 1000.0], speed_limit_mps: None });
     let ford = ds.vehicle("bulwark_a1").unwrap().mobility.fording_depth_m.get();
     let mut arrived_at = None;
     let mut crossed_x = None;
@@ -186,13 +192,19 @@ fn replay_hash(ds: &Arc<DataSet>, map: &Arc<BakedMap>) -> (u64, Vec<Event>) {
     let mut events = Vec::new();
     for t in 0..(120 * sim::TICK_HZ) {
         if t == 10 {
-            sim.submit(BLUE, Command::Move { unit: TANK, destination: [1000.0, 1000.0], speed_limit_mps: None });
+            sim.submit_immediate(
+                BLUE,
+                Command::Move { unit: TANK, destination: [1000.0, 1000.0], speed_limit_mps: None },
+            );
         }
         if t == 900 {
-            sim.submit(BLUE, Command::Move { unit: TANK, destination: [300.0, 900.0], speed_limit_mps: Some(8.0) });
+            sim.submit_immediate(
+                BLUE,
+                Command::Move { unit: TANK, destination: [300.0, 900.0], speed_limit_mps: Some(8.0) },
+            );
         }
         if t == 2000 {
-            sim.submit(BLUE, Command::Halt { unit: TANK });
+            sim.submit_immediate(BLUE, Command::Halt { to: sim::Addressee::Unit(TANK) });
         }
         events.extend(sim.step());
     }
@@ -208,6 +220,6 @@ fn same_commands_give_the_same_state_hash() {
     assert_eq!(h1, h2);
     assert_eq!(e1, e2);
     // Golden value: update deliberately (and say why in the commit) when behaviour changes.
-    const GOLDEN: u64 = 0xfd38_62b2_8f2a_2d8f;
+    const GOLDEN: u64 = 0x4806_a50f_deb0_27ed;
     assert_eq!(h1, GOLDEN, "state hash changed: {h1:#018x}");
 }

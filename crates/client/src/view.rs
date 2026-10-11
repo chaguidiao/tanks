@@ -86,6 +86,8 @@ pub struct MapView {
     /// Vehicle class shown by the trafficability layer.
     pub traffic_class: String,
     textures: [Option<Tex>; 4],
+    /// Analysis overlay (viewshed) with its world rectangle (xmin, ymin, xmax, ymax).
+    pub overlay: Option<(Tex, [f64; 4])>,
     contour_bbox: Vec<[f32; 4]>,
     range: (f32, f32),
 }
@@ -103,6 +105,7 @@ impl MapView {
             features: true,
             traffic_class: traffic_class.to_owned(),
             textures: [None, None, None, None],
+            overlay: None,
             contour_bbox: Vec::new(),
             range: (0.0, 1.0),
         };
@@ -175,6 +178,11 @@ impl MapView {
         if let Some(t) = &self.textures[slot(self.base)] {
             let a = cam.to_screen([0.0, h_m]);
             let b = cam.to_screen([w_m, 0.0]);
+            f.texture(t, a[0], a[1], b[0] - a[0], b[1] - a[1], crate::render::Rgba(255, 255, 255, 255));
+        }
+        if let Some((t, r)) = &self.overlay {
+            let a = cam.to_screen([r[0], r[3]]);
+            let b = cam.to_screen([r[2], r[1]]);
             f.texture(t, a[0], a[1], b[0] - a[0], b[1] - a[1], crate::render::Rgba(255, 255, 255, 255));
         }
         if self.features {

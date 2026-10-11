@@ -22,7 +22,6 @@ pub const TRACK: Rgba = Rgba(150, 140, 116, 200);
 pub const FOREST_EDGE: Rgba = Rgba(110, 150, 110, 200);
 
 pub const FRIENDLY: Rgba = Rgba(110, 170, 210, 255);
-#[cfg_attr(not(feature = "debug-truth"), allow(dead_code))]
 pub const HOSTILE: Rgba = Rgba(210, 110, 100, 255);
 pub const ROUTE: Rgba = Rgba(110, 170, 210, 160);
 pub const SELECT: Rgba = Rgba(230, 220, 160, 255);

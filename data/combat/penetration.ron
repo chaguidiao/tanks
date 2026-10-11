@@ -1,0 +1,14 @@
+// Long-rod KE penetration into RHA, Lanz & Odermatt functional form (DESIGN.md §7.4).
+// a, b0, b1 as recalled from Lanz & Odermatt (2000), "Minimum impact energy for KE-penetrators
+// in RHA-targets"; VERIFY against the paper. The recalled c (134.5) over-predicts published
+// penetrations by ~30 %, so c is calibrated: APFSDS 120-A matches its reference penetration at
+// 2 km; APFSDS 125-B then lands within 10 % of its own (independent) reference.
+(
+    a: (value: 0.994, source: "Lanz & Odermatt (2000), tungsten rods vs RHA", confidence: low),
+    b0: (value: 0.283, source: "Lanz & Odermatt (2000)", confidence: low),
+    b1: (value: 0.0656, source: "Lanz & Odermatt (2000)", confidence: low),
+    c: (value: 335.0, source: "calibrated to data/ammo reference penetrations", confidence: estimate,
+        notes: "See file header. Re-check once the original constants are verified."),
+    target_bhn: (value: 260.0, source: "typical RHA hardness (MIL-DTL-12560 class 1 range)", confidence: medium),
+    target_density_g_cm3: (value: 7.85, source: "steel density", confidence: high),
+)

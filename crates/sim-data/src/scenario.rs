@@ -43,4 +43,7 @@ pub struct UnitDef {
     pub position: [f64; 2],
     /// Compass heading, degrees clockwise from north.
     pub heading_deg: f64,
+    /// Platoon callsign; units sharing it form a platoon in listed order (vehicle 1 leads).
+    #[serde(default)]
+    pub platoon: Option<String>,
 }
