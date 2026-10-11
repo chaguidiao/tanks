@@ -1,0 +1,16 @@
+[package]
+name = "client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["gl33"]
+# Graphics backend (pick one). GL 2.1 is the ~2013-GPU fallback build.
+gl33 = ["raylib/opengl_33"]
+gl21 = ["raylib/opengl_21"]
+# Lets the client show ground truth (debug only, CLAUDE.md rule 3).
+debug-truth = []
+
+[dependencies]
+raylib = { workspace = true, features = ["GLFW_BUILD_X11", "SUPPORT_MODULE_RSHAPES", "SUPPORT_MODULE_RTEXTURES", "SUPPORT_MODULE_RTEXT", "SUPPORT_FILEFORMAT_PNG", "SUPPORT_IMAGE_EXPORT", "SUPPORT_SCREEN_CAPTURE", "SUPPORT_TRACELOG"] }

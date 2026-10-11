@@ -1,0 +1,22 @@
+// Soil classes (TERRAIN.md §5.6). Ids are raster values and must be 0..n in order.
+// Typical tracked-vehicle values; moisture/weather modifiers come later.
+[
+    (id: 0, name: "loam",
+        rolling_resistance: (value: 0.06, source: "Wong, Theory of Ground Vehicles (5th ed.), tracked-vehicle motion resistance", confidence: estimate, notes: "Firm, dry-to-moist loam."),
+        traction_coefficient: (value: 0.70, source: "Wong, Theory of Ground Vehicles (5th ed.)", confidence: estimate)),
+    (id: 1, name: "sand",
+        rolling_resistance: (value: 0.10, source: "Wong, Theory of Ground Vehicles (5th ed.)", confidence: estimate, notes: "Loose dry sand sinks."),
+        traction_coefficient: (value: 0.55, source: "Wong, Theory of Ground Vehicles (5th ed.)", confidence: estimate)),
+    (id: 2, name: "clay",
+        rolling_resistance: (value: 0.08, source: "Wong, Theory of Ground Vehicles (5th ed.)", confidence: estimate),
+        traction_coefficient: (value: 0.60, source: "Wong, Theory of Ground Vehicles (5th ed.)", confidence: estimate)),
+    (id: 3, name: "peat",
+        rolling_resistance: (value: 0.15, source: "Wong, Theory of Ground Vehicles (5th ed.), organic terrain (muskeg)", confidence: estimate),
+        traction_coefficient: (value: 0.35, source: "Wong, Theory of Ground Vehicles (5th ed.)", confidence: estimate)),
+    (id: 4, name: "gravel",
+        rolling_resistance: (value: 0.05, source: "Wong, Theory of Ground Vehicles (5th ed.)", confidence: estimate),
+        traction_coefficient: (value: 0.75, source: "Wong, Theory of Ground Vehicles (5th ed.)", confidence: estimate)),
+    (id: 5, name: "paved",
+        rolling_resistance: (value: 0.03, source: "Wong, Theory of Ground Vehicles (5th ed.), tracks on concrete/asphalt", confidence: estimate),
+        traction_coefficient: (value: 0.80, source: "Wong, Theory of Ground Vehicles (5th ed.)", confidence: estimate, notes: "Rubber track pads.")),
+]

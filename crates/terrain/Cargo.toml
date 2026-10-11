@@ -1,0 +1,18 @@
+[package]
+name = "terrain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sim-data.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ron.workspace = true
+toml.workspace = true
+libm.workspace = true
+tiff.workspace = true
+zstd.workspace = true
+# Already in the tree via `tiff`; used for the PNG writer (debug renders, baked textures).
+flate2.workspace = true
+crc32fast.workspace = true

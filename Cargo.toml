@@ -1,0 +1,45 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.99"
+
+[workspace.dependencies]
+sim = { path = "crates/sim" }
+sim-data = { path = "crates/sim-data" }
+terrain = { path = "crates/terrain" }
+terragen = { path = "crates/terragen" }
+ai = { path = "crates/ai" }
+
+serde = { version = "1", features = ["derive"] }
+ron = "0.12"
+toml = "1"
+libm = "0.2"
+rand_chacha = "0.10"
+tiff = { version = "0.11", default-features = false, features = ["deflate"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+flate2 = "1"
+crc32fast = "1"
+zstd = "0.14"
+# Pinned exactly: raylib upgrades are their own commits (CLAUDE.md).
+raylib = { version = "=6.0.0", default-features = false }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.test]
+opt-level = 2
+
+# Terrain generation/baking is heavy; keep it fast in dev builds too.
+[profile.dev.package.terrain]
+opt-level = 3
+
+[profile.dev.package.terragen]
+opt-level = 3

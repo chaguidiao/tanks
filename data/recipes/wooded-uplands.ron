@@ -1,0 +1,10 @@
+// Central-German-style hills and valleys: higher relief, more forest on the slopes.
+(
+    preset: "wooded-uplands",
+    landform: (relief_m: 180.0, wavelength_m: 3200.0, octaves: 7, ridge_mix: 0.45, warp_m: 700.0,
+               tilt_m: 60.0, tilt_azimuth_deg: 200.0, base_m: 200.0),
+    erosion: (iterations: 5, k: 0.0006, m: 0.5, talus: 0.7, thermal_iterations: 8),
+    rivers: (min_area_m2: 2500000.0, width_coef: 2.5, width_exp: 0.5, depth_coef: 0.45, depth_exp: 0.4, min_length_m: 600.0),
+    cover: (forest_fraction: 0.45, forest_wavelength_m: 1800.0, marsh_moisture: 235, field_size_m: 220.0),
+    roads: (village_spacing_m: 3200.0, village_radius_m: 180.0, edge_exits: 4),
+)

@@ -4,3 +4,5 @@
 /data/maps/*/baked/
 # local screenshots / scratch
 /out/
+# generated maps are derived from data/recipes + seed (regenerate with tanks-headless gen)
+/data/maps/

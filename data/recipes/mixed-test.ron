@@ -1,0 +1,10 @@
+// Small mixed map for AI and unit tests (use with --size 2000).
+(
+    preset: "mixed-test",
+    landform: (relief_m: 40.0, wavelength_m: 1200.0, octaves: 6, ridge_mix: 0.3, warp_m: 250.0,
+               tilt_m: 10.0, tilt_azimuth_deg: 90.0, base_m: 100.0),
+    erosion: (iterations: 3, k: 0.0004, m: 0.5, talus: 0.6, thermal_iterations: 4),
+    rivers: (min_area_m2: 400000.0, width_coef: 4.0, width_exp: 0.5, depth_coef: 0.8, depth_exp: 0.4, min_length_m: 300.0),
+    cover: (forest_fraction: 0.25, forest_wavelength_m: 600.0, marsh_moisture: 230, field_size_m: 180.0),
+    roads: (village_spacing_m: 900.0, village_radius_m: 110.0, edge_exits: 2),
+)
