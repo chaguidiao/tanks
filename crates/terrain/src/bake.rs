@@ -272,7 +272,11 @@ pub fn bake(pkg: &AuthoringPackage, td: &TerrainData, classes: &[MobilityClass])
                 if let Some(sid) = road_soil {
                     soil.data[k] = sid;
                 }
-                water.data[k] = 0.0; // implicit bridge / culvert
+            }
+            // Implicit bridge / culvert: the deck spans at least 1.5 cells either side of the
+            // centreline so the crossing is never narrower than a vehicle's tracking error.
+            if d <= half.max(cell * 1.5) {
+                water.data[k] = 0.0;
             }
         }
     }

@@ -117,3 +117,77 @@ pub fn landcover_view(lc: &Grid<u8>, td: &TerrainData) -> Vec<u8> {
     });
     out
 }
+
+/// Cell rectangle `[i0, i1) × [j0, j1)`.
+#[derive(Debug, Clone, Copy)]
+pub struct CellRect {
+    pub i0: usize,
+    pub j0: usize,
+    pub i1: usize,
+    pub j1: usize,
+}
+
+impl CellRect {
+    pub fn full(w: usize, h: usize) -> Self {
+        Self { i0: 0, j0: 0, i1: w, j1: h }
+    }
+    pub fn w(&self) -> usize {
+        self.i1 - self.i0
+    }
+    pub fn h(&self) -> usize {
+        self.j1 - self.j0
+    }
+}
+
+/// Default tactical base map: hypsometric tint × hillshade with land-cover cues drawn the
+/// topographic-map way (forest stipple, light village fill, flat water). `range` fixes the tint
+/// scale so partial updates (editor brushes) match the rest of the image. Output rows run
+/// north to south over `rect`.
+pub fn tactical(
+    hf: &Heightfield,
+    lc: &Grid<u8>,
+    water: &Grid<f32>,
+    td: &TerrainData,
+    range: (f32, f32),
+    rect: CellRect,
+) -> Vec<u8> {
+    const STOPS: [[f64; 3]; 4] = [[20.0, 30.0, 34.0], [38.0, 54.0, 52.0], [70.0, 80.0, 66.0], [108.0, 108.0, 90.0]];
+    const Z_EXAGGERATION: f64 = 3.0;
+    let (lo, hi) = range;
+    let span = ((hi - lo) as f64).max(1.0);
+    let az = 315f64.to_radians();
+    let alt = 45f64.to_radians();
+    let l = [libm::sin(az) * libm::cos(alt), libm::cos(az) * libm::cos(alt), libm::sin(alt)];
+    let (w, h) = (rect.w(), rect.h());
+    let mut out = vec![0u8; w * h * 4];
+    for j in rect.j0..rect.j1 {
+        let row = rect.j1 - 1 - j;
+        for i in rect.i0..rect.i1 {
+            let k = row * w + (i - rect.i0);
+            let t = ((hf.z.get(i, j) - lo) as f64 / span).clamp(0.0, 1.0) * 3.0;
+            let s = (t as usize).min(2);
+            let mut c = lerp3(STOPS[s], STOPS[s + 1], t - s as f64);
+            let (gx, gy) = hf.node_gradient(i, j);
+            let n = [-gx * Z_EXAGGERATION, -gy * Z_EXAGGERATION, 1.0];
+            let len = libm::sqrt(n[0] * n[0] + n[1] * n[1] + 1.0);
+            let d = ((n[0] * l[0] + n[1] * l[1] + n[2] * l[2]) / len).max(0.0);
+            let shade = (d / libm::sin(alt)).clamp(0.3, 1.25);
+            c = [c[0] * shade, c[1] * shade, c[2] * shade];
+            let def = td.landcover(lc.get(i, j));
+            if water.get(i, j) > 0.05 || def.is_water {
+                c = [44.0, 66.0, 84.0];
+            } else if def.is_forest {
+                c = [c[0] * 0.62 + 2.0, c[1] * 0.78 + 8.0, c[2] * 0.62 + 2.0];
+                if i % 3 == 0 && j % 3 == 0 {
+                    c = [c[0] * 0.45, c[1] * 0.6, c[2] * 0.45];
+                }
+            } else if def.name == "village" {
+                c = [c[0] * 0.6 + 40.0, c[1] * 0.6 + 38.0, c[2] * 0.6 + 36.0];
+            } else if def.name == "marsh" && (i + j) % 4 == 0 {
+                c = [c[0] * 0.8, c[1] * 0.9, c[2] * 1.05];
+            }
+            put(&mut out, k, [c[0].min(255.0) as u8, c[1].min(255.0) as u8, c[2].min(255.0) as u8]);
+        }
+    }
+    out
+}

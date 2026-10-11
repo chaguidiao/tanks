@@ -198,6 +198,30 @@ pub fn segment_time(speed: &Grid<u8>, cell: f64, a: Vec2, b: Vec2) -> Option<f64
     Some(t)
 }
 
+/// Lines offset ±0.75 cell either side of the segment must also be passable, so shortcuts keep
+/// clear of no-go edges (vehicles have width and do not track the line perfectly).
+fn has_clearance(speed: &Grid<u8>, cell: f64, a: Vec2, b: Vec2) -> bool {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let len = libm::sqrt(dx * dx + dy * dy);
+    if len < 1e-9 {
+        return true;
+    }
+    let (nx, ny) = (-dy / len * cell * 0.75, dx / len * cell * 0.75);
+    let n = libm::ceil(len / (cell * 0.5)).max(1.0) as usize;
+    for side in [-1.0, 1.0] {
+        // Skip the first and last samples: the ends are on the grid path already.
+        for k in 1..n {
+            let f = k as f64 / n as f64;
+            let (x, y) = (a[0] + f * dx + side * nx, a[1] + f * dy + side * ny);
+            let (i, j) = (libm::floor(x / cell) as i64, libm::floor(y / cell) as i64);
+            if speed.in_bounds(i, j) && speed.get(i as usize, j as usize) == 0 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Greedy string-pulling: skip intermediate points while the straight segment is passable and
 /// no slower than the grid path it replaces.
 fn smooth(speed: &Grid<u8>, cell: f64, pts: &[Vec2]) -> Vec<Vec2> {
@@ -215,7 +239,9 @@ fn smooth(speed: &Grid<u8>, cell: f64, pts: &[Vec2]) -> Vec<Vec2> {
         let mut j = i + 2;
         while j < pts.len() && j <= i + 400 {
             match segment_time(speed, cell, pts[i], pts[j]) {
-                Some(t) if t <= (cum[j] - cum[i]) * 1.01 + 0.05 => best = j,
+                Some(t) if t <= (cum[j] - cum[i]) * 1.01 + 0.05 && has_clearance(speed, cell, pts[i], pts[j]) => {
+                    best = j
+                }
                 _ => break,
             }
             j += 1;

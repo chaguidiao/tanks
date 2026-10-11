@@ -69,6 +69,10 @@ impl DataSet {
         Ok(Self { vehicles, terrain })
     }
 
+    pub fn load_scenario(root: &Path, id: &str) -> Result<ScenarioDef, DataError> {
+        load_ron(&root.join("scenarios").join(format!("{id}.ron")))
+    }
+
     pub fn vehicle(&self, id: &str) -> Option<&VehicleDef> {
         self.vehicles.iter().find(|v| v.id == id)
     }

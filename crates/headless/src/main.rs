@@ -169,6 +169,51 @@ fn print_info(b: &BakedMap) {
     println!("hash       input {:016x} output {:016x}", b.input_hash, b.output_hash());
 }
 
-fn run_scenario(_data: &std::path::Path, _ds: &DataSet, _a: &Args) -> Result<(), String> {
-    Err("run: not implemented yet".into())
+fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), String> {
+    use std::sync::Arc;
+
+    use sim::{Command, Event, SideId, Sim};
+
+    let id = a.req("--scenario")?;
+    let sc = DataSet::load_scenario(data, id).map_err(|e| e.to_string())?;
+    let map = Arc::new(workflow::ensure_map(data, ds, &sc.map, |s| eprintln!("{s}")).map_err(|e| e.to_string())?);
+    let mut sim = Sim::new(&sc, Arc::new(ds.clone()), map).map_err(|e| e.to_string())?;
+    let seconds: f64 = a.get("--seconds").unwrap_or("300").parse().map_err(|_| "bad --seconds")?;
+    let blue = SideId(0);
+    if let Some(m) = a.get("--move") {
+        let (x, y) = m.split_once(',').ok_or("--move expects x,y")?;
+        let dest = [x.parse::<f64>().map_err(|_| "bad x")?, y.parse::<f64>().map_err(|_| "bad y")?];
+        let unit = sim.perceived(blue).own.first().ok_or("no Blue units")?.id;
+        sim.submit(blue, Command::Move { unit, destination: dest, speed_limit_mps: None });
+    }
+    let t = Instant::now();
+    let ticks = (seconds * sim::TICK_HZ as f64) as u64;
+    for _ in 0..ticks {
+        for e in sim.step() {
+            let name = |u| sim.perceived(blue).unit(u).map_or("?".to_owned(), |o| o.callsign.clone());
+            let msg = match &e {
+                Event::RoutePlanned { length_m, .. } => format!("route planned, {length_m:.0} m"),
+                Event::NoRoute { .. } => "no route".into(),
+                Event::Arrived { .. } => "arrived".into(),
+                Event::Halted { .. } => "halted".into(),
+                Event::Stuck { .. } => "stuck".into(),
+                Event::OutOfFuel { .. } => "out of fuel".into(),
+            };
+            println!("t={:7.1}s  {:<4} {msg}", sim.time_s(), name(e.unit()));
+        }
+    }
+    let wall = t.elapsed().as_secs_f64();
+    for u in &sim.perceived(blue).own {
+        println!(
+            "{:<4} pos ({:7.1}, {:7.1})  speed {:4.1} m/s  fuel {:5.1} %",
+            u.callsign,
+            u.pos[0],
+            u.pos[1],
+            u.speed,
+            u.fuel_fraction * 100.0
+        );
+    }
+    println!("ticks {ticks}  wall {wall:.2} s  ({:.0}x real time)", seconds / wall.max(1e-9));
+    println!("state hash {:016x}", sim.state_hash());
+    Ok(())
 }

@@ -1,0 +1,29 @@
+// M1 test scenario: one Blue tank platoon on a generated farmland map. Order moves and watch
+// the vehicles route across country, along roads and over bridges.
+(
+    id: "m1-move",
+    name: "M1 - MOVEMENT",
+    date: (1990, 6, 15),
+    start_time_s: 21600, // 06:00
+    map: (id: "demo", recipe: "rolling-farmland", seed: 42, size_m: 8000.0),
+    seed: 1,
+    sides: [
+        (
+            name: "BLUE",
+            doctrine: "western-combined",
+            units: [
+                (callsign: "1-1", vehicle: "bulwark_a1", position: (1500.0, 1500.0), heading_deg: 45.0),
+                (callsign: "1-2", vehicle: "bulwark_a1", position: (1560.0, 1440.0), heading_deg: 45.0),
+                (callsign: "1-3", vehicle: "bulwark_a1", position: (1400.0, 1520.0), heading_deg: 45.0),
+                (callsign: "1-4", vehicle: "bulwark_a1", position: (1440.0, 1440.0), heading_deg: 45.0),
+            ],
+        ),
+        (
+            name: "RED",
+            doctrine: "generic-opfor",
+            units: [
+                (callsign: "201", vehicle: "kurgan_b", position: (6500.0, 6500.0), heading_deg: 225.0),
+            ],
+        ),
+    ],
+)
