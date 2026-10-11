@@ -143,6 +143,13 @@ pub fn step(
             if r > max_r {
                 continue;
             }
+            // Distant pairs are checked at 1 Hz (staggered), with the hazard over 1 s.
+            let stride: u64 = if r > 2500.0 { 4 } else { 1 };
+            let phase = (world.id[o].0 as u64 * 31 + world.id[t].0 as u64) % stride;
+            if !(tick / SENSOR_EVERY + phase).is_multiple_of(stride) {
+                continue;
+            }
+            let check_dt = SENSOR_DT * stride as f64;
             let heights = sample_heights(tdef);
             let s = cache.get(g, (world.id[o].0, world.id[t].0), opos, eye, tp.pos, &heights);
             let f = s.fraction();
@@ -182,7 +189,7 @@ pub fn step(
             let tau = m.acquire_tau_s.get();
             let hazard = |n50: f64| {
                 let lambda = ttpf(cycles, n50) * s.transmittance * cue / tau;
-                1.0 - libm::exp(-lambda * SENSOR_DT)
+                1.0 - libm::exp(-lambda * check_dt)
             };
             let sens = world.sensors[o].as_mut().expect("checked");
             match sens.tracks.iter_mut().find(|tr| tr.target == t) {

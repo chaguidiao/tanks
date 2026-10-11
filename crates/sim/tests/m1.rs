@@ -55,7 +55,10 @@ fn scenario(year: i32, pos: [f64; 2], heading_deg: f64) -> ScenarioDef {
                 heading_deg,
                 platoon: None,
             }],
+            ai: None,
         }],
+        objectives: vec![],
+        victory: None,
     }
 }
 

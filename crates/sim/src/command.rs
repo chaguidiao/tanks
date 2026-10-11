@@ -136,7 +136,7 @@ pub enum Event {
     },
     ScenarioEnd {
         winner: Option<SideId>,
-        reason: String,
+        reason: EndReason,
     },
 }
 
@@ -167,4 +167,14 @@ pub enum PlatoonReport {
         remaining: u8,
         of: u8,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EndReason {
+    /// The side lost its victory-condition fraction of tanks.
+    ForceDestroyed { side: SideId },
+    /// The attacker seized and held the objective.
+    ObjectiveSeized { side: SideId },
+    /// Time ran out; `holder` holds the objective (if any).
+    TimeLimit { holder: Option<SideId> },
 }

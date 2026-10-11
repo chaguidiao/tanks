@@ -16,7 +16,7 @@ use crate::ground::Ground;
 const EARTH_R: f64 = 6_371_000.0;
 const REFRACTION_K: f64 = 0.13;
 /// Micro-relief is evaluated within this distance of the observer and the target (m).
-const MICRO_RANGE: f64 = 300.0;
+const MICRO_RANGE: f64 = 150.0;
 /// Samples this close to either end are ignored (the vehicles' own footprints) (m).
 const END_CLEARANCE: f64 = 5.0;
 
@@ -54,11 +54,18 @@ pub fn sight(g: &Ground, from: Vec2, eye_agl: f64, to: Vec2, heights: &[f64]) ->
     if d < 2.0 * END_CLEARANCE {
         return Sight { visible, transmittance: 1.0 };
     }
-    let step = g.map.elevation.cell * 0.5;
-    let n = libm::ceil(d / step) as usize;
-    for k in 1..n {
-        let s = k as f64 * d / n as f64;
-        if s < END_CLEARANCE || s > d - END_CLEARANCE {
+    // Half-cell steps near the ends (micro-relief decides hull-down there), full cells between.
+    let fine = g.map.elevation.cell * 0.5;
+    let coarse = g.map.elevation.cell;
+    let mut s = 0.0;
+    loop {
+        let near_end = s < MICRO_RANGE || s > d - MICRO_RANGE;
+        let ds = if near_end { fine } else { coarse };
+        s += ds;
+        if s >= d - END_CLEARANCE {
+            break;
+        }
+        if s < END_CLEARANCE {
             continue;
         }
         let t = s / d;
@@ -85,7 +92,7 @@ pub fn sight(g: &Ground, from: Vec2, eye_agl: f64, to: Vec2, heights: &[f64]) ->
         if canopy > 0.0 && kk > 0.0 {
             let ray = z0 + (zg1 + heights.get(mid).copied().unwrap_or(0.0) - z0) * t;
             if ray < ground + canopy {
-                optical += kk * (d / n as f64);
+                optical += kk * ds;
             }
         }
     }

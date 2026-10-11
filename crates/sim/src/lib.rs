@@ -19,6 +19,7 @@ pub mod platoon;
 pub mod platoon_ai;
 pub mod sensors;
 pub mod vehicle;
+pub mod victory;
 pub mod world;
 
 use std::sync::Arc;
@@ -33,7 +34,7 @@ use terrain::hash::StableHasher;
 use terrain::path::Pathfinder;
 
 pub use ai::picture::{self as view, PerceivedWorld};
-pub use command::{Addressee, Command, Event, KillKind, PlatoonReport, PositionKind, TimedCommand};
+pub use command::{Addressee, Command, EndReason, Event, KillKind, PlatoonReport, PositionKind, TimedCommand};
 pub use world::{EntityId, SideId, World};
 
 pub type Vec2 = [f64; 2];
@@ -95,7 +96,13 @@ pub struct Sim {
     pictures: Vec<PerceivedWorld>,
     pub(crate) scenario: ScenarioDef,
     ended: bool,
+    commanders: Vec<Option<ai::commander::Commander>>,
+    ai_enabled: Vec<bool>,
+    victory: victory::VictoryState,
 }
+
+/// Commander AI decision interval: 0.2 Hz (DESIGN.md §4.1).
+pub const COMMANDER_EVERY: u64 = 100;
 
 impl Sim {
     pub fn new(scenario: &ScenarioDef, data: Arc<DataSet>, map: Arc<BakedMap>) -> Result<Self, String> {
@@ -191,6 +198,34 @@ impl Sim {
             sides.push(picture::SideState::new(SideId(si as u8), doctrine));
         }
         let n_sides = scenario.sides.len();
+        let commanders: Vec<Option<ai::commander::Commander>> = scenario
+            .sides
+            .iter()
+            .enumerate()
+            .map(|(si, side)| {
+                side.ai.as_ref().map(|plan| {
+                    let tasks = plan
+                        .tasks
+                        .iter()
+                        .map(|t| ai::commander::TaskState {
+                            platoons: t
+                                .platoons
+                                .iter()
+                                .filter_map(|cs| {
+                                    platoons.iter().find(|p| p.side.0 as usize == si && &p.callsign == cs).map(|p| p.id)
+                                })
+                                .collect(),
+                            mission: t.mission.clone(),
+                            start_s: t.start_s,
+                            phase: ai::commander::Phase::Waiting,
+                            broken: Vec::new(),
+                        })
+                        .collect();
+                    ai::commander::Commander::new(tasks)
+                })
+            })
+            .collect();
+        let ai_enabled = commanders.iter().map(|c| c.is_some()).collect();
         let mut sim = Self {
             tick: 0,
             map,
@@ -213,6 +248,9 @@ impl Sim {
             pictures: (0..n_sides).map(|s| PerceivedWorld::empty(SideId(s as u8))).collect(),
             scenario: scenario.clone(),
             ended: false,
+            commanders,
+            ai_enabled,
+            victory: victory::VictoryState::default(),
         };
         sim.update_pictures();
         Ok(sim)
@@ -254,6 +292,22 @@ impl Sim {
 
     pub fn ended(&self) -> bool {
         self.ended
+    }
+
+    /// Turn a side's commander AI on or off (the player's side normally runs without it).
+    pub fn set_ai_enabled(&mut self, side: SideId, on: bool) {
+        if let Some(v) = self.ai_enabled.get_mut(side.0 as usize) {
+            *v = on && self.commanders[side.0 as usize].is_some();
+        }
+    }
+
+    /// Commander phase per task, for display/debugging (AI side only).
+    pub fn commander_phases(&self, side: SideId) -> Vec<ai::commander::Phase> {
+        self.commanders
+            .get(side.0 as usize)
+            .and_then(|c| c.as_ref())
+            .map(|c| c.tasks.iter().map(|t| t.phase).collect())
+            .unwrap_or_default()
     }
 
     /// Queue an order over the radio net: it takes effect after the side's doctrinal order
@@ -301,6 +355,34 @@ impl Sim {
         self.pending = keep;
         for (_, c) in due {
             self.apply(&c, &mut events);
+        }
+
+        // 2a. Commander AI (orders go over the radio net like the player's).
+        if tick.is_multiple_of(COMMANDER_EVERY) {
+            for si in 0..self.commanders.len() {
+                if !self.ai_enabled[si] {
+                    continue;
+                }
+                let Some(cmdr) = self.commanders[si].as_mut() else { continue };
+                let orders = cmdr.step(&self.pictures[si], &self.sides[si].doctrine, &self.scenario.objectives);
+                let side = SideId(si as u8);
+                for o in orders {
+                    let cmd = match o {
+                        ai::commander::Order::Move { platoon, destination, formation, technique } => {
+                            Command::PlatoonMove { platoon, destination, formation: Some(formation), technique }
+                        }
+                        ai::commander::Order::Occupy { platoon, centre, radius, facing } => Command::OccupyPosition {
+                            platoon,
+                            centre,
+                            radius_m: radius,
+                            facing,
+                            kind: PositionKind::HullDown,
+                        },
+                        ai::commander::Order::Halt { platoon } => Command::Halt { to: Addressee::Platoon(platoon) },
+                    };
+                    self.incoming.push(TimedCommand { tick, side, cmd, immediate: tick == 0 });
+                }
+            }
         }
 
         // 2. Platoon AI.
@@ -421,6 +503,16 @@ impl Sim {
 
         // 8. Mobility.
         mobility::step(&mut self.world, &self.vehicles, &self.map, &self.data.terrain, &mut events);
+
+        // 9. Victory conditions (1 Hz).
+        if tick.is_multiple_of(PLATOON_AI_EVERY)
+            && !self.ended
+            && let Some(v) = self.scenario.victory.clone()
+            && let Some((winner, reason)) = self.victory.check(&self.world, &self.scenario, &v, tick as f64 * DT)
+        {
+            self.ended = true;
+            events.push(Event::ScenarioEnd { winner, reason });
+        }
 
         self.tick += 1;
         self.update_pictures();

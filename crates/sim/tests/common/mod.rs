@@ -55,9 +55,17 @@ pub fn scenario(start_time_s: u32, blue: Vec<UnitDef>, red: Vec<UnitDef>) -> Sce
         map: MapRef { id: "synthetic".into(), recipe: "mixed-test".into(), seed: 1, size_m: 0.0 },
         seed: 7,
         sides: vec![
-            SideDef { name: "BLUE".into(), doctrine: "western-combined".into(), tech_year: None, units: blue },
-            SideDef { name: "RED".into(), doctrine: "generic-opfor".into(), tech_year: None, units: red },
+            SideDef {
+                name: "BLUE".into(),
+                doctrine: "western-combined".into(),
+                tech_year: None,
+                units: blue,
+                ai: None,
+            },
+            SideDef { name: "RED".into(), doctrine: "generic-opfor".into(), tech_year: None, units: red, ai: None },
         ],
+        objectives: vec![],
+        victory: None,
     }
 }
 

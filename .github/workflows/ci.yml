@@ -33,6 +33,8 @@ jobs:
         run: |
           cargo run --release -p headless -- gen --recipe rolling-farmland --seed 42 --id demo
           cargo run --release -p headless -- run --scenario m1-move --seconds 300 --move 6000,5200
+          cargo run --release -p headless -- run --scenario m5-hold-the-village --seconds 2700
+          cargo run --release -p headless -- duel --trials 100 --out out/duel.csv
       - name: Client screenshots (GL 3.3 and GL 2.1 under Mesa llvmpipe)
         run: |
           mkdir -p out
@@ -42,7 +44,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: screenshots
-          path: out/*.png
+          path: |
+            out/*.png
+            out/*.csv
 
   other-os:
     strategy:

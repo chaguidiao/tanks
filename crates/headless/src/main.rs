@@ -14,6 +14,7 @@ const USAGE: &str = "usage: tanks-headless <command> [options]
   bake    --map <id>                                                   bake an authoring package
   render  --map <id> --layer <tint|shade|slope|traffic|landcover> [--class <vehicle>] [--downsample <n>] --out <png>
   info    --map <id>                                                   print map statistics
+  probe   --map <id> --at <x,y[;x,y..]>                                terrain at points
   run     --scenario <id> [--seconds <s>] [--move <x,y>]               run a scenario headless
   duel    [--shooter <id>] [--target <id>] [--ranges 500,1000,..] [--trials <n>] [--aspect front|side]
           [--out <csv>]                                                Monte-Carlo duel validation harness
@@ -112,6 +113,23 @@ fn run(cmd: &str, a: Args) -> Result<(), String> {
             eprintln!("wrote {}", out.display());
         }
         "run" => run_scenario(&data, &ds, &a)?,
+        "probe" => {
+            let id = a.req("--map")?;
+            let baked = BakedMap::load(&workflow::map_dir(&data, id).join("baked")).map_err(|e| e.to_string())?;
+            for xy in a.req("--at")?.split(';') {
+                let (x, y) = xy.split_once(',').ok_or("--at expects x,y[;x,y]")?;
+                let (x, y): (f64, f64) = (x.parse().map_err(|_| "bad x")?, y.parse().map_err(|_| "bad y")?);
+                let (i, j) = baked.elevation.cell_of(x, y);
+                let lc = ds.terrain.landcover(baked.landcover.get(i, j));
+                println!(
+                    "({x:.0}, {y:.0}) z {:.1} m  slope {:.0} %  {}  water {:.1} m",
+                    baked.elevation.height(x, y),
+                    baked.elevation.node_slope(i, j) * 100.0,
+                    lc.name,
+                    baked.water_depth.get(i, j)
+                );
+            }
+        }
         "duel" => duel(&ds, &a)?,
         _ => return Err(format!("unknown command '{cmd}'\n{USAGE}")),
     }
@@ -175,7 +193,7 @@ fn print_info(b: &BakedMap) {
 fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), String> {
     use std::sync::Arc;
 
-    use sim::{Command, SideId, Sim};
+    use sim::{Command, Event, SideId, Sim};
 
     let id = a.req("--scenario")?;
     let sc = DataSet::load_scenario(data, id).map_err(|e| e.to_string())?;
@@ -192,9 +210,15 @@ fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), St
     let t = Instant::now();
     let ticks = (seconds * sim::TICK_HZ as f64) as u64;
     for _ in 0..ticks {
+        if sim.ended() {
+            break;
+        }
         for e in sim.step() {
-            let msg = format!("{e:?}");
-            println!("t={:7.1}s  {msg}", sim.time_s());
+            let show =
+                matches!(e, Event::ScenarioEnd { .. } | Event::PlatoonReport { .. } | Event::Hit { kill: Some(_), .. });
+            if show {
+                println!("t={:7.1}s  {e:?}", sim.time_s());
+            }
         }
     }
     let wall = t.elapsed().as_secs_f64();
@@ -279,6 +303,7 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                             heading_deg: 0.0,
                             platoon: None,
                         }],
+                        ai: None,
                     },
                     SideDef {
                         name: "B".into(),
@@ -291,8 +316,11 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                             heading_deg: if side_on { 90.0 } else { 180.0 },
                             platoon: None,
                         }],
+                        ai: None,
                     },
                 ],
+                objectives: vec![],
+                victory: None,
             };
             let mut sim = Sim::new(&sc, data.clone(), map.clone())?;
             sim.submit_immediate(

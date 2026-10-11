@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use sim::view::{Condition, ContactLevel, PerceivedWorld, PlatoonId, Task, WeaponsStatus};
-use sim::{Addressee, Command, EntityId, Event, KillKind, PlatoonReport, PositionKind, SideId, Sim};
+use sim::{Addressee, Command, EndReason, EntityId, Event, KillKind, PlatoonReport, PositionKind, SideId, Sim};
 use sim_data::{DataSet, Formation, ScenarioDef, Technique};
 use terrain::BakedMap;
 use terrain::ground::Ground;
@@ -76,11 +76,14 @@ pub struct Game {
     prev: Vec<(EntityId, [f64; 2], f64)>,
     pub log: VecDeque<(String, String)>,
     bp_count: u32,
+    pub ended: Option<String>,
 }
 
 impl Game {
     pub fn new(scenario: ScenarioDef, ds: Arc<DataSet>, map: Arc<BakedMap>) -> Result<Self, String> {
-        let sim = Sim::new(&scenario, ds, map)?;
+        let mut sim = Sim::new(&scenario, ds, map)?;
+        // The player commands side 0; its commander AI (if the scenario has one) stays off.
+        sim.set_ai_enabled(SideId(0), false);
         let mut g = Self {
             sim,
             scenario,
@@ -97,6 +100,7 @@ impl Game {
             prev: Vec::new(),
             log: VecDeque::new(),
             bp_count: 0,
+            ended: None,
         };
         if let Some((id, p)) = g.picture().own.first().map(|u| (u.id, u.platoon)) {
             g.sel_unit = Some(id);
@@ -159,6 +163,10 @@ impl Game {
             }
         }
         if let Some(t) = radio_text(e, self.sim.perceived(self.side), self) {
+            if matches!(e, Event::ScenarioEnd { .. }) {
+                self.ended = Some(t.clone());
+                self.paused = true;
+            }
             self.radio(t);
         }
     }
@@ -606,6 +614,15 @@ impl Game {
         };
         f.text(&tool, 560.0, 8.0, style::FONT_L - 8, style::AMBER);
 
+        if let Some(end) = &self.ended {
+            let w = f.text_width(end, style::FONT_L) + 40.0;
+            let (x, y) = ((screen[0] - w) / 2.0, 60.0);
+            f.rect(x, y, w, 64.0, style::PANEL);
+            f.rect_lines(x, y, w, 64.0, style::AMBER);
+            f.text(end, x + 20.0, y + 12.0, style::FONT_L, style::AMBER);
+            f.text("F8 AFTER-ACTION REVIEW", x + 20.0, y + 40.0, style::FONT_L - 8, style::TEXT);
+        }
+
         // Unit / platoon panel.
         let pw = 300.0;
         let (px, py) = (screen[0] - pw - 10.0, 40.0);
@@ -809,7 +826,17 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                 PlatoonReport::Strength { remaining, of } => format!("{cs}: {remaining} OF {of} VEHICLES OPERATIONAL."),
             }
         }
-        Event::ScenarioEnd { reason, .. } => format!("ENDEX. {reason}"),
+        Event::ScenarioEnd { winner, reason } => {
+            let names = game.sim.side_names();
+            let name = |s: SideId| names.get(s.0 as usize).cloned().unwrap_or_default();
+            let why = match reason {
+                EndReason::ForceDestroyed { side } => format!("{} COMBAT INEFFECTIVE", name(*side)),
+                EndReason::ObjectiveSeized { side } => format!("OBJECTIVE SEIZED BY {}", name(*side)),
+                EndReason::TimeLimit { holder: Some(h) } => format!("TIME. OBJECTIVE HELD BY {}", name(*h)),
+                EndReason::TimeLimit { holder: None } => "TIME. OBJECTIVE CONTESTED".to_owned(),
+            };
+            format!("ENDEX. {why}. {} WINS.", winner.map_or("NO SIDE".into(), name))
+        }
         _ => return None,
     })
 }
