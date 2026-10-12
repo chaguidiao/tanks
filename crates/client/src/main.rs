@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! client [--scenario <id>] [--map <id>] [--edit] [--scenario-editor]
-//!        [--screenshot <png> [--frames <n>] [--order <unit-or-platoon>:<x>,<y>] [--bp <platoon>:<x>,<y>,<deg>]
+//!        [--screenshot <png> [--frames <n>] [--order <unit-or-platoon>:<x>,<y>[,<x>,<y>..]] [--bp <platoon>:<x>,<y>,<deg>]
 //!         [--pl -:<x>,<y>,<x>,<y>..] [--advance <s>] [--aar] [--save-replay <ron>]
 //!         [--zoom <m-per-px>] [--center <x>,<y>] [--layer relief|slope|traffic|cover]]
 //! ```
@@ -11,6 +11,7 @@ mod aar;
 mod editor;
 mod format;
 mod game;
+mod hud;
 mod render;
 mod scenedit;
 mod style;
@@ -25,10 +26,28 @@ use terragen::workflow;
 use terrain::{AuthoringPackage, BakedMap};
 
 use crate::editor::Editor;
-use crate::game::Game;
+use crate::game::{Game, GameAction};
+use crate::hud::{Button, Look, Rect};
 use crate::render::{Gfx, Input, Key};
 use crate::scenedit::ScenarioEditor;
-use crate::view::{BaseLayer, Camera, MapView};
+use crate::view::{BaseLayer, Camera, MapView, Minimap};
+
+/// Top-bar actions handled by the app (map layers, modes, help).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppAction {
+    Layer(BaseLayer),
+    Contours,
+    Grid,
+    TerrainEditor,
+    ScenarioEditor,
+    Help,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Clicked {
+    App(AppAction),
+    Game(GameAction),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -169,12 +188,12 @@ fn run() -> Result<(), String> {
                 ("--pl", _, pts) if pts.len() >= 4 && pts.len() % 2 == 0 => {
                     g.add_phase_line(pts.chunks(2).map(|c| [c[0], c[1]]).collect());
                 }
-                ("--order", Some(p), [x, y]) => {
-                    let t = g.technique;
-                    g.sim.submit(
-                        g.side,
-                        sim::Command::PlatoonMove { platoon: p, destination: [*x, *y], formation: None, technique: t },
-                    );
+                // `--order <platoon>:x,y[,x,y..]`: checkpoints, then the destination.
+                ("--order", Some(p), pts) if pts.len() >= 2 && pts.len() % 2 == 0 => {
+                    let mut pts: Vec<[f64; 2]> = pts.chunks(2).map(|c| [c[0], c[1]]).collect();
+                    let dest = pts.pop().expect("non-empty");
+                    g.sel_platoon = Some(p);
+                    g.issue_move(pts, dest);
                 }
                 ("--order", None, [x, y]) => {
                     let id = g
@@ -292,10 +311,48 @@ impl App {
     fn tick(&mut self) -> Result<(), String> {
         let inp = self.gfx.input();
         self.cam.screen = inp.screen;
-        let over_ui = match self.mode {
-            Mode::Game => self.game.as_ref().is_some_and(|g| g.over_ui(inp.mouse, inp.screen)),
-            Mode::Editor => self.editor.as_ref().is_some_and(|e| e.over_ui(inp.mouse)),
-            Mode::Scenario => self.scenario_editor.as_ref().is_some_and(|e| e.over_ui(inp.mouse)),
+        let (app_buttons, game_buttons) = self.buttons(inp.screen);
+        let clicked = hud::clicked(&app_buttons, inp.mouse, inp.left_pressed)
+            .map(Clicked::App)
+            .or_else(|| hud::clicked(&game_buttons, inp.mouse, inp.left_pressed).map(Clicked::Game));
+        let minimap = self.minimap(inp.screen);
+        let in_minimap = minimap.is_some_and(|m| m.r.contains(inp.mouse));
+        let over_ui = inp.mouse[1] < hud::TOP_H
+            || inp.mouse[1] > inp.screen[1] - hud::STATUS_H
+            || hud::hovered(&game_buttons, inp.mouse).is_some()
+            || match self.mode {
+                Mode::Game => {
+                    self.game.as_ref().is_some_and(|g| g.panels(inp.screen).iter().any(|r| r.contains(inp.mouse)))
+                }
+                Mode::Editor => self.editor.as_ref().is_some_and(|e| e.over_ui(inp.mouse)),
+                Mode::Scenario => self.scenario_editor.as_ref().is_some_and(|e| e.over_ui(inp.mouse)),
+            };
+        // Minimap: click or drag to move the view.
+        if let Some(m) = minimap
+            && in_minimap
+            && (inp.left_pressed || inp.left_down)
+        {
+            self.cam.centre = m.to_world(inp.mouse);
+        }
+        if let Some(Clicked::App(a)) = clicked {
+            match a {
+                AppAction::Layer(b) => self.view.base = b,
+                AppAction::Contours => self.view.contours = !self.view.contours,
+                AppAction::Grid => self.view.grid = !self.view.grid,
+                AppAction::Help => self.help = !self.help,
+                AppAction::TerrainEditor => match self.mode {
+                    Mode::Editor => self.leave_editor()?,
+                    _ => {
+                        self.scenario_editor = None;
+                        self.enter_editor()?
+                    }
+                },
+                AppAction::ScenarioEditor => self.toggle_scenario_editor(),
+            }
+        }
+        let game_click = match clicked {
+            Some(Clicked::Game(a)) => Some(a),
+            _ => None,
         };
 
         // Camera: wheel zooms about the cursor; middle-drag or arrow keys pan.
@@ -338,13 +395,8 @@ impl App {
                 Mode::Scenario => {}
             }
         }
-        if inp.hit(Key::F(9))
-            && self.mode == Mode::Game
-            && let Some(g) = &mut self.game
-        {
-            g.paused = true;
-            self.scenario_editor = Some(ScenarioEditor::new(g.scenario.clone(), &self.ds));
-            self.mode = Mode::Scenario;
+        if inp.hit(Key::F(9)) && self.mode == Mode::Game && self.game.is_some() {
+            self.toggle_scenario_editor();
             self.last_input = inp;
             self.draw();
             return Ok(());
@@ -353,7 +405,10 @@ impl App {
         match self.mode {
             Mode::Game => {
                 if let Some(g) = &mut self.game {
-                    let fx = g.update(&inp, &self.cam, over_ui);
+                    let fx = g.update(&inp, &self.cam, over_ui || in_minimap, game_click);
+                    if let Some(c) = fx.center_on {
+                        self.cam.centre = c;
+                    }
                     if fx.clear_overlay {
                         self.view.overlay = None;
                     }
@@ -413,6 +468,82 @@ impl App {
         Ok(())
     }
 
+    fn toggle_scenario_editor(&mut self) {
+        match self.mode {
+            Mode::Scenario => {
+                // Leave without restarting the game (F9 in the scenario editor plays the edit).
+                self.scenario_editor = None;
+                self.mode = Mode::Game;
+            }
+            _ => {
+                if let Some(g) = &mut self.game {
+                    g.paused = true;
+                    self.scenario_editor = Some(ScenarioEditor::new(g.scenario.clone(), &self.ds));
+                    self.mode = Mode::Scenario;
+                }
+            }
+        }
+    }
+
+    /// Minimap (game mode only, not in the after-action review).
+    fn minimap(&self, screen: [f32; 2]) -> Option<Minimap> {
+        let g = self.game.as_ref()?;
+        if self.mode != Mode::Game || g.aar.is_some() {
+            return None;
+        }
+        Some(Minimap::new(hud::minimap_frame(screen), self.map.manifest.width_m(), self.map.manifest.height_m()))
+    }
+
+    /// Top-bar buttons of the app (right-aligned) and every game-mode button.
+    fn buttons(&self, screen: [f32; 2]) -> (Vec<Button<AppAction>>, Vec<Button<GameAction>>) {
+        let z = Rect::new(0.0, 0.0, 0.0, 0.0);
+        let b = |l: &str, a: AppAction| Button::new(z, Look::Bar, l, a);
+        let base = self.view.base;
+        let mut items = vec![
+            b("RELIEF", AppAction::Layer(BaseLayer::Tactical))
+                .key("F1")
+                .tip("BASE MAP: SHADED RELIEF AND LAND COVER")
+                .active(base == BaseLayer::Tactical),
+            b("SLOPE", AppAction::Layer(BaseLayer::Slope))
+                .key("F2")
+                .tip("BASE MAP: SLOPE")
+                .active(base == BaseLayer::Slope),
+            b("GO/NO-GO", AppAction::Layer(BaseLayer::Trafficability))
+                .key("F3")
+                .tip("BASE MAP: TRAFFICABILITY FOR THE FIRST VEHICLE TYPE")
+                .active(base == BaseLayer::Trafficability),
+            b("COVER", AppAction::Layer(BaseLayer::LandCover))
+                .key("F4")
+                .tip("BASE MAP: LAND COVER CLASSES")
+                .active(base == BaseLayer::LandCover),
+            b("CONTOURS", AppAction::Contours).key("F5").tip("CONTOUR LINES").active(self.view.contours),
+            b("GRID", AppAction::Grid).key("F6").tip("1 KM GRID").active(self.view.grid),
+        ];
+        if self.game.is_some() {
+            items.push(
+                b("TERRAIN EDIT", AppAction::TerrainEditor)
+                    .key("E")
+                    .tip("TERRAIN EDITOR (THE SCENARIO RESTARTS IF THE MAP CHANGES)")
+                    .active(self.mode == Mode::Editor),
+            );
+            items.push(
+                b("SCENARIO EDIT", AppAction::ScenarioEditor)
+                    .key("F9")
+                    .tip("SCENARIO EDITOR: PLACE UNITS, OBJECTIVES, DATE")
+                    .active(self.mode == Mode::Scenario),
+            );
+        }
+        items.push(b("HELP", AppAction::Help).key("F7").tip("KEYBOARD AND MOUSE REFERENCE").active(self.help));
+        let x = screen[0] - hud::bar_width(&items) - 6.0;
+        let mut app = Vec::new();
+        hud::bar_row(&mut app, x, items);
+        let game = match (&self.game, self.mode) {
+            (Some(g), Mode::Game) => g.buttons(screen),
+            _ => Vec::new(),
+        };
+        (app, game)
+    }
+
     fn save(&mut self) {
         let Some(ed) = &mut self.editor else { return };
         let dir = workflow::map_dir(&self.data_dir, &self.map_id);
@@ -434,6 +565,8 @@ impl App {
     }
 
     fn draw(&mut self) {
+        let (app_buttons, game_buttons) = self.buttons(self.last_input.screen);
+        let minimap = self.minimap(self.last_input.screen);
         let inp = &self.last_input;
         let (cam, view, map, ds) = (&self.cam, &self.view, &self.map, &self.ds);
         let (mode, game, editor, help) = (self.mode, &self.game, &self.editor, self.help);
@@ -454,27 +587,41 @@ impl App {
             {
                 e.draw_world(f, cam, inp.mouse);
             }
+            // Top bar (game state text is drawn by the game's own UI on top of it).
+            f.rect(0.0, 0.0, inp.screen[0], hud::TOP_H, style::PANEL);
+            f.line([0.0, hud::TOP_H], [inp.screen[0], hud::TOP_H], 1.0, style::PANEL_EDGE);
             match mode {
                 Mode::Game => {
                     if let Some(g) = game {
                         g.draw_ui(f, inp.screen);
                     }
+                    if let (Some(m), Some(g)) = (&minimap, game) {
+                        f.rect(m.r.x - 2.0, m.r.y - 2.0, m.r.w + 4.0, m.r.h + 4.0, style::PANEL);
+                        view.draw_minimap(f, m, cam);
+                        g.draw_minimap(f, m);
+                    }
                 }
                 Mode::Editor => {
+                    f.text("TERRAIN EDITOR", 10.0, 8.0, style::FONT_L - 4, style::AMBER);
                     if let Some(e) = editor {
                         e.draw_ui(f, inp.screen);
                     }
                 }
                 Mode::Scenario => {
+                    f.text("SCENARIO EDITOR", 10.0, 8.0, style::FONT_L - 4, style::AMBER);
                     if let Some(e) = scenario_editor {
                         e.draw_ui(f, inp.screen, ds);
                     }
                 }
             }
+            hud::draw(f, &game_buttons, inp.mouse);
+            hud::draw(f, &app_buttons, inp.mouse);
             status_line(f, inp, cam, map, ds, view.base);
             if help {
                 help_overlay(f, inp.screen);
             }
+            hud::tooltip(f, &app_buttons, inp.mouse, inp.screen);
+            hud::tooltip(f, &game_buttons, inp.mouse, inp.screen);
         });
     }
 }
@@ -509,19 +656,23 @@ fn status_line(f: &mut render::Frame, inp: &Input, cam: &Camera, map: &BakedMap,
 
 fn help_overlay(f: &mut render::Frame, screen: [f32; 2]) {
     let lines = [
-        "MAP     WHEEL ZOOM   MMB DRAG / ARROWS PAN",
+        "EVERY BUTTON SHOWS ITS HOTKEY; HOVER FOR A DESCRIPTION.",
+        "",
+        "MAP     WHEEL ZOOM   MMB DRAG / ARROWS PAN   CLICK/DRAG MINIMAP TO MOVE",
         "LAYERS  F1 RELIEF  F2 SLOPE  F3 GO/NO-GO  F4 LAND COVER  F5 CONTOURS  F6 GRID",
-        "GAME    LMB SELECT PLATOON (CTRL: SINGLE TANK)  RMB MOVE  CTRL+RMB ENGAGE CONTACT  TAB NEXT PLATOON",
-        "        F FORMATION  T TECHNIQUE  B BATTLE POSITION ([ ] RADIUS)  W WEAPONS CONTROL  H HALT",
-        "        SPACE PAUSE  1-4 SPEED X1 X2 X4 X8   V VIEWSHED  L LINE OF SIGHT",
-        "PLAN    ENTER EXECUTE (PLANNING PHASE)  G GRAPHICS (PL/OBJ/TRP)  K CONTINGENCY MODE FOR NEXT ORDER",
-        "        F8 AFTER-ACTION REVIEW (CTRL+R SAVE REPLAY)",
+        "SELECT  LMB PLATOON (CTRL: SINGLE TANK)  ROSTER / PANEL ROWS (CLICK AGAIN: CENTRE)  TAB NEXT  ESC CLEAR",
+        "MOVE    RMB MOVE   M MOVE TOOL   SHIFT+RMB ADD CHECKPOINT (RELEASE SHIFT TO SEND, APPENDS TO ROUTE)",
+        "        R ROUTE TOOL: LMB CHECKPOINTS, RMB DESTINATION, BKSP UNDO   H HALT",
+        "ORDERS  F FORMATION  T TECHNIQUE  B BATTLE POSITION ([ ] RADIUS)  W WEAPONS  A / CTRL+RMB ENGAGE",
+        "TIME    SPACE PAUSE  1-4 SPEED X1 X2 X4 X8   V VIEWSHED  L LINE OF SIGHT",
+        "PLAN    ENTER EXECUTE (PLANNING PHASE)  G GRAPHICS (PL/OBJ/TRP)  K TIMING OF THE NEXT ORDER",
+        "        RMB CANCELS A TARGETING TOOL   F8 AFTER-ACTION REVIEW (CTRL+R SAVE REPLAY)",
         "SCENARIO F9 EDIT/PLAY  P PLACE  LMB DRAG  R ROTATE  DEL REMOVE  TAB SIDE  V VEHICLE  N PLATOON",
         "        O OBJECTIVE  Y/U YEAR  T START TIME  CTRL+S SAVE",
         "EDITOR  E TOGGLE  1-4 BRUSHES  5 RIVER  6 ROAD  7 FOREST  8 BUILDING  DEL DELETE  [ ] RADIUS  - = RATE",
         "        CTRL+Z/Y UNDO/REDO  B BAKE  CTRL+S SAVE",
     ];
-    let (w, h) = (900.0, lines.len() as f32 * 20.0 + 20.0);
+    let (w, h) = (980.0, lines.len() as f32 * 20.0 + 20.0);
     let (x, y) = ((screen[0] - w) / 2.0, (screen[1] - h) / 2.0);
     f.rect(x, y, w, h, style::PANEL);
     f.rect_lines(x, y, w, h, style::PANEL_EDGE);

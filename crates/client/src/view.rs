@@ -6,7 +6,8 @@ use terrain::contour::ContourKind;
 use terrain::features::RoadClass;
 use terrain::shade::{self, CellRect};
 
-use crate::render::{Frame, Gfx, P2, Tex};
+use crate::hud::Rect;
+use crate::render::{Frame, Gfx, P2, Rgba, Tex};
 use crate::style;
 
 #[derive(Debug, Clone, Copy)]
@@ -56,6 +57,31 @@ impl Camera {
     pub fn fit(&mut self, w_m: f64, h_m: f64) {
         self.centre = [w_m / 2.0, h_m / 2.0];
         self.mpp = (w_m / self.screen[0] as f64).max(h_m / self.screen[1] as f64) * 1.05;
+    }
+}
+
+/// Overview map: the whole terrain fitted (aspect kept) into a screen frame.
+#[derive(Debug, Clone, Copy)]
+pub struct Minimap {
+    /// Image rectangle on screen (inside the frame).
+    pub r: Rect,
+    pub w_m: f64,
+    pub h_m: f64,
+}
+
+impl Minimap {
+    pub fn new(frame: Rect, w_m: f64, h_m: f64) -> Self {
+        let s = (frame.w as f64 / w_m).min(frame.h as f64 / h_m);
+        let (w, h) = ((w_m * s) as f32, (h_m * s) as f32);
+        Self { r: Rect::new(frame.x + (frame.w - w) / 2.0, frame.y + (frame.h - h) / 2.0, w, h), w_m, h_m }
+    }
+
+    pub fn to_px(self, p: [f64; 2]) -> P2 {
+        [self.r.x + (p[0] / self.w_m) as f32 * self.r.w, self.r.y + self.r.h - (p[1] / self.h_m) as f32 * self.r.h]
+    }
+
+    pub fn to_world(self, s: P2) -> [f64; 2] {
+        [((s[0] - self.r.x) / self.r.w) as f64 * self.w_m, ((self.r.y + self.r.h - s[1]) / self.r.h) as f64 * self.h_m]
     }
 }
 
@@ -196,6 +222,20 @@ impl MapView {
         }
     }
 
+    /// The current base layer, whole map, into the minimap; plus the camera's view rectangle.
+    pub fn draw_minimap(&self, f: &mut Frame, m: &Minimap, cam: &Camera) {
+        if let Some(t) = &self.textures[slot(self.base)] {
+            f.texture(t, m.r.x, m.r.y, m.r.w, m.r.h, Rgba(200, 200, 200, 255));
+        }
+        f.rect_lines(m.r.x, m.r.y, m.r.w, m.r.h, style::PANEL_EDGE);
+        let v = cam.view();
+        let a = m.to_px([v[0].max(0.0), v[3].min(m.h_m)]);
+        let b = m.to_px([v[2].min(m.w_m), v[1].max(0.0)]);
+        if b[0] > a[0] && b[1] > a[1] {
+            f.rect_lines(a[0], a[1], b[0] - a[0], b[1] - a[1], style::SELECT);
+        }
+    }
+
     fn draw_contours(&self, f: &mut Frame, cam: &Camera, baked: &BakedMap) {
         let v = cam.view();
         let show_inter = cam.mpp < 10.0;
@@ -296,7 +336,13 @@ fn draw_grid(f: &mut Frame, cam: &Camera, w_m: f64, h_m: f64) {
         let a = cam.to_screen([x, 0.0f64.max(v[1])]);
         let b = cam.to_screen([x, h_m.min(v[3])]);
         f.line(a, b, 1.0, style::GRID);
-        f.text(&format!("{:02}", (x / 1000.0) as i64), a[0] + 2.0, 26.0, style::FONT, style::GRID_LABEL);
+        f.text(
+            &format!("{:02}", (x / 1000.0) as i64),
+            a[0] + 2.0,
+            crate::hud::TOP_H + 4.0,
+            style::FONT,
+            style::GRID_LABEL,
+        );
         x += step;
     }
     let mut y = (v[1].max(0.0) / step).floor() * step;

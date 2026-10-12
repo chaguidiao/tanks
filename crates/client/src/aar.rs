@@ -233,9 +233,9 @@ impl AarView {
             t % 60.0,
             if self.playing { "PLAYING X10" } else { "" }
         );
-        f.text(&head, 10.0, 6.0, style::FONT_L - 6, style::AMBER);
+        f.text(&head, 10.0, crate::hud::TOP_H + 8.0, style::FONT_L - 6, style::AMBER);
         // Statistics panel.
-        let (px, py, pw) = (screen[0] - 330.0, 40.0, 320.0);
+        let (px, py, pw) = (screen[0] - 330.0, crate::hud::TOP_H + 36.0, 320.0);
         let mut lines: Vec<(String, Rgba)> = Vec::new();
         for (i, s) in rec.stats.iter().enumerate() {
             let c = if i == 0 { style::FRIENDLY } else { style::HOSTILE };

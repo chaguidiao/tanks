@@ -49,13 +49,19 @@ tools/dev/devbox.sh run cargo run --release -p headless -- render --map demo --l
 tools/dev/devbox.sh run cargo run --release -p headless -- run --scenario m1-move --seconds 600 --move 6000,5200
 ```
 
-Client keys: F7 shows help. Game: LMB select, RMB move, H halt, Space pause, 1–4 speed. E toggles the
-terrain editor (1–4 brushes, 5 river, 6 road, 7 forest, Ctrl+S save).
+Client: every control is a button (top bar, roster, command card) that shows its hotkey; hover for a
+tooltip, F7 for the full key list. Game: LMB select, RMB move, Shift+RMB add route checkpoints (release
+Shift to send), H halt, Space pause, 1–4 speed. E toggles the terrain editor (1–4 brushes, 5 river,
+6 road, 7 forest, Ctrl+S save).
 
 Headless rendering (screenshots without a display, Mesa llvmpipe):
 ```bash
 tools/dev/devbox.sh run xvfb-run -a -s "-screen 0 1600x900x24" cargo run -p client -- --order 1-1:3000,2600 --advance 60 --screenshot out/m1.png
+# platoon route with checkpoints: --order <platoon>:cp1x,cp1y,...,destx,desty
+tools/dev/devbox.sh run bash -c 'xvfb-run -a -s "-screen 0 1600x900x24" target/debug/client --scenario m5-hold-the-village --order 1:5200,4300,5800,3900,5400,3300 --advance 60 --screenshot out/route.png; true'
 ```
+If you wrap `xvfb-run` in `bash -c`, end the script with `; true`: otherwise bash execs `xvfb-run` as
+the container's PID 1, where it can miss Xvfb's ready signal and hang forever.
 
 ## Testing old-GPU compatibility
 - **OpenGL 2.1 build**: `cargo build -p client --no-default-features --features gl21` (use a separate `CARGO_TARGET_DIR`, e.g. `target/gl21`, to avoid rebuilding raylib each switch).

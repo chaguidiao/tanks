@@ -9,6 +9,15 @@ pub const PANEL_EDGE: Rgba = Rgba(60, 80, 70, 255);
 pub const TEXT: Rgba = Rgba(170, 196, 168, 255);
 pub const TEXT_DIM: Rgba = Rgba(110, 130, 112, 255);
 pub const AMBER: Rgba = Rgba(214, 170, 90, 255);
+/// Disabled controls.
+pub const TEXT_OFF: Rgba = Rgba(70, 82, 72, 255);
+
+// HUD controls: flat, dark, outlined; the active state uses the selection colour (and an
+// outline change), so it does not rely on colour alone.
+pub const BUTTON: Rgba = Rgba(20, 28, 30, 240);
+pub const BUTTON_HOVER: Rgba = Rgba(32, 44, 44, 245);
+pub const BUTTON_ACTIVE: Rgba = Rgba(48, 52, 36, 250);
+pub const TOOLTIP: Rgba = Rgba(8, 12, 14, 245);
 
 pub const CONTOUR_INDEX: Rgba = Rgba(150, 140, 104, 200);
 pub const CONTOUR: Rgba = Rgba(120, 116, 90, 140);
@@ -26,9 +35,12 @@ pub const FOREST_EDGE: Rgba = Rgba(110, 150, 110, 200);
 pub const FRIENDLY: Rgba = Rgba(110, 170, 210, 255);
 pub const HOSTILE: Rgba = Rgba(210, 110, 100, 255);
 pub const ROUTE: Rgba = Rgba(110, 170, 210, 160);
+/// Route being drafted (not yet sent).
+pub const ROUTE_DRAFT: Rgba = Rgba(230, 200, 120, 220);
 pub const SELECT: Rgba = Rgba(230, 220, 160, 255);
 
 pub const EDIT_CURSOR: Rgba = Rgba(230, 200, 120, 200);
 
 pub const FONT: i32 = 10;
+pub const FONT_S: i32 = 12;
 pub const FONT_L: i32 = 20;

@@ -51,6 +51,7 @@ pub struct Input {
     pub middle_down: bool,
     pub mouse_delta: P2,
     pub ctrl: bool,
+    pub shift: bool,
     /// Keys pressed this frame.
     pub pressed: Vec<Key>,
     /// Keys held down (navigation keys only).
@@ -178,6 +179,7 @@ impl Gfx {
             middle_down: rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_MIDDLE),
             mouse_delta: [d.x, d.y],
             ctrl: rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL) || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL),
+            shift: rl.is_key_down(KeyboardKey::KEY_LEFT_SHIFT) || rl.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT),
             screen: [rl.get_screen_width() as f32, rl.get_screen_height() as f32],
             frame_time: rl.get_frame_time(),
             ..Default::default()

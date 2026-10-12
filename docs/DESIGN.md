@@ -398,27 +398,33 @@ Packs can also carry era-dependent variants, e.g., a modern pack that assumes a 
 - **Effects**: minimal. Optional faint scanline/phosphor glow toggle. Shell traces as short thin lines; hits as small flash marks; destroyed units as symbol with an X.
 - **Symbols**: NATO frames at platoon level when zoomed out, individual vehicles when zoomed in (aggregation by zoom). Implemented natively as vector primitives (the needed 2525D/APP-6D subset); **milsymbol** (MIT) is a visual reference.
 
-### 10.2 Screen layout (desktop, 1920×1080 baseline)
+### 10.2 Screen layout (desktop, 1600×900 minimum)
+Borrowed from RTS conventions (StarCraft / Command & Conquer): every order is a visible button that also shows its hotkey, so the game is learnable with the mouse alone and fast with the keyboard.
 ```
-┌──────────────────────────────────────────────────────────────┬───────────────┐
-│ TOP BAR: scenario clock (local time), sim speed, PAUSE, weather/light       │
-├──────────────────────────────────────────────────────────────┬───────────────┤
-│                                                              │ UNIT PANEL    │
-│                  TACTICAL MAP                                │  Platoon/tank │
-│    contours · grid · graphics · tracks · range fans          │  ACE status   │
-│                                                              │  damage, crew │
-│                                                              │  current task │
-├──────────────────────────────────────────────────────────────┼───────────────┤
-│ RADIO LOG (terse, timestamped, filterable by net)            │ ORDER BUILDER │
-└──────────────────────────────────────────────────────────────┴───────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ TOP BAR: clock · state · EXECUTE / PAUSE · X1 X2 X4 X8 · AAR │ map layers · editors · HELP │
+├────────────┬─────────────────────────────────────────────────┬───────────────┤
+│ ORDER OF   │              (tool prompt, centred)              │ SELECTION     │
+│ BATTLE     │                                                  │ platoon task, │
+│ (roster)   │                 TACTICAL MAP                     │ route, member │
+│            │   contours · grid · graphics · routes + CPs      │ rows (click → │
+│            │                                                  │ single tank)  │
+├──────────┬─┴──────────────────────────────────────┬──────────┴───────────────┤
+│ MINIMAP  │ RADIO NET (terse, timestamped)          │ COMMAND CARD 5 × 3       │
+│          │                                         │ (sub-card while placing) │
+├──────────┴─────────────────────────────────────────┴──────────────────────────┤
+│ STATUS: cursor grid, elevation, slope, land cover · layer · m/px               │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
+Command card rows: orders (move, route, halt, battle position, engage), posture (formation, technique, weapons control, timing, next platoon), planning tools (phase line, objective, TRP, viewshed, LOS). While a route, phase line or battle position is being placed, the card swaps to a sub-card (send/finish, undo point, radius, cancel). Hovering any button shows a tooltip with its hotkey.
 
 ### 10.3 Interaction
-- Select unit(s) → right-click map or drag a polygon → **radial/context menu of orders** valid for that geometry → order panel shows parameters with sensible defaults → *Issue* (or *Issue on trigger*).
-- Orders queue per platoon, visible as graphics on the map (dashed = planned, solid = executing).
+- Select a platoon (map, roster or Tab) → right-click the map to move, or pick an order on the command card and click the map (targeting mode; right click or Esc cancels). Timing (K) makes the next order a contingency (on enemy crossing the last PL, or in 5 min).
+- **Routes with checkpoints**: Shift+right-click adds checkpoints (appending to the platoon's current route) and the route is sent as one order when Shift is released; or the ROUTE tool: left-click checkpoints, right-click the destination. One radio order carries the whole route (`via` on `Move`/`PlatoonMove`); the platoon plans leg by leg, keeps formation through the checkpoints and, after a contact drill, resumes with only the checkpoints not yet passed.
+- Orders are visible as graphics on the map (dashed = sent / not yet acknowledged, solid = executing), with numbered checkpoints and an X at the destination.
 - **Auto-pause** options: on first contact, unit destroyed, unit requests orders, order complete.
 - Tools: LOS check (point-to-point with profile chart), viewshed from point at chosen eye height, range ruler (metres + mils + bearing), dead-ground shading.
-- Keyboard-first: space = pause, 1–4 speed, hotkeys for orders, Tab cycles units.
+- Mouse or keyboard: space = pause, 1–4 speed, a hotkey for every card button, Tab cycles platoons; clicking a selected roster entry centres the map; minimap click/drag pans.
 - **After-action review**: timeline scrubber, ground truth toggle, LOS lines of every shot, statistics (detections first, rounds fired, hits, Pk by range).
 
 ### 10.4 Audio
@@ -483,6 +489,8 @@ Sparse: radio clicks, squelch, terse synthesised or recorded callouts (optional)
 | M5 | Scenario objectives, victory conditions (force destroyed, objective seized and held 2 min, time limit with defender tie-break) and per-side AI plans; commander AI (`ai::commander`, 0.2 Hz) reading only the side's picture: attack template march → pre-battle → battle formation → consolidate with break-off on losses, defend template; orders go over the radio with delay; scenario `m5-hold-the-village` playable start to finish (also headless with both AIs) | Re-planning/COA choice (HTN/utility), reserves and counter-attacks, OPFOR reconnaissance, artillery preparation, Blue auto-commander option in the UI |
 | M6 | Planning phase (clock stopped at H-hour; orders, graphics and contingencies apply at once, ENTER executes); control measures drawn in the client (phase lines, objectives, TRPs, battle positions) and held in each side's picture; triggers (enemy crosses PL, platoon crosses PL, at time) that release orders as code words; replays = scenario + player command log (`sim::Replay`, CTRL+R in the AAR, `tanks-headless replay` verifies the hash); AAR with timeline scrub over recorded truth frames, shots and per-side stats (rounds/hits/kills/losses, first contact, hits by range band); scenario editor (F9: place/drag/rotate/delete units, platoons, vehicle by in-service year, objectives, date, start time, save to `data/scenarios/<id>-custom.ron`, play); generated village buildings (footprints in `buildings.geojson`, baked to a height grid that blocks LOS and movement); terrain editor building tool and feature delete | Town blocks/streets beyond villages, building damage, AI use of buildings, AAR replay by re-simulation (frames are recorded live), graphics in the AAR, editing AI plans and victory conditions in the scenario editor, trigger/graphic editing after placement, PL-relative report text |
 
+**UX pass (2026-10-12, after M6):** clickable top bar (time control, map layers, editors, help), order-of-battle roster, selection panel with clickable vehicle rows, StarCraft-style command card with hotkey labels, tooltips and placement sub-cards, minimap, wrapped radio net; multi-checkpoint routes (sim `via`, see §10.3). Deferred: box/multi-platoon selection, control groups, a real order queue (sequential *different* orders, e.g. move then occupy BP), auto-pause options, LOS profile chart.
+
 **Suggested start for M7 (v1.0):** content first. Add Modern-era vehicles and sensors (thermal sights, APFSDS generations) as data with sources, 5–8 scenarios across both eras using the scenario editor, then packaging (release builds per OS with `data/` alongside). Keep re-running the duel harness when adding vehicles.
 
 ---
@@ -505,6 +513,7 @@ Sparse: radio clicks, squelch, terse synthesised or recorded callouts (optional)
 | 13 | Generator randomness | `terragen` uses position-keyed hashing per stage (no RNG streams), so per-pixel stages run on threads with identical results |
 | 14 | Replay input | A replay holds only externally given commands (`generated == false`) plus the sides a human played; AI and trigger orders are regenerated by re-simulation. Control measures carry no radio delay and draw no random numbers, so `Sim::settle` may apply them during the planning phase without changing replay results |
 | 15 | Buildings | Footprints are authored features; the baker rasterises them to a building-height grid (`buildings.bin`) used by LOS (opaque to roof height) and as NO-GO in every mobility raster |
+| 16 | Multi-point routes | A route with checkpoints is **one** order (`via: Vec<Vec2>` on `Move`/`PlatoonMove`, omitted from RON when empty so old replays load unchanged), not a client-side queue of moves: it crosses the radio once, replays deterministically and the platoon AI owns resumption after contact. Legs are planned separately (`Pathfinder::find_via`) so checkpoints are actually visited |
 
 ### Remaining open questions
 None blocking. Development environment: see `docs/DEVELOPMENT.md`.

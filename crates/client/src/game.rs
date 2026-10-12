@@ -17,10 +17,11 @@ use terrain::ground::Ground;
 
 use crate::aar::{AarView, Recorder};
 use crate::format;
+use crate::hud::{self, Button, Look, Rect, TOP_H};
 use crate::render::{Frame, Input, Key, P2, Rgba};
 use crate::style;
 use crate::symbols;
-use crate::view::Camera;
+use crate::view::{Camera, Minimap};
 
 /// Time compression steps (DESIGN.md §2.1).
 pub const SPEEDS: [u32; 4] = [1, 2, 4, 8];
@@ -31,6 +32,13 @@ const AGGREGATE_MPP: f64 = 7.0;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Tool {
     None,
+    /// Move: the next left click is the destination.
+    Move,
+    /// Route with checkpoints: left clicks add checkpoints (in `Game::draft`), right click or
+    /// Enter adds the destination and sends.
+    Route,
+    /// Engage: the next left click picks a contact.
+    Engage,
     /// Battle position: centre chosen, waiting for the threat direction click.
     BattlePosition {
         centre: Option<[f64; 2]>,
@@ -65,27 +73,77 @@ pub enum OrderMode {
     InFiveMinutes,
 }
 
+/// Commands on the command card; each also has a hotkey.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cmd {
+    Move,
+    Route,
+    Halt,
+    BattlePosition,
+    Engage,
+    Formation,
+    Technique,
+    Weapons,
+    Contingency,
+    NextPlatoon,
+    PhaseLine,
+    Objective,
+    Trp,
+    Viewshed,
+    Los,
+    /// Finish the route or phase line being drawn.
+    Send,
+    UndoPoint,
+    Cancel,
+    RadiusDown,
+    RadiusUp,
+}
+
+/// What a HUD click or hotkey asks the game to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameAction {
+    Pause,
+    Speed(usize),
+    Execute,
+    Aar,
+    SelectPlatoon(PlatoonId),
+    SelectUnit(EntityId),
+    Cmd(Cmd),
+}
+
 const PL_NAMES: [&str; 8] = ["RED", "BLUE", "GREEN", "AMBER", "BLACK", "WHITE", "GOLD", "SILVER"];
 
 /// A graphic the player drew with an order (dashed until acknowledged).
 #[derive(Debug, Clone)]
 pub struct OrderGraphic {
     pub platoon: Option<PlatoonId>,
+    pub unit: Option<EntityId>,
     pub kind: GraphicKind,
     pub acknowledged: bool,
 }
 
 #[derive(Debug, Clone)]
 pub enum GraphicKind {
-    Bp { centre: [f64; 2], radius: f64, facing: f64, label: String },
+    Bp {
+        centre: [f64; 2],
+        radius: f64,
+        facing: f64,
+        label: String,
+    },
+    /// Route sent but not yet received: start, checkpoints, destination.
+    Route {
+        points: Vec<[f64; 2]>,
+    },
 }
 
-/// Side effects for the app (textures etc.).
+/// Side effects for the app (textures, camera etc.).
 #[derive(Default)]
 pub struct GameFx {
     /// Viewshed overlay: (rgba, w, h, origin x, origin y, step m).
     pub viewshed: Option<(Vec<u8>, usize, usize, f64, f64, f64)>,
     pub clear_overlay: bool,
+    /// Centre the camera here.
+    pub center_on: Option<[f64; 2]>,
 }
 
 pub struct Game {
@@ -100,6 +158,9 @@ pub struct Game {
     pub tool: Tool,
     pub bp_radius: f64,
     pub graphics: Vec<OrderGraphic>,
+    /// Route being drafted: checkpoints (and, once sent, the destination). Built with
+    /// Shift+right click (sent when Shift is released) or with the ROUTE tool.
+    pub draft: Vec<[f64; 2]>,
     acc: f64,
     prev: Vec<(EntityId, [f64; 2], f64)>,
     pub log: VecDeque<(String, String)>,
@@ -130,6 +191,7 @@ impl Game {
             tool: Tool::None,
             bp_radius: 250.0,
             graphics: Vec::new(),
+            draft: Vec::new(),
             acc: 0.0,
             prev: Vec::new(),
             log: VecDeque::new(),
@@ -147,7 +209,9 @@ impl Game {
         }
         g.capture_prev();
         let name = g.scenario.name.clone();
-        g.radio(format!("{name}. PLANNING: ISSUE ORDERS, DRAW GRAPHICS (G), ENTER TO EXECUTE. F7 HELP."));
+        g.radio(format!(
+            "{name}. PLANNING: ISSUE ORDERS, DRAW GRAPHICS, THEN EXECUTE (ENTER). HOVER A BUTTON FOR HELP, F7 KEYS."
+        ));
         Ok(g)
     }
 
@@ -180,7 +244,84 @@ impl Game {
     }
 
     pub fn order_move(&mut self, unit: EntityId, dest: [f64; 2]) {
-        self.order(Command::Move { unit, destination: dest, speed_limit_mps: None });
+        self.order(Command::Move { unit, destination: dest, via: Vec::new(), speed_limit_mps: None });
+    }
+
+    /// Centre of the selection's operational vehicles (platoon or single unit).
+    fn selection_centre(&self) -> Option<[f64; 2]> {
+        let pic = self.picture();
+        let ids: Vec<EntityId> = match (self.sel_platoon, self.sel_unit) {
+            (Some(p), _) => pic.platoon(p)?.members.clone(),
+            (None, Some(u)) => vec![u],
+            _ => return None,
+        };
+        let ps: Vec<[f64; 2]> = ids
+            .iter()
+            .filter_map(|m| pic.unit(*m))
+            .filter(|u| u.condition != Condition::Destroyed)
+            .map(|u| u.pos)
+            .collect();
+        if ps.is_empty() {
+            return None;
+        }
+        let n = ps.len() as f64;
+        Some([ps.iter().map(|p| p[0]).sum::<f64>() / n, ps.iter().map(|p| p[1]).sum::<f64>() / n])
+    }
+
+    /// Move the selection to `dest` through checkpoints `via` (route with checkpoints).
+    pub fn issue_move(&mut self, via: Vec<[f64; 2]>, dest: [f64; 2]) {
+        let start = self.selection_centre();
+        let cps: Vec<String> =
+            via.iter().enumerate().map(|(i, p)| format!("CP {} GRID {}", i + 1, format::grid(*p))).collect();
+        let route_txt = if cps.is_empty() { String::new() } else { format!(" VIA {},", cps.join(", ")) };
+        let mut points: Vec<[f64; 2]> = start.into_iter().collect();
+        points.extend(via.iter().copied());
+        points.push(dest);
+        match (self.sel_platoon, self.sel_unit) {
+            (Some(p), _) => {
+                let technique = self.technique;
+                self.graphics.retain(|g| g.platoon != Some(p));
+                self.graphics.push(OrderGraphic {
+                    platoon: Some(p),
+                    unit: None,
+                    kind: GraphicKind::Route { points },
+                    acknowledged: false,
+                });
+                let cs = self.platoon_cs(p);
+                self.radio(format!(
+                    "TO {cs}: MOVE{route_txt} TO GRID {}, {}.",
+                    format::grid(dest),
+                    format_technique(technique)
+                ));
+                self.order(Command::PlatoonMove { platoon: p, destination: dest, via, formation: None, technique });
+            }
+            (None, Some(u)) => {
+                self.graphics.retain(|g| g.unit != Some(u));
+                self.graphics.push(OrderGraphic {
+                    platoon: None,
+                    unit: Some(u),
+                    kind: GraphicKind::Route { points },
+                    acknowledged: false,
+                });
+                if !cps.is_empty() {
+                    let cs = self.picture().unit(u).map_or("?".into(), |x| x.callsign.clone());
+                    self.radio(format!("TO {cs}: MOVE{route_txt} TO GRID {}.", format::grid(dest)));
+                }
+                self.order(Command::Move { unit: u, destination: dest, via, speed_limit_mps: None });
+            }
+            _ => {}
+        }
+    }
+
+    /// Send the drafted route: the last point is the destination.
+    fn send_route(&mut self) {
+        let mut pts = std::mem::take(&mut self.draft);
+        if let Some(dest) = pts.pop() {
+            self.issue_move(pts, dest);
+        }
+        if self.tool == Tool::Route {
+            self.tool = Tool::None;
+        }
     }
 
     /// Most recently drawn phase line (trigger reference).
@@ -206,7 +347,7 @@ impl Game {
                     self.radio(format!("CONTINGENCY SET: ON ENEMY CROSSING {label}."));
                 }
                 None => {
-                    self.radio("NO PHASE LINE DRAWN (G). ORDER SENT NOW.".into());
+                    self.radio("NO PHASE LINE DRAWN. ORDER SENT NOW.".into());
                     self.sim.submit(self.side, cmd);
                 }
             },
@@ -235,12 +376,18 @@ impl Game {
     }
 
     fn on_event(&mut self, e: &Event) {
-        if let Event::OrderReceived { side, to: Addressee::Platoon(p) } = e
-            && *side == self.side
-        {
-            for g in self.graphics.iter_mut().filter(|g| g.platoon == Some(*p)) {
-                g.acknowledged = true;
+        match e {
+            Event::OrderReceived { side, to: Addressee::Platoon(p) } if *side == self.side => {
+                for g in self.graphics.iter_mut().filter(|g| g.platoon == Some(*p)) {
+                    g.acknowledged = true;
+                }
+                // The platoon now shows its own planned route.
+                self.graphics.retain(|g| !(g.platoon == Some(*p) && matches!(g.kind, GraphicKind::Route { .. })));
             }
+            Event::RoutePlanned { unit, .. } | Event::NoRoute { unit } => {
+                self.graphics.retain(|g| g.unit != Some(*unit));
+            }
+            _ => {}
         }
         if let Some(t) = radio_text(e, self.sim.perceived(self.side), self) {
             if matches!(e, Event::ScenarioEnd { .. }) {
@@ -251,16 +398,67 @@ impl Game {
         }
     }
 
-    pub fn update(&mut self, inp: &Input, cam: &Camera, over_ui: bool) -> GameFx {
+    /// Hotkeys, as the same actions the HUD buttons issue.
+    fn hotkeys(&self, inp: &Input) -> Vec<GameAction> {
+        use Cmd as C;
+        let mut a = Vec::new();
+        let drawing_line =
+            matches!(&self.tool, Tool::Graphic { kind: DrawKind::PhaseLine, points } if !points.is_empty());
+        if inp.hit(Key::Enter) {
+            if drawing_line || !self.draft.is_empty() {
+                a.push(GameAction::Cmd(C::Send));
+            } else if self.planning {
+                a.push(GameAction::Execute);
+            }
+        }
+        for (k, c) in [
+            (Key::Char('k'), C::Contingency),
+            (Key::Char('v'), C::Viewshed),
+            (Key::Char('l'), C::Los),
+            (Key::Char('b'), C::BattlePosition),
+            (Key::LeftBracket, C::RadiusDown),
+            (Key::RightBracket, C::RadiusUp),
+            (Key::Char('t'), C::Technique),
+            (Key::Char('f'), C::Formation),
+            (Key::Char('w'), C::Weapons),
+            (Key::Char('h'), C::Halt),
+            (Key::Char('m'), C::Move),
+            (Key::Char('a'), C::Engage),
+            (Key::Tab, C::NextPlatoon),
+            (Key::Escape, C::Cancel),
+            (Key::Backspace, C::UndoPoint),
+        ] {
+            if inp.hit(k) {
+                a.push(GameAction::Cmd(c));
+            }
+        }
+        if inp.hit(Key::Char('r')) && !inp.ctrl {
+            a.push(GameAction::Cmd(C::Route));
+        }
+        if inp.hit(Key::Char('g')) {
+            // G cycles PL -> OBJ -> TRP -> off.
+            a.push(GameAction::Cmd(match &self.tool {
+                Tool::Graphic { kind: DrawKind::PhaseLine, .. } => C::Objective,
+                Tool::Graphic { kind: DrawKind::Objective, .. } => C::Trp,
+                Tool::Graphic { kind: DrawKind::Trp, .. } => C::Trp,
+                _ => C::PhaseLine,
+            }));
+        }
+        if inp.hit(Key::Space) {
+            a.push(GameAction::Pause);
+        }
+        for k in 0..SPEEDS.len() {
+            if inp.hit(Key::Num(k as u8 + 1)) {
+                a.push(GameAction::Speed(k));
+            }
+        }
+        a
+    }
+
+    pub fn update(&mut self, inp: &Input, cam: &Camera, over_ui: bool, clicked: Option<GameAction>) -> GameFx {
         let mut fx = GameFx::default();
-        if inp.hit(Key::F(8)) {
-            self.aar = match self.aar {
-                Some(_) => None,
-                None => {
-                    self.open_aar();
-                    self.aar.take()
-                }
-            };
+        if inp.hit(Key::F(8)) || clicked == Some(GameAction::Aar) {
+            self.toggle_aar();
         }
         if let Some(a) = &mut self.aar {
             a.update(inp, &self.recorder);
@@ -274,133 +472,25 @@ impl Game {
             }
             return fx;
         }
-        if self.planning {
-            let finishing_line = matches!(self.tool, Tool::Graphic { kind: DrawKind::PhaseLine, .. });
-            if inp.hit(Key::Enter) && !finishing_line {
-                self.execute();
-            }
-            if inp.hit(Key::Space) {
-                self.radio("PLANNING PHASE: PRESS ENTER TO EXECUTE.".into());
-            }
-        } else if inp.hit(Key::Space) {
-            self.paused = !self.paused;
-        }
-        if inp.hit(Key::Char('k')) {
-            self.order_mode = match self.order_mode {
-                OrderMode::Now => OrderMode::OnEnemyCrossing,
-                OrderMode::OnEnemyCrossing => OrderMode::InFiveMinutes,
-                OrderMode::InFiveMinutes => OrderMode::Now,
-            };
-        }
-        if inp.hit(Key::Char('g')) {
-            self.tool = match &self.tool {
-                Tool::Graphic { kind: DrawKind::PhaseLine, .. } => {
-                    Tool::Graphic { kind: DrawKind::Objective, points: vec![] }
-                }
-                Tool::Graphic { kind: DrawKind::Objective, .. } => {
-                    Tool::Graphic { kind: DrawKind::Trp, points: vec![] }
-                }
-                Tool::Graphic { kind: DrawKind::Trp, .. } => Tool::None,
-                _ => Tool::Graphic { kind: DrawKind::PhaseLine, points: vec![] },
-            };
-        }
-        if let Tool::Graphic { kind: DrawKind::PhaseLine, points } = self.tool.clone()
-            && inp.hit(Key::Enter)
-            && points.len() >= 2
-        {
-            self.add_phase_line(points);
-            self.tool = Tool::Graphic { kind: DrawKind::PhaseLine, points: vec![] };
-        }
-        for (k, _) in SPEEDS.iter().enumerate() {
-            if inp.hit(Key::Num(k as u8 + 1)) {
-                self.speed = k;
-            }
-        }
-        if inp.hit(Key::Tab) {
-            let ps: Vec<(PlatoonId, Option<EntityId>)> =
-                self.picture().platoons.iter().map(|p| (p.id, p.members.first().copied())).collect();
-            if !ps.is_empty() {
-                let i =
-                    self.sel_platoon.and_then(|s| ps.iter().position(|p| p.0 == s)).map_or(0, |i| (i + 1) % ps.len());
-                self.sel_platoon = Some(ps[i].0);
-                self.sel_unit = ps[i].1;
-            }
-        }
-        if inp.hit(Key::Escape) {
-            if self.tool != Tool::None {
-                if self.tool == Tool::Viewshed {
-                    fx.clear_overlay = true;
-                }
-                self.tool = Tool::None;
-            } else {
-                self.sel_platoon = None;
-                self.sel_unit = None;
-            }
-        }
-        if inp.hit(Key::Char('v')) {
-            self.tool = if self.tool == Tool::Viewshed { Tool::None } else { Tool::Viewshed };
-            fx.clear_overlay = true;
-        }
-        if inp.hit(Key::Char('l')) {
-            self.tool = Tool::Los { a: None, b: None, result: None };
-        }
-        if inp.hit(Key::Char('b')) && self.sel_platoon.is_some() {
-            self.tool = Tool::BattlePosition { centre: None };
-        }
-        if inp.hit(Key::LeftBracket) {
-            self.bp_radius = (self.bp_radius / 1.25).max(100.0);
-        }
-        if inp.hit(Key::RightBracket) {
-            self.bp_radius = (self.bp_radius * 1.25).min(800.0);
-        }
-        if inp.hit(Key::Char('t')) {
-            self.technique = match self.technique {
-                Technique::Traveling => Technique::TravelingOverwatch,
-                Technique::TravelingOverwatch => Technique::BoundingOverwatch,
-                Technique::BoundingOverwatch => Technique::Traveling,
-            };
-        }
-        if inp.hit(Key::Char('f'))
-            && let Some(p) = self.sel_platoon
-            && let Some(v) = self.picture().platoon(p)
-        {
-            let i = Formation::ALL.iter().position(|f| *f == v.formation).unwrap_or(0);
-            let f = Formation::ALL[(i + 1) % Formation::ALL.len()];
-            self.order(Command::SetFormation { platoon: p, formation: f });
-            let cs = self.platoon_cs(p);
-            self.radio(format!("TO {cs}: CHANGE FORMATION, {}.", format_formation(f)));
-        }
-        if inp.hit(Key::Char('w'))
-            && let Some(to) = self.addressee()
-        {
-            let cur = match to {
-                Addressee::Unit(u) => self.picture().unit(u).map(|u| u.weapons),
-                Addressee::Platoon(p) => self
-                    .picture()
-                    .platoon(p)
-                    .and_then(|v| v.members.first())
-                    .and_then(|u| self.picture().unit(*u))
-                    .map(|u| u.weapons),
-            }
-            .unwrap_or(WeaponsStatus::Free);
-            let next = match cur {
-                WeaponsStatus::Free => WeaponsStatus::Tight,
-                WeaponsStatus::Tight => WeaponsStatus::Hold,
-                WeaponsStatus::Hold => WeaponsStatus::Free,
-            };
-            self.order(Command::WeaponsControl { to, status: next });
-            self.radio(format!("WEAPONS {}.", format!("{next:?}").to_uppercase()));
-        }
-        if inp.hit(Key::Char('h'))
-            && let Some(to) = self.addressee()
-        {
-            self.order(Command::Halt { to });
+        let mut actions = self.hotkeys(inp);
+        actions.extend(clicked.filter(|a| *a != GameAction::Aar));
+        for a in actions {
+            self.act(a, &mut fx);
         }
 
         let world = cam.to_world(inp.mouse);
         if !over_ui && inp.left_pressed {
             match self.tool.clone() {
                 Tool::None => self.select(cam, inp.mouse, inp.ctrl),
+                Tool::Move => {
+                    self.issue_move(Vec::new(), world);
+                    self.tool = Tool::None;
+                }
+                Tool::Route => self.draft.push(world),
+                Tool::Engage => {
+                    self.engage_at(cam, inp.mouse);
+                    self.tool = Tool::None;
+                }
                 Tool::BattlePosition { centre: None } => self.tool = Tool::BattlePosition { centre: Some(world) },
                 Tool::BattlePosition { centre: Some(c) } => {
                     let facing = ai::drive::bearing(c, world);
@@ -438,32 +528,37 @@ impl Game {
             }
         }
         if !over_ui && inp.right_pressed {
-            if inp.ctrl {
-                self.engage_at(cam, inp.mouse);
-            } else {
-                match (self.sel_platoon, self.sel_unit) {
-                    (Some(p), _) => {
-                        self.sim.submit(
-                            self.side,
-                            Command::PlatoonMove {
-                                platoon: p,
-                                destination: world,
-                                formation: None,
-                                technique: self.technique,
-                            },
-                        );
-                        let cs = self.platoon_cs(p);
-                        self.radio(format!(
-                            "TO {cs}: MOVE TO GRID {}, {}.",
-                            format::grid(world),
-                            format_technique(self.technique)
-                        ));
-                        self.graphics.retain(|g| g.platoon != Some(p));
+            match &self.tool {
+                // Right click finishes a route at the clicked destination.
+                Tool::Route => {
+                    self.draft.push(world);
+                    self.send_route();
+                }
+                // Right click cancels a targeting mode (RTS convention).
+                Tool::Move | Tool::Engage | Tool::BattlePosition { .. } | Tool::Graphic { .. } => {
+                    self.tool = Tool::None;
+                }
+                _ if inp.ctrl => self.engage_at(cam, inp.mouse),
+                _ if inp.shift => {
+                    // Shift+right click queues checkpoints, appended to the current route.
+                    if self.draft.is_empty()
+                        && let Some(v) = self.sel_platoon.and_then(|p| self.picture().platoon(p))
+                    {
+                        self.draft = v.waypoints.clone();
                     }
-                    (None, Some(u)) => self.order_move(u, world),
-                    _ => {}
+                    if self.sel_platoon.is_some() || self.sel_unit.is_some() {
+                        self.draft.push(world);
+                    }
+                }
+                _ => {
+                    self.draft.clear();
+                    self.issue_move(Vec::new(), world);
                 }
             }
+        }
+        // Shift released: the queued route goes out as one order.
+        if !inp.shift && !self.draft.is_empty() && self.tool != Tool::Route {
+            self.send_route();
         }
         if !self.paused && !self.planning {
             self.acc += inp.frame_time as f64 * SPEEDS[self.speed] as f64;
@@ -473,6 +568,183 @@ impl Game {
             self.advance_ticks(n);
         }
         fx
+    }
+
+    fn toggle_aar(&mut self) {
+        if self.aar.is_some() {
+            self.aar = None;
+        } else {
+            self.open_aar();
+        }
+    }
+
+    fn act(&mut self, a: GameAction, fx: &mut GameFx) {
+        match a {
+            GameAction::Pause => {
+                if self.planning {
+                    self.radio("PLANNING PHASE: EXECUTE (ENTER) TO START THE CLOCK.".into());
+                } else {
+                    self.paused = !self.paused;
+                }
+            }
+            GameAction::Speed(k) => {
+                self.speed = k.min(SPEEDS.len() - 1);
+                if !self.planning && self.ended.is_none() {
+                    self.paused = false;
+                }
+            }
+            GameAction::Execute => self.execute(),
+            GameAction::Aar => self.toggle_aar(),
+            GameAction::SelectPlatoon(p) => {
+                if self.sel_platoon == Some(p) {
+                    fx.center_on = self.selection_centre();
+                } else {
+                    self.sel_platoon = Some(p);
+                    self.sel_unit = self.picture().platoon(p).and_then(|v| v.members.first().copied());
+                    self.draft.clear();
+                }
+            }
+            GameAction::SelectUnit(u) => {
+                if self.sel_unit == Some(u) && self.sel_platoon.is_none() {
+                    fx.center_on = self.selection_centre();
+                } else {
+                    self.sel_unit = Some(u);
+                    self.sel_platoon = None;
+                    self.draft.clear();
+                }
+            }
+            GameAction::Cmd(c) => self.command(c, fx),
+        }
+    }
+
+    fn toggle_tool(&mut self, t: Tool) {
+        self.tool = if std::mem::discriminant(&self.tool) == std::mem::discriminant(&t) { Tool::None } else { t };
+    }
+
+    fn command(&mut self, c: Cmd, fx: &mut GameFx) {
+        let selected = self.addressee().is_some();
+        if self.tool == Tool::Viewshed && !matches!(c, Cmd::Viewshed) {
+            fx.clear_overlay = true;
+        }
+        match c {
+            Cmd::Move if selected => self.toggle_tool(Tool::Move),
+            Cmd::Route if selected => {
+                self.draft.clear();
+                self.toggle_tool(Tool::Route);
+            }
+            Cmd::Engage if self.sel_unit.is_some() => self.toggle_tool(Tool::Engage),
+            Cmd::BattlePosition if self.sel_platoon.is_some() => {
+                self.toggle_tool(Tool::BattlePosition { centre: None });
+            }
+            Cmd::Halt => {
+                if let Some(to) = self.addressee() {
+                    self.draft.clear();
+                    self.order(Command::Halt { to });
+                }
+            }
+            Cmd::Formation => {
+                if let Some(p) = self.sel_platoon
+                    && let Some(v) = self.picture().platoon(p)
+                {
+                    let i = Formation::ALL.iter().position(|f| *f == v.formation).unwrap_or(0);
+                    let f = Formation::ALL[(i + 1) % Formation::ALL.len()];
+                    self.order(Command::SetFormation { platoon: p, formation: f });
+                    let cs = self.platoon_cs(p);
+                    self.radio(format!("TO {cs}: CHANGE FORMATION, {}.", format_formation(f)));
+                }
+            }
+            Cmd::Technique => {
+                self.technique = match self.technique {
+                    Technique::Traveling => Technique::TravelingOverwatch,
+                    Technique::TravelingOverwatch => Technique::BoundingOverwatch,
+                    Technique::BoundingOverwatch => Technique::Traveling,
+                };
+            }
+            Cmd::Weapons => {
+                if let Some(to) = self.addressee() {
+                    let next = match self.selection_weapons().unwrap_or(WeaponsStatus::Free) {
+                        WeaponsStatus::Free => WeaponsStatus::Tight,
+                        WeaponsStatus::Tight => WeaponsStatus::Hold,
+                        WeaponsStatus::Hold => WeaponsStatus::Free,
+                    };
+                    self.order(Command::WeaponsControl { to, status: next });
+                    self.radio(format!("WEAPONS {}.", weapons_str(next)));
+                }
+            }
+            Cmd::Contingency => {
+                self.order_mode = match self.order_mode {
+                    OrderMode::Now => OrderMode::OnEnemyCrossing,
+                    OrderMode::OnEnemyCrossing => OrderMode::InFiveMinutes,
+                    OrderMode::InFiveMinutes => OrderMode::Now,
+                };
+            }
+            Cmd::NextPlatoon => {
+                let ps: Vec<(PlatoonId, Option<EntityId>)> =
+                    self.picture().platoons.iter().map(|p| (p.id, p.members.first().copied())).collect();
+                if !ps.is_empty() {
+                    let i = self
+                        .sel_platoon
+                        .and_then(|s| ps.iter().position(|p| p.0 == s))
+                        .map_or(0, |i| (i + 1) % ps.len());
+                    self.sel_platoon = Some(ps[i].0);
+                    self.sel_unit = ps[i].1;
+                    self.draft.clear();
+                }
+            }
+            Cmd::PhaseLine => self.toggle_tool_graphic(DrawKind::PhaseLine),
+            Cmd::Objective => self.toggle_tool_graphic(DrawKind::Objective),
+            Cmd::Trp => self.toggle_tool_graphic(DrawKind::Trp),
+            Cmd::Viewshed => {
+                self.tool = if self.tool == Tool::Viewshed { Tool::None } else { Tool::Viewshed };
+                fx.clear_overlay = true;
+            }
+            Cmd::Los => self.toggle_tool(Tool::Los { a: None, b: None, result: None }),
+            Cmd::Send => match self.tool.clone() {
+                Tool::Graphic { kind: DrawKind::PhaseLine, points } if points.len() >= 2 => {
+                    self.add_phase_line(points);
+                    self.tool = Tool::Graphic { kind: DrawKind::PhaseLine, points: vec![] };
+                }
+                _ => self.send_route(),
+            },
+            Cmd::UndoPoint => {
+                if let Tool::Graphic { points, .. } = &mut self.tool {
+                    points.pop();
+                } else {
+                    self.draft.pop();
+                }
+            }
+            Cmd::Cancel => {
+                if self.tool != Tool::None || !self.draft.is_empty() {
+                    self.tool = Tool::None;
+                    self.draft.clear();
+                } else {
+                    self.sel_platoon = None;
+                    self.sel_unit = None;
+                }
+            }
+            Cmd::RadiusDown => self.bp_radius = (self.bp_radius / 1.25).max(100.0),
+            Cmd::RadiusUp => self.bp_radius = (self.bp_radius * 1.25).min(800.0),
+            Cmd::Move | Cmd::Route | Cmd::Engage | Cmd::BattlePosition => {
+                self.radio("NO UNIT SELECTED.".into());
+            }
+        }
+    }
+
+    /// Selecting the active graphic tool again turns it off.
+    fn toggle_tool_graphic(&mut self, kind: DrawKind) {
+        match &self.tool {
+            Tool::Graphic { kind: k, .. } if *k == kind => self.tool = Tool::None,
+            _ => self.tool = Tool::Graphic { kind, points: vec![] },
+        }
+    }
+
+    /// Weapons control status of the selection (its first vehicle).
+    fn selection_weapons(&self) -> Option<WeaponsStatus> {
+        let pic = self.picture();
+        match self.addressee()? {
+            Addressee::Unit(u) => pic.unit(u).map(|u| u.weapons),
+            Addressee::Platoon(p) => pic.platoon(p)?.members.first().and_then(|u| pic.unit(*u)).map(|u| u.weapons),
+        }
     }
 
     /// Draw the next phase line (PL RED, PL BLUE, ...).
@@ -507,16 +779,14 @@ impl Game {
 
     pub fn issue_bp(&mut self, centre: [f64; 2], facing: f64) {
         let Some(p) = self.sel_platoon else { return };
-        self.sim.submit(
-            self.side,
-            Command::OccupyPosition {
-                platoon: p,
-                centre,
-                radius_m: self.bp_radius,
-                facing,
-                kind: PositionKind::HullDown,
-            },
-        );
+        self.draft.clear();
+        self.order(Command::OccupyPosition {
+            platoon: p,
+            centre,
+            radius_m: self.bp_radius,
+            facing,
+            kind: PositionKind::HullDown,
+        });
         self.bp_count += 1;
         let label = format!("BP {}", self.bp_count);
         let cs = self.platoon_cs(p);
@@ -524,6 +794,7 @@ impl Game {
         self.graphics.retain(|g| g.platoon != Some(p));
         self.graphics.push(OrderGraphic {
             platoon: Some(p),
+            unit: None,
             kind: GraphicKind::Bp { centre, radius: self.bp_radius, facing, label },
             acknowledged: false,
         });
@@ -632,18 +903,43 @@ impl Game {
                 GraphicKind::Bp { centre, radius, facing, label } => {
                     symbols::battle_position(f, cam, *centre, *radius, *facing, label, g.acknowledged);
                 }
+                // Sent, not yet received: dashed (DESIGN.md §10.3).
+                GraphicKind::Route { points } => {
+                    route_line(f, cam, points, style::ROUTE, true);
+                    let skip = usize::from(points.len() > 1);
+                    checkpoints(f, cam, &points[skip..], style::ROUTE);
+                }
             }
         }
-        // Routes: solid while executing (DESIGN.md §10.3).
+        // Platoon routes with checkpoints: solid while executing (DESIGN.md §10.3).
+        for pv in &pic.platoons {
+            let sel = self.sel_platoon == Some(pv.id);
+            if pv.route.len() >= 2 {
+                let c = if sel { style::ROUTE } else { Rgba(style::ROUTE.0, style::ROUTE.1, style::ROUTE.2, 90) };
+                route_line(f, cam, &pv.route, c, false);
+            }
+            if sel || cam.mpp > AGGREGATE_MPP {
+                checkpoints(f, cam, &pv.waypoints, style::ROUTE);
+            }
+        }
+        // Single-vehicle routes (and slot routes of the selected platoon when zoomed in).
         for u in &pic.own {
-            if u.route.len() >= 2
-                && (self.sel_platoon.is_none() || u.platoon == self.sel_platoon || cam.mpp < AGGREGATE_MPP)
-            {
-                for w in u.route.windows(2) {
-                    f.line(cam.to_screen(w[0]), cam.to_screen(w[1]), 1.0, style::ROUTE);
-                }
+            let detached = u.platoon.is_none() || self.sel_unit == Some(u.id) && self.sel_platoon.is_none();
+            let slot = u.platoon.is_some() && u.platoon == self.sel_platoon && cam.mpp < 1.5;
+            if u.route.len() >= 2 && (detached || slot) {
+                route_line(f, cam, &u.route, style::ROUTE, false);
                 f.circle_lines(cam.to_screen(*u.route.last().unwrap()), 4.0, style::ROUTE);
             }
+        }
+        // Route being drafted (Shift+right click or ROUTE tool), from the selection to the cursor.
+        if !self.draft.is_empty() || self.tool == Tool::Route {
+            let mut pts: Vec<[f64; 2]> = self.selection_centre().into_iter().collect();
+            pts.extend(self.draft.iter().copied());
+            if self.tool == Tool::Route {
+                pts.push(cam.to_world(mouse));
+            }
+            route_line(f, cam, &pts, style::ROUTE_DRAFT, true);
+            checkpoints(f, cam, &self.draft, style::ROUTE_DRAFT);
         }
         // Shots this side knows about.
         for s in &pic.shots {
@@ -744,6 +1040,17 @@ impl Game {
 
     fn draw_tool(&self, f: &mut Frame, cam: &Camera, mouse: P2) {
         match &self.tool {
+            Tool::Move => {
+                if let Some(c) = self.selection_centre() {
+                    route_line(f, cam, &[c, cam.to_world(mouse)], style::ROUTE_DRAFT, true);
+                }
+                f.circle_lines(mouse, 6.0, style::ROUTE_DRAFT);
+            }
+            Tool::Engage => {
+                f.circle_lines(mouse, 10.0, style::HOSTILE);
+                f.line([mouse[0] - 14.0, mouse[1]], [mouse[0] + 14.0, mouse[1]], 1.0, style::HOSTILE);
+                f.line([mouse[0], mouse[1] - 14.0], [mouse[0], mouse[1] + 14.0], 1.0, style::HOSTILE);
+            }
             Tool::BattlePosition { centre } => {
                 let c = centre.unwrap_or_else(|| cam.to_world(mouse));
                 let facing = centre.map_or(0.0, |c| ai::drive::bearing(c, cam.to_world(mouse)));
@@ -811,81 +1118,338 @@ impl Game {
         }
     }
 
-    pub fn draw_ui(&self, f: &mut Frame, screen: P2) {
-        if let Some(a) = &self.aar {
-            a.draw_ui(f, screen, &self.recorder, self.sim.side_names(), self.scenario.start_time_s as f64);
-            return;
-        }
-        let side = &self.sim.side_names()[self.side.0 as usize];
-        let state = if self.planning {
-            "PLANNING - ENTER TO EXECUTE".to_owned()
-        } else if self.paused {
-            "PAUSED".to_owned()
-        } else {
-            format!("X{}", SPEEDS[self.speed])
-        };
-        let top = format!("{}   {}   {}   {}", format::clock(self.sim.clock_s()), state, side, self.scenario.name);
-        f.text(&top, 10.0, 6.0, style::FONT_L - 4, if self.paused { style::AMBER } else { style::TEXT });
-        let tool = match &self.tool {
+    /// Prompt for the active tool or draft (shown under the top bar).
+    fn prompt(&self) -> String {
+        let n = self.draft.len();
+        match &self.tool {
+            Tool::None if n > 0 => format!("ROUTE: {n} POINT(S). SHIFT+RIGHT CLICK ADDS, RELEASE SHIFT TO SEND"),
             Tool::None => String::new(),
-            Tool::BattlePosition { centre: None } => "BP: CLICK CENTRE  [ ] RADIUS".into(),
-            Tool::BattlePosition { .. } => "BP: CLICK THREAT DIRECTION".into(),
-            Tool::Viewshed => "VIEWSHED: CLICK OBSERVER POINT  (V/ESC CLOSE)".into(),
-            Tool::Los { .. } => "LOS: CLICK TWO POINTS".into(),
+            Tool::Move => "MOVE: CLICK DESTINATION   (RIGHT CLICK / ESC CANCEL)".into(),
+            Tool::Route => format!("ROUTE: CLICK CHECKPOINTS ({n}), RIGHT CLICK DESTINATION   BKSP UNDO   ESC CANCEL"),
+            Tool::Engage => "ENGAGE: CLICK A CONTACT   (RIGHT CLICK / ESC CANCEL)".into(),
+            Tool::BattlePosition { centre: None } => "BATTLE POSITION: CLICK CENTRE   [ ] RADIUS".into(),
+            Tool::BattlePosition { .. } => "BATTLE POSITION: CLICK THREAT DIRECTION".into(),
+            Tool::Viewshed => "VIEWSHED: CLICK OBSERVER POINT   (V / ESC CLOSE)".into(),
+            Tool::Los { .. } => "LINE OF SIGHT: CLICK TWO POINTS".into(),
             Tool::Graphic { kind: DrawKind::PhaseLine, .. } => {
-                "PHASE LINE: CLICK POINTS, ENTER TO FINISH (G NEXT TOOL)".into()
+                "PHASE LINE: CLICK POINTS, ENTER TO FINISH   BKSP UNDO   ESC CANCEL".into()
             }
-            Tool::Graphic { kind: DrawKind::Objective, .. } => {
-                "OBJECTIVE: CLICK CENTRE, CLICK EDGE (G NEXT TOOL)".into()
-            }
-            Tool::Graphic { kind: DrawKind::Trp, .. } => "TRP: CLICK POINTS (G CLOSE)".into(),
-        };
-        let mode = match self.order_mode {
-            OrderMode::Now => String::new(),
-            OrderMode::OnEnemyCrossing => format!(
-                "NEXT ORDER: ON ENEMY CROSSING {}",
-                self.last_phase_line().map_or("(NO PL)".into(), |g| g.label.clone())
-            ),
-            OrderMode::InFiveMinutes => "NEXT ORDER: AT +5 MIN".into(),
-        };
-        f.text(&mode, 560.0, 24.0, style::FONT_L - 8, style::SELECT);
-        f.text(&tool, 560.0, 8.0, style::FONT_L - 8, style::AMBER);
+            Tool::Graphic { kind: DrawKind::Objective, .. } => "OBJECTIVE: CLICK CENTRE, THEN EDGE".into(),
+            Tool::Graphic { kind: DrawKind::Trp, .. } => "TARGET REFERENCE POINT: CLICK POINTS".into(),
+        }
+    }
 
-        if let Some(end) = &self.ended {
-            let w = f.text_width(end, style::FONT_L) + 40.0;
-            let (x, y) = ((screen[0] - w) / 2.0, 60.0);
-            f.rect(x, y, w, 64.0, style::PANEL);
-            f.rect_lines(x, y, w, 64.0, style::AMBER);
-            f.text(end, x + 20.0, y + 12.0, style::FONT_L, style::AMBER);
-            f.text("F8 AFTER-ACTION REVIEW", x + 20.0, y + 40.0, style::FONT_L - 8, style::TEXT);
+    fn state_text(&self) -> (String, Rgba) {
+        if self.planning {
+            ("PLANNING".into(), style::AMBER)
+        } else if self.paused {
+            ("PAUSED".into(), style::AMBER)
+        } else {
+            (format!("RUNNING X{}", SPEEDS[self.speed]), style::TEXT)
+        }
+    }
+
+    /// Every clickable control of game mode, laid out for this screen size.
+    pub fn buttons(&self, screen: P2) -> Vec<Button<GameAction>> {
+        let mut out = Vec::new();
+        let aar = self.aar.is_some();
+        // Top bar: time control.
+        let mut bar = Vec::new();
+        if !aar {
+            if self.planning {
+                bar.push(
+                    Button::new(Rect::new(0.0, 0.0, 0.0, 0.0), Look::Bar, "EXECUTE", GameAction::Execute)
+                        .key("ENTER")
+                        .tip("END PLANNING: START THE CLOCK (H-HOUR)")
+                        .colour(style::AMBER),
+                );
+            } else {
+                let label = if self.paused { "RESUME" } else { "PAUSE" };
+                bar.push(
+                    Button::new(Rect::new(0.0, 0.0, 0.0, 0.0), Look::Bar, label, GameAction::Pause)
+                        .key("SPACE")
+                        .tip("PAUSE / RESUME (ORDERS CAN BE GIVEN WHILE PAUSED)")
+                        .active(self.paused),
+                );
+            }
+            for (k, x) in SPEEDS.iter().enumerate() {
+                bar.push(
+                    Button::new(Rect::new(0.0, 0.0, 0.0, 0.0), Look::Bar, format!("X{x}"), GameAction::Speed(k))
+                        .key(["1", "2", "3", "4"][k])
+                        .tip(format!("TIME COMPRESSION X{x}"))
+                        .active(self.speed == k),
+                );
+            }
+        }
+        bar.push(
+            Button::new(Rect::new(0.0, 0.0, 0.0, 0.0), Look::Bar, "AAR", GameAction::Aar)
+                .key("F8")
+                .tip("AFTER-ACTION REVIEW: REPLAY THE BATTLE WITH GROUND TRUTH")
+                .active(aar),
+        );
+        hud::bar_row(&mut out, 190.0, bar);
+        if aar {
+            return out;
         }
 
-        // Unit / platoon panel.
-        let pw = 300.0;
-        let (px, py) = (screen[0] - pw - 10.0, 40.0);
-        let ph = 230.0;
-        f.rect(px, py, pw, ph, style::PANEL);
-        f.rect_lines(px, py, pw, ph, style::PANEL_EDGE);
+        // Platoon roster (left).
+        for (k, (label, value, act, sel)) in self.roster().into_iter().enumerate() {
+            let r = Rect::new(8.0, TOP_H + 26.0 + k as f32 * 24.0, ROSTER_W - 4.0, 22.0);
+            out.push(
+                Button::new(r, Look::Row, label, act)
+                    .value(value)
+                    .active(sel)
+                    .colour(style::FRIENDLY)
+                    .tip("SELECT (CLICK AGAIN TO CENTRE THE MAP)")
+                    .key("TAB"),
+            );
+        }
+
+        // Selection panel: member rows select a single vehicle.
+        let (_, _, rows, _) = self.info(screen);
+        out.extend(rows);
+
+        // Command card.
+        for (i, b) in self.card() {
+            let mut b = b;
+            b.r = hud::card_cell(screen, i);
+            out.push(b);
+        }
+        out
+    }
+
+    /// Roster rows: (label, value, action, selected).
+    fn roster(&self) -> Vec<(String, String, GameAction, bool)> {
         let pic = self.picture();
-        let mut lines: Vec<(String, Rgba)> = Vec::new();
+        let mut rows = Vec::new();
+        for pv in &pic.platoons {
+            let alive = pv.members.iter().filter_map(|m| pic.unit(*m)).filter(|u| u.condition != Condition::Destroyed);
+            let n = alive.count();
+            let task = pv.task.replace("BATTLE POSITION", "BP");
+            rows.push((
+                format!("{} PLT  {}/{}", pv.callsign, n, pv.members.len()),
+                task,
+                GameAction::SelectPlatoon(pv.id),
+                self.sel_platoon == Some(pv.id),
+            ));
+        }
+        for u in pic.own.iter().filter(|u| u.platoon.is_none()) {
+            rows.push((
+                u.callsign.clone(),
+                short_task(u),
+                GameAction::SelectUnit(u.id),
+                self.sel_unit == Some(u.id) && self.sel_platoon.is_none(),
+            ));
+        }
+        rows
+    }
+
+    /// Command card cells (index, button), StarCraft-style: a fixed 5 × 3 grid, with a
+    /// sub-card while a route, phase line or battle position is being placed.
+    fn card(&self) -> Vec<(usize, Button<GameAction>)> {
+        let z = Rect::new(0.0, 0.0, 0.0, 0.0);
+        let b = |label: &str, c: Cmd| Button::new(z, Look::Card, label, GameAction::Cmd(c));
+        let sel = self.addressee().is_some();
+        let plt = self.sel_platoon.is_some();
+        let cancel = (14, b("CANCEL", Cmd::Cancel).key("ESC").tip("CANCEL (RIGHT CLICK ALSO CANCELS)"));
+        let timing = match self.order_mode {
+            OrderMode::Now => "NOW".to_owned(),
+            OrderMode::OnEnemyCrossing => {
+                format!("ON {}", self.last_phase_line().map_or("PL ?".into(), |g| g.label.clone()))
+            }
+            OrderMode::InFiveMinutes => "AT +5 MIN".into(),
+        };
+        let technique = || {
+            b("TECHNIQUE", Cmd::Technique)
+                .key("T")
+                .value(short_technique(self.technique))
+                .tip("MOVEMENT TECHNIQUE FOR THE NEXT MOVE: TRAVELING / TRAVELING OVERWATCH / BOUNDING OVERWATCH")
+        };
+        let contingency = || {
+            b("TIMING", Cmd::Contingency)
+                .key("K")
+                .value(timing.clone())
+                .active(self.order_mode != OrderMode::Now)
+                .tip("NEXT ORDER: NOW / WHEN ENEMY CROSSES THE LAST PHASE LINE / IN 5 MIN")
+        };
+        if self.tool == Tool::Route || !self.draft.is_empty() {
+            let n = self.draft.len();
+            return vec![
+                (
+                    0,
+                    b("SEND", Cmd::Send)
+                        .key("ENTER")
+                        .value(format!("{n} PTS"))
+                        .enabled(n > 0)
+                        .tip("SEND THE ROUTE: LAST POINT IS THE DESTINATION"),
+                ),
+                (1, b("UNDO PT", Cmd::UndoPoint).key("BKSP").enabled(n > 0).tip("REMOVE THE LAST POINT")),
+                (3, technique()),
+                (4, contingency()),
+                cancel,
+            ];
+        }
+        if let Tool::Graphic { kind: DrawKind::PhaseLine, points } = &self.tool
+            && !points.is_empty()
+        {
+            return vec![
+                (0, b("FINISH", Cmd::Send).key("ENTER").enabled(points.len() >= 2).tip("FINISH THE PHASE LINE")),
+                (1, b("UNDO PT", Cmd::UndoPoint).key("BKSP").tip("REMOVE THE LAST POINT")),
+                cancel,
+            ];
+        }
+        if let Tool::BattlePosition { .. } = self.tool {
+            let r = format!("{:.0} M", self.bp_radius);
+            return vec![
+                (0, b("RADIUS -", Cmd::RadiusDown).key("[").value(r.clone()).tip("SMALLER BATTLE POSITION")),
+                (1, b("RADIUS +", Cmd::RadiusUp).key("]").value(r).tip("LARGER BATTLE POSITION")),
+                (4, contingency()),
+                cancel,
+            ];
+        }
+        let is = |t: &Tool| std::mem::discriminant(&self.tool) == std::mem::discriminant(t);
+        let gfx = |k: DrawKind| matches!(&self.tool, Tool::Graphic { kind, .. } if *kind == k);
+        let formation = self
+            .sel_platoon
+            .and_then(|p| self.picture().platoon(p))
+            .map_or(String::new(), |v| format_formation(v.formation));
+        let weapons = self.selection_weapons().map_or("", weapons_str);
+        vec![
+            (
+                0,
+                b("MOVE", Cmd::Move)
+                    .key("M")
+                    .value("R-CLICK")
+                    .enabled(sel)
+                    .active(is(&Tool::Move))
+                    .tip("MOVE TO A POINT (OR RIGHT CLICK THE MAP)"),
+            ),
+            (
+                1,
+                b("ROUTE", Cmd::Route)
+                    .key("R")
+                    .value("SHIFT+R-CLK")
+                    .enabled(sel)
+                    .active(is(&Tool::Route))
+                    .tip("ROUTE WITH CHECKPOINTS: CLICK CPS, RIGHT CLICK DESTINATION (OR SHIFT+RIGHT CLICKS)"),
+            ),
+            (2, b("HALT", Cmd::Halt).key("H").enabled(sel).tip("HALT IN PLACE")),
+            (
+                3,
+                b("BATTLE POS", Cmd::BattlePosition)
+                    .key("B")
+                    .value(format!("{:.0} M", self.bp_radius))
+                    .enabled(plt)
+                    .active(is(&Tool::BattlePosition { centre: None }))
+                    .tip("OCCUPY A BATTLE POSITION HULL-DOWN: CLICK CENTRE, THEN THREAT DIRECTION"),
+            ),
+            (
+                4,
+                b("ENGAGE", Cmd::Engage)
+                    .key("A")
+                    .value("CTRL+R-CLK")
+                    .enabled(self.sel_unit.is_some())
+                    .active(is(&Tool::Engage))
+                    .tip("SELECTED TANK ENGAGES A CONTACT (PLATOONS DISTRIBUTE FIRE THEMSELVES)"),
+            ),
+            (
+                5,
+                b("FORMATION", Cmd::Formation)
+                    .key("F")
+                    .value(formation)
+                    .enabled(plt)
+                    .tip("CHANGE PLATOON FORMATION (CYCLES)"),
+            ),
+            (6, technique()),
+            (
+                7,
+                b("WEAPONS", Cmd::Weapons)
+                    .key("W")
+                    .value(weapons)
+                    .enabled(sel)
+                    .tip("WEAPONS CONTROL: FREE / TIGHT / HOLD"),
+            ),
+            (8, contingency()),
+            (9, b("NEXT PLT", Cmd::NextPlatoon).key("TAB").tip("SELECT THE NEXT PLATOON")),
+            (
+                10,
+                b("PHASE LINE", Cmd::PhaseLine)
+                    .key("G")
+                    .active(gfx(DrawKind::PhaseLine))
+                    .tip("DRAW A PHASE LINE (CONTROL MEASURE AND TRIGGER REFERENCE)"),
+            ),
+            (11, b("OBJECTIVE", Cmd::Objective).key("G").active(gfx(DrawKind::Objective)).tip("DRAW AN OBJECTIVE")),
+            (12, b("TRP", Cmd::Trp).key("G").active(gfx(DrawKind::Trp)).tip("PLACE TARGET REFERENCE POINTS")),
+            (
+                13,
+                b("VIEWSHED", Cmd::Viewshed)
+                    .key("V")
+                    .active(self.tool == Tool::Viewshed)
+                    .tip("SHOW WHAT CAN BE SEEN FROM A POINT"),
+            ),
+            (
+                14,
+                b("LOS", Cmd::Los)
+                    .key("L")
+                    .active(is(&Tool::Los { a: None, b: None, result: None }))
+                    .tip("LINE OF SIGHT BETWEEN TWO POINTS"),
+            ),
+        ]
+    }
+
+    /// Selection panel (top right): frame, header lines, member rows, footer lines.
+    #[allow(clippy::type_complexity)]
+    fn info(&self, screen: P2) -> (Rect, Vec<(String, Rgba)>, Vec<Button<GameAction>>, Vec<(String, Rgba)>) {
+        const W: f32 = 320.0;
+        const LINE: f32 = 18.0;
+        let (x, y) = (screen[0] - W - 6.0, TOP_H + 6.0);
+        let pic = self.picture();
+        let mut head: Vec<(String, Rgba)> = Vec::new();
+        let mut rows = Vec::new();
+        let mut members = Vec::new();
         if let Some(pv) = self.sel_platoon.and_then(|p| pic.platoon(p)) {
-            lines.push((format!("PLATOON {}", pv.callsign), style::FRIENDLY));
-            lines.push((pv.task.clone(), style::TEXT));
-            lines.push((
-                format!("FORM {}  TECH {}", format_formation(pv.formation), format_technique(self.technique)),
+            head.push((format!("PLATOON {}", pv.callsign), style::FRIENDLY));
+            head.push((pv.task.clone(), style::TEXT));
+            head.push((
+                format!("FORM {}   NEXT MOVE {}", format_formation(pv.formation), short_technique(self.technique)),
                 style::TEXT_DIM,
             ));
-            for m in pv.members.iter().filter_map(|m| pic.unit(*m)) {
-                lines.push((unit_line(m), condition_colour(m.condition)));
+            if !pv.waypoints.is_empty() {
+                head.push((
+                    format!(
+                        "ROUTE {} CP, DEST GRID {}",
+                        pv.waypoints.len() - 1,
+                        format::grid(*pv.waypoints.last().unwrap())
+                    ),
+                    style::TEXT_DIM,
+                ));
             }
+            members = pv.members.iter().filter_map(|m| pic.unit(*m)).collect();
         } else if let Some(u) = self.sel_unit.and_then(|id| pic.unit(id)) {
-            lines.push((format!("{}  {}", u.callsign, u.vehicle_name), style::FRIENDLY));
-            lines.push((format!("GRID {}  HDG {}", format::grid8(u.pos), format::mils(u.heading)), style::TEXT));
-            lines.push((unit_line(u), condition_colour(u.condition)));
-            lines.push((format!("FUEL {:.0} %", u.fuel_fraction * 100.0), style::TEXT));
+            head.push((format!("{}  {}", u.callsign, u.vehicle_name), style::FRIENDLY));
+            head.push((format!("GRID {}  HDG {}", format::grid8(u.pos), format::mils(u.heading)), style::TEXT));
+            head.push((
+                format!("FUEL {:.0} %   WEAPONS {}", u.fuel_fraction * 100.0, weapons_str(u.weapons)),
+                style::TEXT,
+            ));
+            members.push(u);
         } else {
-            lines.push(("NO UNIT SELECTED".into(), style::TEXT_DIM));
+            head.push(("NO UNIT SELECTED".into(), style::TEXT_DIM));
+            head.push(("CLICK A UNIT OR A PLATOON IN THE ROSTER".into(), style::TEXT_DIM));
         }
+        let mut cy = y + 8.0 + head.len() as f32 * LINE + 4.0;
+        for m in members {
+            let label = format!("{:<5} {:>3} KM/H {:>3} RDS", m.callsign, format::kmh(m.speed), m.ammo);
+            rows.push(
+                Button::new(Rect::new(x + 6.0, cy, W - 12.0, 20.0), Look::Row, label, GameAction::SelectUnit(m.id))
+                    .value(short_task(m))
+                    .colour(condition_colour(m.condition))
+                    .active(self.sel_unit == Some(m.id) && self.sel_platoon.is_none())
+                    .tip("SELECT THIS VEHICLE ALONE (CLICK AGAIN TO CENTRE)"),
+            );
+            cy += 22.0;
+        }
+        let mut foot: Vec<(String, Rgba)> = Vec::new();
         for t in pic.triggers.iter().rev().take(3) {
             let cond = match &t.condition {
                 TriggerCondition::EnemyCrosses { line } => {
@@ -898,40 +1462,210 @@ impl Game {
                     format!("AT {}", format::clock(self.scenario.start_time_s as f64 + time_s))
                 }
             };
-            lines.push((
-                format!("CW {}: {cond} -> {}{}", t.id, t.order, if t.fired { " (EXECUTED)" } else { "" }),
+            foot.push((
+                format!("CW {}: {cond} -> {}{}", t.id, t.order, if t.fired { " (DONE)" } else { "" }),
                 style::TEXT_DIM,
             ));
         }
-        let contacts = pic.live_contacts().count();
-        lines.push((
-            format!("CONTACTS {contacts}   KILLS {}", pic.contacts.iter().filter(|c| c.destroyed).count()),
+        foot.push((
+            format!(
+                "CONTACTS {}   KILLS {}",
+                pic.live_contacts().count(),
+                pic.contacts.iter().filter(|c| c.destroyed).count()
+            ),
             style::TEXT_DIM,
         ));
-        for (k, (l, c)) in lines.iter().take(12).enumerate() {
-            f.text(l, px + 10.0, py + 8.0 + k as f32 * 19.0, style::FONT_L - 8, *c);
+        let h = cy - y + 4.0 + foot.len() as f32 * LINE + 6.0;
+        (Rect::new(x, y, W, h), head, rows, foot)
+    }
+
+    /// Panels that block map clicks (besides buttons and the top bar).
+    pub fn panels(&self, screen: P2) -> Vec<Rect> {
+        if self.aar.is_some() {
+            return Vec::new();
+        }
+        let n = self.roster().len() as f32;
+        vec![
+            self.info(screen).0,
+            Rect::new(4.0, TOP_H + 4.0, ROSTER_W + 4.0, 24.0 + n * 24.0),
+            hud::minimap_frame(screen),
+            hud::log_frame(screen),
+            hud::card_frame(screen),
+        ]
+    }
+
+    /// Top bar (game part), panels and the command card. Buttons are drawn by the caller.
+    pub fn draw_ui(&self, f: &mut Frame, screen: P2) {
+        let (state, sc) = self.state_text();
+        f.text(&format::clock(self.sim.clock_s()), 10.0, 8.0, style::FONT_L - 4, style::TEXT);
+        f.text(&state, 104.0, 10.0, style::FONT_S, sc);
+        if let Some(a) = &self.aar {
+            a.draw_ui(f, screen, &self.recorder, self.sim.side_names(), self.scenario.start_time_s as f64);
+            return;
+        }
+        let side = &self.sim.side_names()[self.side.0 as usize];
+        f.text(&format!("{side}  /  {}", self.scenario.name), 470.0, 10.0, style::FONT_S, style::TEXT_DIM);
+
+        let prompt = self.prompt();
+        let mode = match self.order_mode {
+            OrderMode::Now => String::new(),
+            OrderMode::OnEnemyCrossing => format!(
+                "NEXT ORDER ON ENEMY CROSSING {}",
+                self.last_phase_line().map_or("(NO PHASE LINE)".into(), |g| g.label.clone())
+            ),
+            OrderMode::InFiveMinutes => "NEXT ORDER AT +5 MIN".into(),
+        };
+        let mut py = TOP_H + 6.0;
+        for (t, c) in [(prompt, style::AMBER), (mode, style::SELECT)] {
+            if t.is_empty() {
+                continue;
+            }
+            let w = f.text_width(&t, style::FONT_S) + 24.0;
+            let x = (screen[0] - w) / 2.0;
+            hud::panel(f, Rect::new(x, py, w, 24.0));
+            f.text(&t, x + 12.0, py + 6.0, style::FONT_S, c);
+            py += 28.0;
+        }
+
+        if let Some(end) = &self.ended {
+            let w = f.text_width(end, style::FONT_L) + 40.0;
+            let (x, y) = ((screen[0] - w) / 2.0, py + 30.0);
+            f.rect(x, y, w, 64.0, style::PANEL);
+            f.rect_lines(x, y, w, 64.0, style::AMBER);
+            f.text(end, x + 20.0, y + 12.0, style::FONT_L, style::AMBER);
+            f.text("AAR (F8): AFTER-ACTION REVIEW", x + 20.0, y + 40.0, style::FONT_S, style::TEXT);
+        }
+
+        // Roster.
+        let n = self.roster().len() as f32;
+        hud::panel(f, Rect::new(4.0, TOP_H + 4.0, ROSTER_W + 4.0, 24.0 + n * 24.0));
+        f.text("ORDER OF BATTLE", 12.0, TOP_H + 10.0, style::FONT, style::TEXT_DIM);
+
+        // Selection panel.
+        let (r, head, _, foot) = self.info(screen);
+        hud::panel(f, r);
+        for (k, (l, c)) in head.iter().enumerate() {
+            f.text(l, r.x + 10.0, r.y + 8.0 + k as f32 * 18.0, style::FONT_S, *c);
+        }
+        for (k, (l, c)) in foot.iter().enumerate() {
+            let y = r.y + r.h - 6.0 - (foot.len() - k) as f32 * 18.0;
+            f.text(l, r.x + 10.0, y + 3.0, style::FONT_S, *c);
         }
 
         // Radio log.
-        let n = 8;
-        let (lw, lh) = (640.0, n as f32 * 16.0 + 12.0);
-        let (lx, ly) = (10.0, screen[1] - lh - 28.0);
-        f.rect(lx, ly, lw, lh, style::PANEL);
-        f.rect_lines(lx, ly, lw, lh, style::PANEL_EDGE);
-        for (k, (t, msg)) in self.log.iter().rev().take(n).collect::<Vec<_>>().into_iter().rev().enumerate() {
-            f.text(&format!("{t}  {msg}"), lx + 8.0, ly + 6.0 + k as f32 * 16.0, style::FONT_L - 8, style::TEXT);
+        let lr = hud::log_frame(screen);
+        hud::panel(f, lr);
+        f.text("RADIO NET", lr.x + 8.0, lr.y + 5.0, style::FONT, style::TEXT_DIM);
+        let n = ((lr.h - 24.0) / 16.0) as usize;
+        let max_chars = ((lr.w - 16.0) / (style::FONT_S as f32 * 0.62)) as usize;
+        let mut lines: Vec<String> = Vec::new();
+        for (t, msg) in self.log.iter().rev() {
+            // Wrap long transmissions; newest at the bottom.
+            let full = format!("{t}  {msg}");
+            let mut chunk: Vec<String> = Vec::new();
+            let mut cur = String::new();
+            for w in full.split(' ') {
+                if !cur.is_empty() && cur.len() + 1 + w.len() > max_chars {
+                    chunk.push(std::mem::take(&mut cur));
+                    cur.push_str("          ");
+                }
+                if !cur.is_empty() && !cur.ends_with(' ') {
+                    cur.push(' ');
+                }
+                cur.push_str(w);
+            }
+            chunk.push(cur);
+            for c in chunk.into_iter().rev() {
+                lines.push(c);
+            }
+            if lines.len() >= n {
+                break;
+            }
         }
+        for (k, l) in lines.iter().take(n).rev().enumerate() {
+            f.text(l, lr.x + 8.0, lr.y + 20.0 + k as f32 * 16.0, style::FONT_S, style::TEXT);
+        }
+
+        // Command card frame and title.
+        let cr = hud::card_frame(screen);
+        hud::panel(f, cr);
+        let title = match (self.sel_platoon, self.sel_unit) {
+            (Some(p), _) => format!("ORDERS: PLATOON {}", self.platoon_cs(p)),
+            (None, Some(u)) => format!("ORDERS: {}", self.picture().unit(u).map_or("?".into(), |u| u.callsign.clone())),
+            _ => "ORDERS: NO SELECTION".into(),
+        };
+        f.text(&title, cr.x + 8.0, cr.y + 6.0, style::FONT, style::TEXT_DIM);
     }
 
-    pub fn over_ui(&self, s: P2, screen: P2) -> bool {
-        let in_panel = s[0] > screen[0] - 310.0 && s[1] > 40.0 && s[1] < 270.0;
-        let in_log = s[0] < 650.0 && s[1] > screen[1] - 8.0 * 16.0 - 40.0 && s[1] < screen[1] - 28.0;
-        in_panel || in_log
+    /// Own units, contacts and routes on the minimap.
+    pub fn draw_minimap(&self, f: &mut Frame, m: &Minimap) {
+        if self.aar.is_some() {
+            return;
+        }
+        let pic = self.picture();
+        for g in &pic.graphics {
+            if let SimGraphic::PhaseLine { points } = &g.kind {
+                for w in points.windows(2) {
+                    f.line(m.to_px(w[0]), m.to_px(w[1]), 1.0, style::TEXT_DIM);
+                }
+            }
+        }
+        for pv in &pic.platoons {
+            for w in pv.route.windows(2) {
+                f.line(m.to_px(w[0]), m.to_px(w[1]), 1.0, style::ROUTE);
+            }
+        }
+        for c in pic.live_contacts() {
+            let p = m.to_px(c.pos);
+            f.rect(p[0] - 2.0, p[1] - 2.0, 4.0, 4.0, style::HOSTILE);
+        }
+        for u in &pic.own {
+            let p = m.to_px(u.pos);
+            let c = if u.condition == Condition::Destroyed { style::TEXT_OFF } else { style::FRIENDLY };
+            let sel = self.sel_unit == Some(u.id) || (u.platoon.is_some() && u.platoon == self.sel_platoon);
+            f.circle(p, if sel { 3.0 } else { 2.0 }, if sel { style::SELECT } else { c });
+        }
     }
 }
 
-fn unit_line(u: &sim::view::OwnUnit) -> String {
-    let task = match &u.task {
+const ROSTER_W: f32 = 236.0;
+
+/// Polyline in world coordinates; dashed for orders not yet acknowledged / drafts.
+fn route_line(f: &mut Frame, cam: &Camera, pts: &[[f64; 2]], c: Rgba, dashed: bool) {
+    for w in pts.windows(2) {
+        let (a, b) = (cam.to_screen(w[0]), cam.to_screen(w[1]));
+        if !dashed {
+            f.line(a, b, 1.5, c);
+            continue;
+        }
+        let len = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+        let n = (len / 8.0).ceil().max(1.0) as usize;
+        for k in (0..n).step_by(2) {
+            let t0 = k as f32 / n as f32;
+            let t1 = ((k + 1) as f32 / n as f32).min(1.0);
+            let p = |t: f32| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+            f.line(p(t0), p(t1), 1.5, c);
+        }
+    }
+}
+
+/// Checkpoints (numbered) and the destination of a route.
+fn checkpoints(f: &mut Frame, cam: &Camera, pts: &[[f64; 2]], c: Rgba) {
+    let Some((last, cps)) = pts.split_last() else { return };
+    for (i, p) in cps.iter().enumerate() {
+        let s = cam.to_screen(*p);
+        f.circle_lines(s, 7.0, c);
+        let t = format!("{}", i + 1);
+        f.text(&t, s[0] - 3.0, s[1] - 5.0, style::FONT, c);
+        f.text("CP", s[0] + 9.0, s[1] - 5.0, style::FONT, c);
+    }
+    let s = cam.to_screen(*last);
+    f.line([s[0] - 6.0, s[1] - 6.0], [s[0] + 6.0, s[1] + 6.0], 1.5, c);
+    f.line([s[0] - 6.0, s[1] + 6.0], [s[0] + 6.0, s[1] - 6.0], 1.5, c);
+}
+
+fn short_task(u: &sim::view::OwnUnit) -> String {
+    let t = match &u.task {
         Task::Idle => "HALTED".to_owned(),
         Task::Moving { remaining_m } => format!("MOVING {}", format::distance(*remaining_m)),
         Task::Set => u.position_note.clone().unwrap_or("SET".into()),
@@ -939,21 +1673,20 @@ fn unit_line(u: &sim::view::OwnUnit) -> String {
         Task::Overwatch => "OVERWATCH".into(),
         Task::Occupying => "OCCUPYING".into(),
     };
-    let cond = match u.condition {
-        Condition::Operational => "",
-        Condition::MobilityKill => " M-KILL",
-        Condition::FirepowerKill => " F-KILL",
-        Condition::Destroyed => " DESTROYED",
-    };
-    format!(
-        "{:<4} {:>3} KM/H  {:>2} RDS  {} {}{}",
-        u.callsign,
-        format::kmh(u.speed),
-        u.ammo,
-        weapons_str(u.weapons),
-        task,
-        cond
-    )
+    match u.condition {
+        Condition::Operational => t,
+        Condition::MobilityKill => "M-KILL".into(),
+        Condition::FirepowerKill => "F-KILL".into(),
+        Condition::Destroyed => "DESTROYED".into(),
+    }
+}
+
+fn short_technique(t: Technique) -> &'static str {
+    match t {
+        Technique::Traveling => "TRAVEL",
+        Technique::TravelingOverwatch => "TRAV OVW",
+        Technique::BoundingOverwatch => "BOUND OVW",
+    }
 }
 
 fn weapons_str(w: WeaponsStatus) -> &'static str {

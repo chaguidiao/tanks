@@ -52,13 +52,13 @@
 - `terragen`: stages (`landform`, `hydro`, `rivers`, `cover`, `roads`), `generate()`, `workflow::ensure_map` (load-or-generate-and-bake). Recipes in `data/recipes/`.
 - `ai`: pure functions with plain inputs (no `sim` types). `picture.rs` = `PerceivedWorld` (the only thing AI/UI read), `drive.rs` route following, `formation.rs`, `position.rs` (BP hull-down finder), `firedist.rs`, `commander.rs` (OPFOR templates).
 - `sim`: `Sim` (`submit`/`submit_immediate`/`settle`/`step`/`perceived`/`truth`/`state_hash`, `Replay`), `world.rs` (SoA entities, `Order`), `vehicle.rs` (vehicle AI 5 Hz), `mobility.rs` (physics), `sensors.rs` (detection 4 Hz), `picture.rs` (per-side picture, contacts), `gunnery.rs` (FCS, ballistics, penetration, damage), `platoon.rs`/`platoon_ai.rs` (1 Hz), `control.rs` (graphics, triggers), `victory.rs`, `command.rs` (`Command`, `Event`). Scenario tests: `crates/sim/tests/m1..m6.rs`.
-- `client`: `render.rs` is the ONLY raylib module; `view.rs` (camera, map layers), `game.rs` (sim loop, planning, orders, graphics, radio text), `aar.rs` (recorder + after-action review), `editor.rs` (terrain), `scenedit.rs` (scenario editor), `symbols.rs`, `format.rs` (grids/mils/km/h), `style.rs` (palette).
+- `client`: `render.rs` is the ONLY raylib module; `view.rs` (camera, map layers, minimap), `hud.rs` (buttons, tooltips, screen layout), `game.rs` (sim loop, planning, orders/routes, command card, roster, panels, radio text), `aar.rs` (recorder + after-action review), `editor.rs` (terrain), `scenedit.rs` (scenario editor), `symbols.rs`, `format.rs` (grids/mils/km/h), `style.rs` (palette).
 - `headless`: `tanks-headless gen|bake|render|info|probe|run|duel|replay`.
 - Status, deferred items and the next milestone: DESIGN.md §13.1. Decisions taken during implementation: DESIGN.md §14 (#10–15).
 
 ## Verifying changes
 - `tools/dev/devbox.sh run just check` (fmt + clippy + nextest). Also clippy the client with `--no-default-features --features gl21,debug-truth`.
-- Visual check without a display: `xvfb-run -a -s "-screen 0 1600x900x24" target/debug/client --order 1-1:3000,2600 --advance 60 --zoom 1.2 --center 2000,1900 [--layer traffic|slope|cover] [--edit] --screenshot out/x.png`, then look at the PNG. M6 options: `--scenario m5-hold-the-village`, `--pl -:x,y,x,y`, `--bp 1:x,y,deg`, `--aar`, `--scenario-editor`, `--save-replay out/r.ron` (check with `tanks-headless replay --file out/r.ron`). Map rasters: `tanks-headless render --map demo --layer tint|landcover|traffic --downsample 3 --out out/x.png`.
+- Visual check without a display: `xvfb-run -a -s "-screen 0 1600x900x24" target/debug/client --order 1-1:3000,2600 --advance 60 --zoom 1.2 --center 2000,1900 [--layer traffic|slope|cover] [--edit] --screenshot out/x.png`, then look at the PNG. M6 options: `--scenario m5-hold-the-village`, `--order 1:cpx,cpy,..,x,y` (route with checkpoints), `--pl -:x,y,x,y`, `--bp 1:x,y,deg`, `--aar`, `--scenario-editor`, `--save-replay out/r.ron` (check with `tanks-headless replay --file out/r.ron`). Map rasters: `tanks-headless render --map demo --layer tint|landcover|traffic --downsample 3 --out out/x.png`.
 - The golden replay hash in `crates/sim/tests/m1.rs` breaks on any behaviour change: update it deliberately and say why in the commit.
 
 ## Gotchas
@@ -68,6 +68,8 @@
 - `gen` is a reserved keyword in edition 2024.
 - Use a separate `CARGO_TARGET_DIR=target/gl21` for the GL 2.1 build to avoid rebuilding raylib.
 - Podman under WSL2 works for `devbox.sh run`.
+- `devbox.sh run bash -c 'xvfb-run ...'` can hang (xvfb-run as PID 1 misses Xvfb's ready signal): end the script with `; true`.
+- Game-mode clicks: every button is built by `Game::buttons`/`App::buttons` (same layout for hit-testing and drawing); hotkeys map to the same `GameAction`s.
 
 ## Visual style
 Dark, low-saturation tactical display; monospace uppercase labels; NATO symbology (MIL-STD-2525D / APP-6D); colour is never the only cue. Avoid flashy effects, bright gradients, or particle spam.
