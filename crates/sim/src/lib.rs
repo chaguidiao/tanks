@@ -425,7 +425,13 @@ impl Sim {
                 for o in orders {
                     let cmd = match o {
                         ai::commander::Order::Move { platoon, destination, formation, technique } => {
-                            Command::PlatoonMove { platoon, destination, formation: Some(formation), technique }
+                            Command::PlatoonMove {
+                                platoon,
+                                destination,
+                                via: Vec::new(),
+                                formation: Some(formation),
+                                technique,
+                            }
                         }
                         ai::commander::Order::Occupy { platoon, centre, radius, facing } => Command::OccupyPosition {
                             platoon,
@@ -599,7 +605,7 @@ impl Sim {
 
     fn apply(&mut self, c: &TimedCommand, events: &mut Vec<Event>) {
         match &c.cmd {
-            Command::Move { unit, destination, speed_limit_mps } => {
+            Command::Move { unit, destination, via, speed_limit_mps } => {
                 let Some(k) = self.world.index_of(*unit) else { return };
                 if self.world.side[k] != c.side || !self.world.can_move(k) {
                     return;
@@ -614,8 +620,8 @@ impl Sim {
                 let layer = self.map.mobility(&self.vehicles[vi].id).expect("checked at spawn");
                 let pos = self.world.transform[k].pos;
                 let cell = self.map.manifest.cell_size_m;
-                match self.pathfinder.find(&layer.speed, cell, pos, *destination) {
-                    Some(route) => {
+                match self.pathfinder.find_via(&layer.speed, cell, pos, via, *destination) {
+                    Some((route, _)) => {
                         let length = route.windows(2).map(|w| dist(w[0], w[1])).sum::<f64>();
                         self.world.set_route(k, route, *speed_limit_mps, None, false, ai::drive::ARRIVAL_RADIUS);
                         events.push(Event::RoutePlanned { unit: *unit, length_m: length });
@@ -660,7 +666,7 @@ impl Sim {
                     self.world.weapons[k] = WeaponsStatus::Tight;
                 }
             }
-            Command::PlatoonMove { platoon, destination, formation, technique } => {
+            Command::PlatoonMove { platoon, destination, via, formation, technique } => {
                 let (dest, f, t) = (*destination, *formation, *technique);
                 if let Some(p) = self.platoon_mut(c.side, *platoon) {
                     if let Some(f) = f {
@@ -669,6 +675,8 @@ impl Sim {
                     p.technique = t;
                     p.order = platoon::PlatoonOrder::Move {
                         destination: dest,
+                        via: via.clone(),
+                        checkpoints: Vec::new(),
                         route: Vec::new(),
                         progress: [0.0, 0.0],
                         active: 0,

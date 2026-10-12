@@ -85,6 +85,7 @@ fn enemy_crossing_a_phase_line_releases_the_planned_order() {
     let then = Command::PlatoonMove {
         platoon: PlatoonId(1),
         destination: [800.0, 1300.0],
+        via: vec![],
         formation: None,
         technique: Technique::Traveling,
     };
@@ -140,6 +141,7 @@ fn planning_phase_measures_show_at_once_and_replay_identically() {
             then: Box::new(Command::PlatoonMove {
                 platoon: PlatoonId(1),
                 destination: [800.0, 1500.0],
+                via: vec![],
                 formation: None,
                 technique: Technique::Traveling,
             }),

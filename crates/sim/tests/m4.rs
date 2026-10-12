@@ -89,6 +89,7 @@ fn wedge_move_keeps_formation_and_reports_set() {
         Command::PlatoonMove {
             platoon: P1,
             destination: [500.0, 2300.0],
+            via: vec![],
             formation: Some(Formation::Wedge),
             technique: Technique::Traveling,
         },
@@ -119,6 +120,7 @@ fn bounding_overwatch_alternates_sections() {
         Command::PlatoonMove {
             platoon: P1,
             destination: [500.0, 2600.0],
+            via: vec![],
             formation: Some(Formation::Line),
             technique: Technique::BoundingOverwatch,
         },
@@ -166,6 +168,7 @@ fn platoon_reacts_to_contact_and_distributes_fire() {
         Command::PlatoonMove {
             platoon: P1,
             destination: [800.0, 3000.0],
+            via: vec![],
             formation: Some(Formation::Line),
             technique: Technique::Traveling,
         },
@@ -182,4 +185,45 @@ fn platoon_reacts_to_contact_and_distributes_fire() {
     );
     // Halted short of the enemy rather than driving into it.
     assert!((0..4).all(|k| w.transform[k].pos[1] < 2500.0));
+}
+
+#[test]
+fn platoon_route_passes_its_checkpoints_in_order() {
+    // Route with checkpoints (ATP 3-20.15 ch. 3, tactical movement along a route): the platoon
+    // must pass CP 1 to the east before turning back west to the destination.
+    let ds = data();
+    let m = map(&ds, 250, 750, "grassland", |_, _| 0.0);
+    let mut sim = Sim::new(&scenario(DAY, platoon(300.0), vec![]), ds, m).unwrap();
+    let (cp, dest) = ([850.0, 1300.0], [250.0, 2300.0]);
+    sim.submit_immediate(
+        BLUE,
+        Command::PlatoonMove {
+            platoon: P1,
+            destination: dest,
+            via: vec![cp],
+            formation: Some(Formation::Column),
+            technique: Technique::Traveling,
+        },
+    );
+    run(&mut sim, 2.0);
+    assert_eq!(sim.perceived(BLUE).platoon(P1).unwrap().waypoints, vec![cp, dest]);
+    let mut closest = f64::MAX;
+    let mut passed_cp = false;
+    let mut set = false;
+    for _ in 0..700 {
+        for e in run(&mut sim, 1.0) {
+            set |= matches!(e, Event::PlatoonReport { report: PlatoonReport::SetAt { .. }, .. });
+        }
+        closest = closest.min(dist(sim.truth().transform[0].pos, cp));
+        if sim.perceived(BLUE).platoon(P1).unwrap().waypoints == vec![dest] {
+            passed_cp = true;
+        }
+        if set {
+            break;
+        }
+    }
+    assert!(closest < 60.0, "leader passed {closest:.0} m from CP 1");
+    assert!(passed_cp, "CP 1 drops off the remaining waypoints once passed");
+    assert!(set, "platoon reports set at the destination");
+    assert!(dist(sim.truth().transform[0].pos, dest) < 200.0);
 }

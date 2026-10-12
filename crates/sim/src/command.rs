@@ -20,19 +20,25 @@ pub enum PositionKind {
 /// Orders into the simulation. Intent-level: platoon and vehicle AI decide how to execute them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Command {
-    /// Move a single vehicle to a point by the fastest route.
+    /// Move a single vehicle to a point by the fastest route, through checkpoints `via` in order
+    /// (route with checkpoints, FM 1-02.2 / ADP 3-90 control measures).
     Move {
         unit: EntityId,
         destination: Vec2,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        via: Vec<Vec2>,
         speed_limit_mps: Option<f64>,
     },
     Halt {
         to: Addressee,
     },
-    /// Platoon movement in a formation using a movement technique (ATP 3-20.15 ch. 3).
+    /// Platoon movement in a formation using a movement technique (ATP 3-20.15 ch. 3), along a
+    /// route through checkpoints `via` in order.
     PlatoonMove {
         platoon: PlatoonId,
         destination: Vec2,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        via: Vec<Vec2>,
         formation: Option<Formation>,
         technique: Technique,
     },

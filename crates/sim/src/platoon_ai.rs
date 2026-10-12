@@ -60,6 +60,13 @@ impl Ctx<'_> {
         let layer = self.map.mobility(&self.vehicles[vi].id)?;
         self.pathfinder.find(&layer.speed, self.map.manifest.cell_size_m, self.world.transform[k].pos, to)
     }
+
+    /// Route through checkpoints; also returns the arc length of each checkpoint.
+    fn route_via(&mut self, k: usize, via: &[Vec2], to: Vec2) -> Option<(Vec<Vec2>, Vec<f64>)> {
+        let vi = self.world.vehicle[k]?;
+        let layer = self.map.mobility(&self.vehicles[vi].id)?;
+        self.pathfinder.find_via(&layer.speed, self.map.manifest.cell_size_m, self.world.transform[k].pos, via, to)
+    }
 }
 
 pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
@@ -155,8 +162,10 @@ fn contact_drill(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
     else {
         return;
     };
-    if let PlatoonOrder::Move { destination, .. } = p.order {
-        p.resume = Some((destination, p.technique));
+    if let PlatoonOrder::Move { destination, via, checkpoints, progress, .. } = &p.order {
+        // Checkpoints already passed are not revisited when the move resumes.
+        let ahead = via.iter().zip(checkpoints).filter(|(_, s)| **s > progress[0]).map(|(v, _)| *v).collect();
+        p.resume = Some((*destination, ahead, p.technique));
     }
     p.order = PlatoonOrder::Contact;
     p.quiet_since = ctx.tick;
@@ -179,9 +188,16 @@ fn contact_step(p: &mut Platoon, ctx: &mut Ctx) {
     }
     if (ctx.tick - p.quiet_since) as f64 * DT >= QUIET_RESUME_S {
         match p.resume.take() {
-            Some((dest, tech)) => {
+            Some((dest, via, tech)) => {
                 p.technique = tech;
-                p.order = PlatoonOrder::Move { destination: dest, route: Vec::new(), progress: [0.0, 0.0], active: 0 };
+                p.order = PlatoonOrder::Move {
+                    destination: dest,
+                    via,
+                    checkpoints: Vec::new(),
+                    route: Vec::new(),
+                    progress: [0.0, 0.0],
+                    active: 0,
+                };
                 ctx.report(p, PlatoonReport::ContinuingMission);
             }
             None => p.order = PlatoonOrder::None,
@@ -195,16 +211,20 @@ fn section(i: usize, n: usize) -> usize {
 
 fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
     let movers: Vec<usize> = p.members.iter().copied().filter(|&k| ctx.world.can_move(k)).collect();
-    let PlatoonOrder::Move { destination, mut route, mut progress, mut active } = p.order.clone() else { return };
+    let PlatoonOrder::Move { destination, via, mut checkpoints, mut route, mut progress, mut active } = p.order.clone()
+    else {
+        return;
+    };
     if movers.is_empty() {
         p.order = PlatoonOrder::None;
         return;
     }
     if route.is_empty() {
         let leader = movers[0];
-        match ctx.route(leader, destination) {
-            Some(r) => {
+        match ctx.route_via(leader, &via, destination) {
+            Some((r, marks)) => {
                 route = r;
+                checkpoints = marks;
                 progress = [0.0, 0.0];
                 active = 0;
                 p.slot_targets = vec![[f64::NAN, f64::NAN]; p.members.len()];
@@ -319,7 +339,7 @@ fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
         p.order = PlatoonOrder::None;
         ctx.report(p, PlatoonReport::SetAt { pos: c });
     } else {
-        p.order = PlatoonOrder::Move { destination, route, progress, active };
+        p.order = PlatoonOrder::Move { destination, via, checkpoints, route, progress, active };
     }
 }
 

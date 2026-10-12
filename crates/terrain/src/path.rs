@@ -44,6 +44,36 @@ impl Pathfinder {
         }
     }
 
+    /// Fastest route from `start` through each checkpoint in `via` to `goal`, one leg at a time.
+    /// Returns the joined waypoints and the arc length (m) at which each checkpoint is reached,
+    /// or `None` if any leg is unreachable.
+    pub fn find_via(
+        &mut self,
+        speed: &Grid<u8>,
+        cell: f64,
+        start: Vec2,
+        via: &[Vec2],
+        goal: Vec2,
+    ) -> Option<(Vec<Vec2>, Vec<f64>)> {
+        let mut route: Vec<Vec2> = Vec::new();
+        let mut marks = Vec::with_capacity(via.len());
+        let mut s = 0.0;
+        for &to in via.iter().chain(std::iter::once(&goal)) {
+            let from = route.last().copied().unwrap_or(start);
+            let leg = self.find(speed, cell, from, to)?;
+            // The first leg is kept whole, so an empty `via` gives exactly `find`'s route.
+            let skip = usize::from(!route.is_empty());
+            for p in leg.into_iter().skip(skip) {
+                let last = route.last().copied().unwrap_or(p);
+                s += ((p[0] - last[0]).powi(2) + (p[1] - last[1]).powi(2)).sqrt();
+                route.push(p);
+            }
+            marks.push(s);
+        }
+        marks.pop();
+        Some((route, marks))
+    }
+
     /// Fastest route from `start` to `goal` (metric). Returns smoothed waypoints including both
     /// ends, or `None` if the goal is unreachable.
     pub fn find(&mut self, speed: &Grid<u8>, cell: f64, start: Vec2, goal: Vec2) -> Option<Vec<Vec2>> {
@@ -294,6 +324,21 @@ mod tests {
         // Straight across slow ground: 380 s. Via the road (~120 m detour each way at 1 m/s
         // plus 380 m at 10 m/s) is faster, so the route must use row 50 (y ≈ 202 m).
         assert!(p.iter().any(|q| (q[1] - 202.0).abs() < 4.0), "{p:?}");
+    }
+
+    #[test]
+    fn route_passes_through_checkpoints_in_order() {
+        let g = speed_grid(64, 64, 100);
+        let mut pf = Pathfinder::new();
+        let (start, cp, goal) = ([10.0, 10.0], [200.0, 20.0], [20.0, 200.0]);
+        let (p, marks) = pf.find_via(&g, 4.0, start, &[cp], goal).unwrap();
+        assert_eq!(marks.len(), 1);
+        let k = p.iter().position(|q| (q[0] - cp[0]).hypot(q[1] - cp[1]) < 4.0).expect("visits checkpoint");
+        let s: f64 = p[..=k].windows(2).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).sum();
+        assert!((s - marks[0]).abs() < 1e-6, "{s} vs {}", marks[0]);
+        // No checkpoints: identical to `find`.
+        let direct = pf.find(&g, 4.0, start, goal).unwrap();
+        assert_eq!(pf.find_via(&g, 4.0, start, &[], goal).unwrap().0, direct);
     }
 
     #[test]

@@ -34,6 +34,19 @@ pub fn along(route: &[Vec2], s: f64) -> (Vec2, f64) {
     (route[n - 1], crate::drive::bearing(route[n - 2], route[n - 1]))
 }
 
+/// The part of a polyline beyond arc length `s` (starting at the point at `s`).
+pub fn remaining(route: &[Vec2], s: f64) -> Vec<Vec2> {
+    let mut out = vec![along(route, s).0];
+    let mut acc = 0.0;
+    for w in route.windows(2) {
+        acc += libm::sqrt((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2));
+        if acc > s {
+            out.push(w[1]);
+        }
+    }
+    out
+}
+
 pub fn length(route: &[Vec2]) -> f64 {
     route.windows(2).map(|w| libm::sqrt((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2))).sum()
 }
@@ -41,6 +54,14 @@ pub fn length(route: &[Vec2]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remaining_starts_at_progress() {
+        let r = [[0.0, 0.0], [100.0, 0.0], [100.0, 100.0]];
+        assert_eq!(remaining(&r, 50.0), vec![[50.0, 0.0], [100.0, 0.0], [100.0, 100.0]]);
+        assert_eq!(remaining(&r, 150.0), vec![[100.0, 50.0], [100.0, 100.0]]);
+        assert_eq!(remaining(&r, 500.0), vec![[100.0, 100.0]]);
+    }
 
     #[test]
     fn slots_rotate_with_heading() {

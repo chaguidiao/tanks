@@ -107,6 +107,10 @@ pub struct PlatoonView {
     pub formation: sim_data::Formation,
     pub technique: sim_data::Technique,
     pub task: String,
+    /// Remaining planned route of the platoon's virtual leader (empty when not moving).
+    pub route: Vec<Vec2>,
+    /// Checkpoints not yet passed, then the destination (also kept while in a contact drill).
+    pub waypoints: Vec<Vec2>,
 }
 
 /// Control measures (DESIGN.md §8.4; MIL-STD-2525D tactical graphics).

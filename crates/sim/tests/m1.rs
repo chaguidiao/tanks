@@ -78,7 +78,10 @@ fn reaches_governed_speed_on_a_paved_road() {
     let ds = data();
     let map = baked(&flat_pkg(1000, 40, "road", "paved", &ds), &ds);
     let mut sim = Sim::new(&scenario(1990, [20.0, 80.0], 90.0), ds.clone(), map).unwrap();
-    sim.submit_immediate(BLUE, Command::Move { unit: TANK, destination: [3900.0, 80.0], speed_limit_mps: None });
+    sim.submit_immediate(
+        BLUE,
+        Command::Move { unit: TANK, destination: [3900.0, 80.0], via: vec![], speed_limit_mps: None },
+    );
     run(&mut sim, 40.0);
     let v = sim.perceived(BLUE).unit(TANK).unwrap().speed;
     let governed = ds.vehicle("bulwark_a1").unwrap().mobility.max_speed_road_mps.get();
@@ -98,7 +101,10 @@ fn climb_speed_matches_power_limited_formula() {
     }
     let map = baked(&pkg, &ds);
     let mut sim = Sim::new(&scenario(1990, [120.0, 40.0], 0.0), ds.clone(), map).unwrap();
-    sim.submit_immediate(BLUE, Command::Move { unit: TANK, destination: [120.0, 1550.0], speed_limit_mps: None });
+    sim.submit_immediate(
+        BLUE,
+        Command::Move { unit: TANK, destination: [120.0, 1550.0], via: vec![], speed_limit_mps: None },
+    );
     run(&mut sim, 60.0);
     let v = sim.perceived(BLUE).unit(TANK).unwrap().speed;
     let m = &ds.vehicle("bulwark_a1").unwrap().mobility;
@@ -127,7 +133,10 @@ fn slope_beyond_limit_has_no_route() {
     }
     let map = baked(&pkg, &ds);
     let mut sim = Sim::new(&scenario(1990, [120.0, 100.0], 0.0), ds, map).unwrap();
-    sim.submit_immediate(BLUE, Command::Move { unit: TANK, destination: [120.0, 700.0], speed_limit_mps: None });
+    sim.submit_immediate(
+        BLUE,
+        Command::Move { unit: TANK, destination: [120.0, 700.0], via: vec![], speed_limit_mps: None },
+    );
     let ev = run(&mut sim, 1.0);
     assert!(ev.contains(&Event::NoRoute { unit: TANK }), "{ev:?}");
 }
@@ -155,7 +164,10 @@ fn move_order_routes_over_the_bridge_and_arrives() {
     let ds = data();
     let map = river_map(&ds);
     let mut sim = Sim::new(&scenario(1990, [200.0, 200.0], 0.0), ds.clone(), map.clone()).unwrap();
-    sim.submit_immediate(BLUE, Command::Move { unit: TANK, destination: [200.0, 1000.0], speed_limit_mps: None });
+    sim.submit_immediate(
+        BLUE,
+        Command::Move { unit: TANK, destination: [200.0, 1000.0], via: vec![], speed_limit_mps: None },
+    );
     let ford = ds.vehicle("bulwark_a1").unwrap().mobility.fording_depth_m.get();
     let mut arrived_at = None;
     let mut crossed_x = None;
@@ -197,13 +209,13 @@ fn replay_hash(ds: &Arc<DataSet>, map: &Arc<BakedMap>) -> (u64, Vec<Event>) {
         if t == 10 {
             sim.submit_immediate(
                 BLUE,
-                Command::Move { unit: TANK, destination: [1000.0, 1000.0], speed_limit_mps: None },
+                Command::Move { unit: TANK, destination: [1000.0, 1000.0], via: vec![], speed_limit_mps: None },
             );
         }
         if t == 900 {
             sim.submit_immediate(
                 BLUE,
-                Command::Move { unit: TANK, destination: [300.0, 900.0], speed_limit_mps: Some(8.0) },
+                Command::Move { unit: TANK, destination: [300.0, 900.0], via: vec![], speed_limit_mps: Some(8.0) },
             );
         }
         if t == 2000 {

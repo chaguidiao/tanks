@@ -240,7 +240,7 @@ fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), St
         let (x, y) = m.split_once(',').ok_or("--move expects x,y")?;
         let dest = [x.parse::<f64>().map_err(|_| "bad x")?, y.parse::<f64>().map_err(|_| "bad y")?];
         let unit = sim.perceived(blue).own.first().ok_or("no Blue units")?.id;
-        sim.submit(blue, Command::Move { unit, destination: dest, speed_limit_mps: None });
+        sim.submit(blue, Command::Move { unit, destination: dest, via: vec![], speed_limit_mps: None });
     }
     let t = Instant::now();
     let ticks = (seconds * sim::TICK_HZ as f64) as u64;
