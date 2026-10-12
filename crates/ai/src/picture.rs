@@ -42,6 +42,15 @@ pub enum Condition {
     Destroyed,
 }
 
+/// What the gun crew is doing (own units only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GunActivity {
+    Ready,
+    Laying,
+    Lasing,
+    Reloading,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct OwnUnit {
     pub id: EntityId,
@@ -62,6 +71,13 @@ pub struct OwnUnit {
     pub route: Vec<Vec2>,
     /// Hull-down state reported by the crew for its current position, if set in a BP.
     pub position_note: Option<String>,
+    /// Crew fit for duty, of the vehicle's establishment.
+    pub crew: (u8, u8),
+    /// Sights damaged by a hit.
+    pub sights_degraded: bool,
+    pub gun: GunActivity,
+    /// The contact the gun is engaging (the crew's own track, as reported).
+    pub target: Option<ContactId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

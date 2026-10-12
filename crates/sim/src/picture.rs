@@ -6,10 +6,13 @@
 //! contacts. Contacts age and expire. Own units are reported exactly (digital position
 //! reporting; era-dependent lag is future work).
 
-use ai::picture::{Contact, ContactId, ContactLevel, OwnUnit, PerceivedWorld, PlatoonView, ShotView, SideId, Task};
+use ai::picture::{
+    Contact, ContactId, ContactLevel, GunActivity, OwnUnit, PerceivedWorld, PlatoonView, ShotView, SideId, Task,
+};
 use rand_chacha::ChaCha8Rng;
 use sim_data::{DoctrinePack, VehicleDef};
 
+use crate::gunnery::Phase;
 use crate::sensors::uniform;
 use crate::world::{Order, World};
 use crate::{DT, Event, Vec2, dist};
@@ -260,6 +263,18 @@ impl SideState {
                 None => (Task::Idle, Vec::new(), None),
             };
             let (turret, ammo) = w.gun[k].as_ref().map_or((t.heading, 0), |g| (g.turret, g.ammo));
+            let establishment = w.vehicle[k].map_or(0, |vi| vehicles[vi].crew);
+            let lost = w.gun[k].as_ref().map_or(0, |g| g.crew_loss);
+            let crew = (establishment.saturating_sub(lost), establishment);
+            let gun = match w.gun[k].as_ref().map(|g| g.phase) {
+                Some(Phase::Laying { .. }) => GunActivity::Laying,
+                Some(Phase::Lasing { .. }) => GunActivity::Lasing,
+                Some(Phase::Reloading { .. }) => GunActivity::Reloading,
+                _ => GunActivity::Ready,
+            };
+            let target =
+                w.gun[k].as_ref().and_then(|g| g.target).and_then(|tg| w.sensors[k].as_ref()?.track(tg)?.contact);
+            let sights_degraded = w.sensors[k].as_ref().is_some_and(|s| s.degraded);
             if w.gun[k].as_ref().is_some_and(|g| g.target.is_some()) {
                 task = Task::Engaging;
             }
@@ -280,6 +295,10 @@ impl SideState {
                 task,
                 route,
                 position_note: note,
+                crew,
+                sights_degraded,
+                gun,
+                target,
             });
         }
     }

@@ -173,7 +173,18 @@ fn platoon_reacts_to_contact_and_distributes_fire() {
             technique: Technique::Traveling,
         },
     );
-    let events = run(&mut sim, 240.0);
+    // The own picture reports each crew's gun state and target (the selected-vehicle card).
+    let (mut events, mut target_seen, mut gun_busy) = (Vec::new(), false, false);
+    for _ in 0..240 * sim::TICK_HZ {
+        events.extend(sim.step());
+        let pic = sim.perceived(BLUE);
+        for u in &pic.own {
+            target_seen |= u.target.is_some_and(|c| pic.contact(c).is_some());
+            gun_busy |= u.gun != sim::view::GunActivity::Ready;
+            assert_eq!(u.crew.1, 4);
+        }
+    }
+    assert!(target_seen && gun_busy, "targets and gun activity reach the own picture");
     assert!(
         events.iter().any(|e| matches!(e, Event::PlatoonReport { report: PlatoonReport::Contact { .. }, .. })),
         "contact drill triggered"
