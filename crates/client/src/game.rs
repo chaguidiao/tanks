@@ -172,6 +172,10 @@ pub struct Game {
     pub recorder: Recorder,
     pub aar: Option<AarView>,
     counts: [u32; 3],
+    /// Formation / weapons changes sent but not yet in the picture (orders wait for the next
+    /// step, or for the radio): the card shows and cycles from these. (target, value, sent at)
+    pending_formation: Vec<(PlatoonId, Formation, f64)>,
+    pending_weapons: Vec<(Addressee, WeaponsStatus, f64)>,
 }
 
 impl Game {
@@ -202,6 +206,8 @@ impl Game {
             recorder: Recorder::default(),
             aar: None,
             counts: [0; 3],
+            pending_formation: Vec::new(),
+            pending_weapons: Vec::new(),
         };
         if let Some((id, p)) = g.picture().own.first().map(|u| (u.id, u.platoon)) {
             g.sel_unit = Some(id);
@@ -373,6 +379,7 @@ impl Game {
                 self.on_event(&e);
             }
         }
+        self.prune_pending();
     }
 
     fn on_event(&mut self, e: &Event) {
@@ -621,6 +628,11 @@ impl Game {
         self.tool = if std::mem::discriminant(&self.tool) == std::mem::discriminant(&t) { Tool::None } else { t };
     }
 
+    /// Run a command-card action outside the frame loop (scripted checks: `--press`).
+    pub fn press(&mut self, c: Cmd) {
+        self.command(c, &mut GameFx::default());
+    }
+
     fn command(&mut self, c: Cmd, fx: &mut GameFx) {
         let selected = self.addressee().is_some();
         if self.tool == Tool::Viewshed && !matches!(c, Cmd::Viewshed) {
@@ -644,10 +656,14 @@ impl Game {
             }
             Cmd::Formation => {
                 if let Some(p) = self.sel_platoon
-                    && let Some(v) = self.picture().platoon(p)
+                    && let Some(cur) = self.shown_formation(p)
                 {
-                    let i = Formation::ALL.iter().position(|f| *f == v.formation).unwrap_or(0);
+                    let i = Formation::ALL.iter().position(|f| *f == cur).unwrap_or(0);
                     let f = Formation::ALL[(i + 1) % Formation::ALL.len()];
+                    if self.order_mode == OrderMode::Now {
+                        self.pending_formation.retain(|x| x.0 != p);
+                        self.pending_formation.push((p, f, self.sim.time_s()));
+                    }
                     self.order(Command::SetFormation { platoon: p, formation: f });
                     let cs = self.platoon_cs(p);
                     self.radio(format!("TO {cs}: CHANGE FORMATION, {}.", format_formation(f)));
@@ -667,6 +683,10 @@ impl Game {
                         WeaponsStatus::Tight => WeaponsStatus::Hold,
                         WeaponsStatus::Hold => WeaponsStatus::Free,
                     };
+                    if self.order_mode == OrderMode::Now {
+                        self.pending_weapons.retain(|x| x.0 != to);
+                        self.pending_weapons.push((to, next, self.sim.time_s()));
+                    }
                     self.order(Command::WeaponsControl { to, status: next });
                     self.radio(format!("WEAPONS {}.", weapons_str(next)));
                 }
@@ -739,9 +759,38 @@ impl Game {
     }
 
     /// Weapons control status of the selection (its first vehicle).
+    /// Weapons status of the selection, or the one just ordered if not yet acknowledged.
     fn selection_weapons(&self) -> Option<WeaponsStatus> {
+        let to = self.addressee()?;
+        if let Some(w) = self.pending_weapons.iter().find(|x| x.0 == to) {
+            return Some(w.1);
+        }
+        self.actual_weapons(to)
+    }
+
+    /// Platoon formation, or the one just ordered if not yet acknowledged.
+    fn shown_formation(&self, p: PlatoonId) -> Option<Formation> {
+        if let Some(f) = self.pending_formation.iter().find(|x| x.0 == p) {
+            return Some(f.1);
+        }
+        self.picture().platoon(p).map(|v| v.formation)
+    }
+
+    /// Drop pending changes once the picture shows them (or after a minute, if overtaken).
+    fn prune_pending(&mut self) {
+        let now = self.sim.time_s();
+        let fresh = |t: f64| now - t < 60.0;
+        let mut pf = std::mem::take(&mut self.pending_formation);
+        pf.retain(|&(p, f, t)| fresh(t) && self.picture().platoon(p).is_some_and(|v| v.formation != f));
+        self.pending_formation = pf;
+        let mut pw = std::mem::take(&mut self.pending_weapons);
+        pw.retain(|&(to, w, t)| fresh(t) && self.actual_weapons(to).is_some_and(|a| a != w));
+        self.pending_weapons = pw;
+    }
+
+    fn actual_weapons(&self, to: Addressee) -> Option<WeaponsStatus> {
         let pic = self.picture();
-        match self.addressee()? {
+        match to {
             Addressee::Unit(u) => pic.unit(u).map(|u| u.weapons),
             Addressee::Platoon(p) => pic.platoon(p)?.members.first().and_then(|u| pic.unit(*u)).map(|u| u.weapons),
         }
@@ -1309,10 +1358,7 @@ impl Game {
         }
         let is = |t: &Tool| std::mem::discriminant(&self.tool) == std::mem::discriminant(t);
         let gfx = |k: DrawKind| matches!(&self.tool, Tool::Graphic { kind, .. } if *kind == k);
-        let formation = self
-            .sel_platoon
-            .and_then(|p| self.picture().platoon(p))
-            .map_or(String::new(), |v| format_formation(v.formation));
+        let formation = self.sel_platoon.and_then(|p| self.shown_formation(p)).map_or(String::new(), format_formation);
         let weapons = self.selection_weapons().map_or("", weapons_str);
         vec![
             (
@@ -1411,7 +1457,11 @@ impl Game {
             head.push((format!("PLATOON {}", pv.callsign), style::FRIENDLY));
             head.push((pv.task.clone(), style::TEXT));
             head.push((
-                format!("FORM {}   NEXT MOVE {}", format_formation(pv.formation), short_technique(self.technique)),
+                format!(
+                    "FORM {}   NEXT MOVE {}",
+                    format_formation(self.shown_formation(pv.id).unwrap_or(pv.formation)),
+                    short_technique(self.technique)
+                ),
                 style::TEXT_DIM,
             ));
             if !pv.waypoints.is_empty() {

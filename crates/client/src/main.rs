@@ -26,7 +26,7 @@ use terragen::workflow;
 use terrain::{AuthoringPackage, BakedMap};
 
 use crate::editor::Editor;
-use crate::game::{Game, GameAction};
+use crate::game::{Cmd, Game, GameAction};
 use crate::hud::{Button, Look, Rect};
 use crate::render::{Gfx, Input, Key};
 use crate::scenedit::ScenarioEditor;
@@ -71,6 +71,8 @@ struct Opts {
     zoom: Option<f64>,
     center: Option<[f64; 2]>,
     layer: Option<String>,
+    select: Option<String>,
+    press: Option<String>,
 }
 
 fn parse_xy(s: &str) -> Option<[f64; 2]> {
@@ -105,6 +107,8 @@ fn opts() -> Result<Opts, String> {
         zoom: get("--zoom").and_then(|v| v.parse().ok()),
         center: get("--center").and_then(|v| parse_xy(&v)),
         layer: get("--layer"),
+        select: get("--select"),
+        press: get("--press"),
     })
 }
 
@@ -207,6 +211,24 @@ fn run() -> Result<(), String> {
                 }
                 _ => return Err(format!("bad {kind} {cs}:{n:?}")),
             }
+        }
+        // `--select <platoon> --press F,W,T`: command-card keys, before and after `--advance`.
+        if let Some(cs) = &o.select {
+            g.sel_platoon = g.picture().platoons.iter().find(|p| &p.callsign == cs).map(|p| p.id);
+            g.sel_unit = None;
+        }
+        let press = |g: &mut Game, keys: &str| {
+            for k in keys.split(',').map(str::trim) {
+                match k {
+                    "F" => g.press(Cmd::Formation),
+                    "W" => g.press(Cmd::Weapons),
+                    "T" => g.press(Cmd::Technique),
+                    _ => {}
+                }
+            }
+        };
+        if let Some(keys) = &o.press {
+            press(g, keys);
         }
         if o.advance_s > 0.0 {
             g.execute();
