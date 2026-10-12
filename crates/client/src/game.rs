@@ -1653,11 +1653,16 @@ fn route_line(f: &mut Frame, cam: &Camera, pts: &[[f64; 2]], c: Rgba, dashed: bo
 fn checkpoints(f: &mut Frame, cam: &Camera, pts: &[[f64; 2]], c: Rgba) {
     let Some((last, cps)) = pts.split_last() else { return };
     for (i, p) in cps.iter().enumerate() {
+        // Dark disc behind the number so it reads over any map layer.
         let s = cam.to_screen(*p);
-        f.circle_lines(s, 7.0, c);
+        f.circle(s, 10.0, style::PANEL);
+        f.circle_lines(s, 10.0, c);
         let t = format!("{}", i + 1);
-        f.text(&t, s[0] - 3.0, s[1] - 5.0, style::FONT, c);
-        f.text("CP", s[0] + 9.0, s[1] - 5.0, style::FONT, c);
+        let tw = f.text_width(&t, style::FONT_S);
+        f.text(&t, s[0] - tw / 2.0, s[1] - style::FONT_S as f32 / 2.0, style::FONT_S, c);
+        let cw = f.text_width("CP", style::FONT_S);
+        f.rect(s[0] + 11.0, s[1] - 8.0, cw + 6.0, 16.0, style::PANEL);
+        f.text("CP", s[0] + 14.0, s[1] - style::FONT_S as f32 / 2.0, style::FONT_S, c);
     }
     let s = cam.to_screen(*last);
     f.line([s[0] - 6.0, s[1] - 6.0], [s[0] + 6.0, s[1] + 6.0], 1.5, c);
