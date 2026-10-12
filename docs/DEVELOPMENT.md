@@ -49,16 +49,27 @@ tools/dev/devbox.sh run cargo run --release -p headless -- render --map demo --l
 tools/dev/devbox.sh run cargo run --release -p headless -- run --scenario m1-move --seconds 600 --move 6000,5200
 ```
 
-Client: every control is a button (top bar, roster, command card) that shows its hotkey; hover for a
-tooltip, F7 for the full key list. Game: LMB select, RMB move, Shift+RMB add route checkpoints (release
-Shift to send), H halt, Space pause, 1–4 speed. E toggles the terrain editor (1–4 brushes, 5 river,
-6 road, 7 forest, Ctrl+S save).
+Client: starts at the title screen → main menu (play scenario, scenario editor, terrain editor,
+options). Every control is a button that shows its hotkey; hover for a tooltip, F7 for the key list of
+the current screen, Esc for the screen menu. Game: LMB select, RMB move, Shift+RMB add route checkpoints
+(release Shift to send), H halt, Space pause, 1–4 speed. Terrain editor: 1–4 brushes, 5 river, 6 road,
+7 forest, 8 building, Ctrl+S save. Scenario editor: F9 play test (and back). Options are stored in
+`~/.config/tanks/settings.cfg` (override with `TANKS_CONFIG`).
 
 Headless rendering (screenshots without a display, Mesa llvmpipe):
 ```bash
 tools/dev/devbox.sh run xvfb-run -a -s "-screen 0 1600x900x24" cargo run -p client -- --order 1-1:3000,2600 --advance 60 --screenshot out/m1.png
 # platoon route with checkpoints: --order <platoon>:cp1x,cp1y,...,destx,desty
 tools/dev/devbox.sh run bash -c 'xvfb-run -a -s "-screen 0 1600x900x24" target/debug/client --scenario m5-hold-the-village --order 1:5200,4300,5800,3900,5400,3300 --advance 60 --screenshot out/route.png; true'
+```
+Menus and flows (screenshot runs use default options and never write the options file):
+```bash
+# a screen directly: title | main | play | edit-scenario | edit-terrain | options
+target/debug/client --screen play --screenshot out/play.png
+# scripted keys, one per frame (waitN = N idle frames; loads do not count): title → menu → 2nd scenario → game → Esc menu
+target/debug/client --keys wait5,enter,wait3,enter,wait3,down,enter,wait5,esc --frames 30 --screenshot out/pause.png
+# any game/editor option opens that screen directly (as before); --pause adds its menu
+target/debug/client --scenario m5-hold-the-village --scenario-editor --screenshot out/scened.png
 ```
 If you wrap `xvfb-run` in `bash -c`, end the script with `; true`: otherwise bash execs `xvfb-run` as
 the container's PID 1, where it can miss Xvfb's ready signal and hang forever.

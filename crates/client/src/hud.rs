@@ -1,5 +1,5 @@
 //! Clickable heads-up display: a small immediate-mode button list shared by the top bar,
-//! the command card, the platoon roster and the selection panel (DESIGN.md §10.4).
+//! the command card, the platoon roster and the selection panel (DESIGN.md §10.2).
 //!
 //! Layout is computed from the screen size each frame, once for hit-testing in `update` and
 //! again for drawing, so there is no retained widget state. Every button also has a hotkey;
@@ -82,6 +82,8 @@ pub enum Look {
     Card,
     /// List row (roster, selection panel): left-aligned text.
     Row,
+    /// Menu screens: large left-aligned label, value (option setting) on the right.
+    Menu,
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +98,8 @@ pub struct Button<A> {
     pub active: bool,
     pub look: Look,
     pub colour: Rgba,
+    /// Keyboard focus (menus): drawn like the mouse hover.
+    pub focused: bool,
 }
 
 impl<A> Button<A> {
@@ -111,6 +115,7 @@ impl<A> Button<A> {
             active: false,
             look,
             colour: style::TEXT,
+            focused: false,
         }
     }
     pub fn key(mut self, k: &'static str) -> Self {
@@ -179,8 +184,10 @@ pub fn panel(f: &mut Frame, r: Rect) {
 }
 
 pub fn draw<A>(f: &mut Frame, buttons: &[Button<A>], mouse: P2) {
+    // With keyboard focus in the list, the focus alone is highlighted (mouse moves move it).
+    let has_focus = buttons.iter().any(|b| b.focused);
     for b in buttons {
-        let hover = b.enabled && b.r.contains(mouse);
+        let hover = b.enabled && if has_focus { b.focused } else { b.r.contains(mouse) };
         let (bg, edge) = match (b.active, hover) {
             (true, _) => (style::BUTTON_ACTIVE, style::SELECT),
             (false, true) => (style::BUTTON_HOVER, style::TEXT),
@@ -220,6 +227,25 @@ pub fn draw<A>(f: &mut Frame, buttons: &[Button<A>], mouse: P2) {
                     let vw = f.text_width(&b.value, style::FONT_S);
                     let vc = if b.enabled { style::TEXT_DIM } else { style::TEXT_OFF };
                     f.text(&b.value, r.x + r.w - vw - 6.0, r.y + (r.h - style::FONT_S as f32) / 2.0, style::FONT_S, vc);
+                }
+            }
+            Look::Menu => {
+                let ty = r.y + (r.h - style::FONT_M as f32) / 2.0;
+                if hover {
+                    f.rect(r.x, r.y, 3.0, r.h, style::AMBER);
+                }
+                f.text(&b.label, r.x + 16.0, ty, style::FONT_M, text);
+                let mut right = r.x + r.w - 12.0;
+                if !b.key.is_empty() {
+                    let kw = f.text_width(b.key, style::FONT_S);
+                    let kc = if b.enabled { style::AMBER } else { style::TEXT_OFF };
+                    f.text(b.key, right - kw, r.y + (r.h - style::FONT_S as f32) / 2.0, style::FONT_S, kc);
+                    right -= kw + 16.0;
+                }
+                if !b.value.is_empty() {
+                    let vw = f.text_width(&b.value, style::FONT_M);
+                    let vc = if b.enabled { style::SELECT } else { style::TEXT_OFF };
+                    f.text(&b.value, right - vw, ty, style::FONT_M, vc);
                 }
             }
         }

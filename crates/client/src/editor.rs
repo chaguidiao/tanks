@@ -125,7 +125,7 @@ impl Editor {
             undo: Vec::new(),
             redo: Vec::new(),
             unsaved: false,
-            status: "EDITOR".into(),
+            status: String::new(),
         }
     }
 
@@ -452,7 +452,7 @@ impl Editor {
         let (x, y, w, h) = (10.0, 40.0, 190.0, 248.0);
         f.rect(x, y, w, h, style::PANEL);
         f.rect_lines(x, y, w, h, style::PANEL_EDGE);
-        f.text("TERRAIN EDITOR", x + 10.0, y + 8.0, style::FONT_L - 6, style::AMBER);
+        f.text("TOOLS", x + 10.0, y + 8.0, style::FONT_L - 6, style::AMBER);
         for (k, t) in Tool::ALL.iter().enumerate() {
             let c = if *t == self.tool { style::SELECT } else { style::TEXT };
             let mark = if *t == self.tool { ">" } else { " " };
@@ -473,14 +473,19 @@ impl Editor {
             f.text(l, x + 10.0, y + 184.0 + k as f32 * 18.0, style::FONT_L - 8, style::TEXT_DIM);
         }
         let hint = if self.tool.is_brush() {
-            "LMB PAINT  DEL DELETE FEATURE  CTRL+Z/Y UNDO/REDO  B BAKE  E EXIT"
+            "LMB PAINT  DEL DELETE FEATURE  CTRL+Z/Y UNDO/REDO  B BAKE  CTRL+S SAVE  ESC MENU"
         } else if self.tool == Tool::Building {
-            "LMB CENTRE, LMB END OF LONG AXIS  DEL DELETE FEATURE  ESC CANCEL  E EXIT"
+            "LMB CENTRE, LMB END OF LONG AXIS  DEL DELETE FEATURE  ESC CANCEL"
         } else {
-            "LMB ADD POINT  ENTER FINISH  BKSP UNDO POINT  ESC CANCEL  E EXIT"
+            "LMB ADD POINT  ENTER FINISH  BKSP UNDO POINT  ESC CANCEL"
         };
         f.text(hint, 10.0, screen[1] - 44.0, style::FONT_L - 8, style::TEXT_DIM);
         f.text(&self.status, 220.0, 44.0, style::FONT_L - 8, style::AMBER);
+    }
+
+    /// A feature is being drawn (Esc cancels it rather than opening the menu).
+    pub fn busy(&self) -> bool {
+        !self.drawing.is_empty() || self.stroke.is_some()
     }
 
     pub fn over_ui(&self, s: P2) -> bool {
@@ -556,6 +561,7 @@ impl<T: Send + 'static> BakeQueue<T> {
     }
 
     /// A bake is wanted or running: the current baked map may be out of date.
+    #[cfg(test)]
     pub fn pending(&self) -> bool {
         self.wanted || self.running.is_some()
     }

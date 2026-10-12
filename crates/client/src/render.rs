@@ -80,10 +80,13 @@ pub struct Gfx {
     fonts: Fonts,
     rl: RaylibHandle,
     thread: RaylibThread,
+    fullscreen: bool,
+    /// Window size to return to when leaving fullscreen.
+    windowed: (i32, i32),
 }
 
 /// UI font sizes (logical px, as used by `style::FONT*`) that get their own glyph atlas.
-const FONT_SIZES: &[i32] = &[8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 24];
+const FONT_SIZES: &[i32] = &[8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 32, 48];
 
 /// Glyphs in the atlas: printable ASCII plus the few symbols the UI prints.
 const FONT_CHARS: &str =
@@ -143,6 +146,8 @@ const KEYMAP: &[(KeyboardKey, Key)] = &[
     (KeyboardKey::KEY_F7, Key::F(7)),
     (KeyboardKey::KEY_F8, Key::F(8)),
     (KeyboardKey::KEY_F9, Key::F(9)),
+    (KeyboardKey::KEY_F10, Key::F(10)),
+    (KeyboardKey::KEY_F11, Key::F(11)),
     (KeyboardKey::KEY_ONE, Key::Num(1)),
     (KeyboardKey::KEY_TWO, Key::Num(2)),
     (KeyboardKey::KEY_THREE, Key::Num(3)),
@@ -198,7 +203,32 @@ impl Gfx {
             rl.set_target_fps(60);
         }
         rl.set_exit_key(None);
-        Self { fonts: Fonts::default(), rl, thread }
+        Self { fonts: Fonts::default(), rl, thread, fullscreen: false, windowed: (w, h) }
+    }
+
+    /// Borderless fullscreen on the current monitor (no video-mode change), or back to a window.
+    pub fn set_fullscreen(&mut self, on: bool) {
+        if on == self.fullscreen {
+            return;
+        }
+        if on {
+            self.windowed = (self.rl.get_screen_width(), self.rl.get_screen_height());
+        }
+        self.rl.toggle_borderless_windowed();
+        if !on {
+            self.rl.set_window_size(self.windowed.0, self.windowed.1);
+        }
+        self.fullscreen = on;
+    }
+
+    /// Frame-rate cap; 0 = vsync only.
+    pub fn set_fps(&mut self, cap: u32) {
+        self.rl.set_target_fps(cap);
+    }
+
+    /// Go back to raylib's built-in font (options screen).
+    pub fn builtin_font(&mut self) {
+        self.fonts.faces.clear();
     }
 
     /// Use a TrueType font for all UI text; on failure the built-in font stays.

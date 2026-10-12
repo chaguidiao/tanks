@@ -1,4 +1,4 @@
-//! Scenario editor (DESIGN.md §10.4): place and orient units, group them into platoons, set
+//! Scenario editor (DESIGN.md §10.4, §11): place and orient units, group them into platoons, set
 //! objectives, date and start time, then save to `data/scenarios/<id>.ron` and play.
 
 use sim_data::{DataSet, ObjectiveDef, ScenarioDef, SideDef, UnitDef};
@@ -221,16 +221,21 @@ impl ScenarioEditor {
             self.unsaved = true;
         }
         if inp.ctrl && inp.hit(Key::Char('s')) {
-            if !self.def.id.ends_with("-custom") {
-                self.def.id.push_str("-custom");
-                self.def.name.push_str(" (CUSTOM)");
-            }
+            self.prepare_save();
             fx.save = true;
         }
         if inp.hit(Key::F(9)) {
             fx.play = true;
         }
         fx
+    }
+
+    /// Saving never overwrites a shipped scenario: edits go to `<id>-custom`.
+    pub fn prepare_save(&mut self) {
+        if !self.def.id.ends_with("-custom") {
+            self.def.id.push_str("-custom");
+            self.def.name.push_str(" (CUSTOM)");
+        }
     }
 
     /// Problems that make the scenario unplayable (shown in the panel).
@@ -309,12 +314,12 @@ impl ScenarioEditor {
         let h = 36.0 + lines.len() as f32 * 18.0;
         f.rect(x, y, w, h, style::PANEL);
         f.rect_lines(x, y, w, h, style::PANEL_EDGE);
-        f.text("SCENARIO EDITOR", x + 10.0, y + 8.0, style::FONT_L - 6, style::AMBER);
+        f.text("SCENARIO", x + 10.0, y + 8.0, style::FONT_L - 6, style::AMBER);
         for (k, (l, c)) in lines.iter().enumerate() {
             f.text(l, x + 10.0, y + 32.0 + k as f32 * 18.0, style::FONT_L - 8, *c);
         }
         f.text(
-            "P PLACE  LMB SELECT/DRAG  R ROTATE  DEL REMOVE  O OBJECTIVE ([ ] RADIUS)  CTRL+S SAVE  F9 PLAY",
+            "P PLACE  LMB SELECT/DRAG  R ROTATE  DEL REMOVE  O OBJECTIVE ([ ] RADIUS)  CTRL+S SAVE  F9 PLAY TEST  ESC MENU",
             10.0,
             screen[1] - 44.0,
             style::FONT_L - 8,

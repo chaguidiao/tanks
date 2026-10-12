@@ -1,66 +1,52 @@
-//! Tanks client: tactical map display, game mode and terrain editor.
+//! Tanks client: title, main menu, scenario/map select, game, terrain editor, scenario editor.
 //!
 //! ```text
-//! client [--scenario <id>] [--map <id>] [--edit] [--scenario-editor]
+//! client                                   title screen → main menu
+//! client [--screen title|main|play|edit-scenario|edit-terrain|options]
+//! client [--scenario <id>] [--map <id>] [--edit] [--scenario-editor] [--pause]
 //!        [--screenshot <png> [--frames <n>] [--order <unit-or-platoon>:<x>,<y>[,<x>,<y>..]] [--bp <platoon>:<x>,<y>,<deg>]
 //!         [--pl -:<x>,<y>,<x>,<y>..] [--advance <s>] [--aar] [--save-replay <ron>]
 //!         [--zoom <m-per-px>] [--center <x>,<y>] [--layer relief|slope|traffic|cover]]
 //! ```
+//! Any game or editor option starts that screen directly (scripted checks); `--pause` opens
+//! its menu. `--keys enter,wait30,down,esc` injects one key per frame (menu-flow checks).
+//! Screenshot runs use default options and never write the options file.
 
 mod aar;
 mod editor;
 mod format;
 mod game;
 mod hud;
+mod mapscreen;
+mod menu;
 mod render;
 mod scenedit;
+mod settings;
 mod style;
 mod symbols;
 mod view;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 
-use sim_data::{DataSet, MapRef};
+use sim_data::{DataSet, MapRef, ScenarioDef};
 use terragen::workflow;
 use terrain::{AuthoringPackage, BakedMap};
 
-use crate::editor::{BakeEvent, BakeQueue, Editor};
-use crate::game::{Cmd, Game, GameAction};
-use crate::hud::{Button, Look, Rect};
+use crate::game::{Cmd, Game};
+use crate::mapscreen::{Ctx, MapScreen, Request};
+use crate::menu::{Backdrop, MapEntry, MapList, MenuAction, Opt, Purpose, ScenarioEntry, ScenarioList};
 use crate::render::{Gfx, Input, Key};
-use crate::scenedit::ScenarioEditor;
-use crate::view::{BaseLayer, Camera, MapView, Minimap, build_layer};
-
-/// Top-bar actions handled by the app (map layers, modes, help).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AppAction {
-    Layer(BaseLayer),
-    Contours,
-    Grid,
-    TerrainEditor,
-    ScenarioEditor,
-    Help,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Clicked {
-    App(AppAction),
-    Game(GameAction),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Mode {
-    Game,
-    Editor,
-    Scenario,
-}
+use crate::settings::Settings;
+use crate::view::BaseLayer;
 
 struct Opts {
     scenario: Option<String>,
     map: Option<String>,
     edit: bool,
     scenario_editor: bool,
+    screen: Option<String>,
+    pause: bool,
     aar: bool,
     save_replay: Option<String>,
     screenshot: Option<String>,
@@ -73,6 +59,27 @@ struct Opts {
     layer: Option<String>,
     select: Option<String>,
     press: Option<String>,
+    keys: Option<String>,
+}
+
+impl Opts {
+    /// A game or editor option was given: skip the menus.
+    fn direct(&self) -> bool {
+        self.scenario.is_some()
+            || self.map.is_some()
+            || self.edit
+            || self.scenario_editor
+            || self.aar
+            || self.pause
+            || self.save_replay.is_some()
+            || !self.orders.is_empty()
+            || self.advance_s > 0.0
+            || self.select.is_some()
+            || self.press.is_some()
+            || self.zoom.is_some()
+            || self.center.is_some()
+            || self.layer.is_some()
+    }
 }
 
 fn parse_xy(s: &str) -> Option<[f64; 2]> {
@@ -98,6 +105,8 @@ fn opts() -> Result<Opts, String> {
         map: get("--map"),
         edit: a.iter().any(|x| x == "--edit"),
         scenario_editor: a.iter().any(|x| x == "--scenario-editor"),
+        screen: get("--screen"),
+        pause: a.iter().any(|x| x == "--pause"),
         aar: a.iter().any(|x| x == "--aar"),
         save_replay: get("--save-replay"),
         screenshot: get("--screenshot"),
@@ -109,33 +118,119 @@ fn opts() -> Result<Opts, String> {
         layer: get("--layer"),
         select: get("--select"),
         press: get("--press"),
+        keys: get("--keys"),
     })
 }
 
-struct App {
-    gfx: Gfx,
-    data_dir: PathBuf,
-    ds: Arc<DataSet>,
-    map_id: String,
-    map: Arc<BakedMap>,
-    view: MapView,
-    cam: Camera,
-    mode: Mode,
-    game: Option<Game>,
-    editor: Option<Editor>,
-    scenario_editor: Option<ScenarioEditor>,
-    map_changed: bool,
-    /// Terrain-editor bakes run on a worker thread so the editor stays responsive.
-    bake: BakeQueue<Baked>,
-    help: bool,
-    last_input: Input,
+/// A map reference for a map directory no scenario names (the map exists, so it only loads).
+fn loose_map(id: &str) -> MapRef {
+    MapRef { id: id.to_owned(), recipe: "rolling-farmland".into(), seed: 1, size_m: 8000.0 }
 }
 
-/// Background re-bake result: the baked map plus the image of the layer that was on screen.
-struct Baked {
-    map: BakedMap,
-    base: BaseLayer,
-    img: Vec<u8>,
+enum Screen {
+    Title,
+    Main,
+    Scenarios(ScenarioList),
+    Maps(MapList),
+    Loading(Box<Loading>),
+    Map(Box<MapScreen>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Leave {
+    MainMenu,
+    Quit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Overlay {
+    /// Screen menu of a map screen (Esc).
+    Pause,
+    /// Options; `over_pause` = BACK returns to the screen menu.
+    Options { over_pause: bool },
+    /// Unsaved edits would be lost.
+    Confirm(Leave),
+}
+
+/// What a finished load opens.
+enum Target {
+    Game(ScenarioDef),
+    ScenarioEditor(ScenarioDef),
+    TerrainEditor,
+}
+
+type LoadResult = Result<(BakedMap, Option<AuthoringPackage>), String>;
+
+enum LoadMsg {
+    Log(String),
+    Done(Box<LoadResult>),
+}
+
+/// A map being generated / baked / loaded on a worker thread (the window keeps drawing).
+struct Loading {
+    what: String,
+    map_id: String,
+    lines: Vec<String>,
+    rx: mpsc::Receiver<LoadMsg>,
+    target: Option<Target>,
+    error: Option<String>,
+}
+
+struct App {
+    // Screens hold textures: declared before `gfx` so they are dropped before the window.
+    screen: Screen,
+    /// A game left for the main menu (RESUME).
+    suspended: Option<Box<MapScreen>>,
+    overlay: Option<Overlay>,
+    help: bool,
+    focus: Option<usize>,
+    backdrop: Backdrop,
+    settings: Settings,
+    /// Write option changes to disk (not in screenshot runs).
+    persist: bool,
+    status: String,
+    data_dir: PathBuf,
+    ds: Arc<DataSet>,
+    font_path: PathBuf,
+    t: f32,
+    quit: bool,
+    last_input: Input,
+    /// `--keys`: injected key presses (None = an idle frame).
+    script_keys: std::collections::VecDeque<Option<Key>>,
+    gfx: Gfx,
+}
+
+/// `--keys` tokens: key names, single letters/digits, `waitN` = N idle frames.
+fn parse_keys(s: &str) -> Result<std::collections::VecDeque<Option<Key>>, String> {
+    let mut out = std::collections::VecDeque::new();
+    for t in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+        let k = match t.to_ascii_lowercase().as_str() {
+            "enter" => Key::Enter,
+            "esc" => Key::Escape,
+            "up" => Key::Up,
+            "down" => Key::Down,
+            "left" => Key::Left,
+            "right" => Key::Right,
+            "space" => Key::Space,
+            "tab" => Key::Tab,
+            w if w.starts_with("wait") => {
+                let n: usize = w[4..].parse().map_err(|_| format!("bad --keys token {t}"))?;
+                out.extend(std::iter::repeat_n(None, n));
+                continue;
+            }
+            f if f.len() > 1 && f.starts_with('f') => Key::F(f[1..].parse().map_err(|_| format!("bad key {t}"))?),
+            c if c.len() == 1 => {
+                let c = c.chars().next().expect("one char");
+                match c.to_digit(10) {
+                    Some(d) => Key::Num(d as u8),
+                    None => Key::Char(c),
+                }
+            }
+            _ => return Err(format!("bad --keys token {t}")),
+        };
+        out.push_back(Some(k));
+    }
+    Ok(out)
 }
 
 fn main() {
@@ -149,141 +244,67 @@ fn run() -> Result<(), String> {
     let o = opts()?;
     let data_dir = sim_data::find_data_dir().ok_or("cannot find data/ directory (set TANKS_DATA)")?;
     let ds = Arc::new(DataSet::load(&data_dir).map_err(|e| e.to_string())?);
-    let scenario = match (&o.scenario, &o.map) {
-        (Some(s), _) => Some(DataSet::load_scenario(&data_dir, s).map_err(|e| e.to_string())?),
-        (None, Some(_)) => None,
-        (None, None) => Some(DataSet::load_scenario(&data_dir, "m1-move").map_err(|e| e.to_string())?),
-    };
-    let map_ref = match (&scenario, &o.map) {
-        (Some(s), _) => s.map.clone(),
-        (None, Some(id)) => MapRef { id: id.clone(), recipe: "rolling-farmland".into(), seed: 1, size_m: 8000.0 },
-        _ => unreachable!(),
-    };
-    let map =
-        Arc::new(workflow::ensure_map(&data_dir, &ds, &map_ref, |s| eprintln!("{s}")).map_err(|e| e.to_string())?);
+    let shot = o.screenshot.is_some();
+    let settings = if shot { Settings::default() } else { Settings::load() };
 
-    let mut gfx = Gfx::open(1600, 900, "TANKS", o.screenshot.is_some());
-    if let Err(e) = gfx.load_font(&data_dir.join("fonts/IBMPlexMono-Medium.ttf")) {
+    let mut gfx = Gfx::open(1600, 900, "TANKS", shot);
+    let font_path = data_dir.join("fonts/IBMPlexMono-Medium.ttf");
+    if settings.ttf_font
+        && let Err(e) = gfx.load_font(&font_path)
+    {
         eprintln!("warning: UI font not loaded, using the built-in font: {e}");
     }
-    let traffic_class = scenario
-        .as_ref()
-        .and_then(|s| s.sides.first())
-        .and_then(|s| s.units.first())
-        .map_or("bulwark_a1".to_owned(), |u| u.vehicle.clone());
-    let mut view = MapView::new(&map, &traffic_class);
-    if let Some(l) = &o.layer {
-        view.base = match l.as_str() {
-            "slope" => BaseLayer::Slope,
-            "traffic" => BaseLayer::Trafficability,
-            "cover" => BaseLayer::LandCover,
-            _ => BaseLayer::Tactical,
-        };
-    }
-    let mut cam = Camera { centre: [0.0, 0.0], mpp: 1.0, screen: [1600.0, 900.0] };
-    cam.fit(map.manifest.width_m(), map.manifest.height_m());
-    if let Some(z) = o.zoom {
-        cam.mpp = z;
-    }
-    if let Some(c) = o.center {
-        cam.centre = c;
-    }
-
-    let mut game = match scenario {
-        Some(s) => Some(Game::new(s, ds.clone(), map.clone())?),
-        None => None,
-    };
-    if let Some(g) = &mut game {
-        for (kind, cs, n) in &o.orders {
-            let platoon = g.picture().platoons.iter().find(|p| &p.callsign == cs).map(|p| p.id);
-            match (kind.as_str(), platoon, n.as_slice()) {
-                ("--bp", Some(p), [x, y, deg]) => {
-                    g.sel_platoon = Some(p);
-                    g.issue_bp([*x, *y], deg.to_radians());
-                }
-                ("--pl", _, pts) if pts.len() >= 4 && pts.len() % 2 == 0 => {
-                    g.add_phase_line(pts.chunks(2).map(|c| [c[0], c[1]]).collect());
-                }
-                // `--order <platoon>:x,y[,x,y..]`: checkpoints, then the destination.
-                ("--order", Some(p), pts) if pts.len() >= 2 && pts.len() % 2 == 0 => {
-                    let mut pts: Vec<[f64; 2]> = pts.chunks(2).map(|c| [c[0], c[1]]).collect();
-                    let dest = pts.pop().expect("non-empty");
-                    g.sel_platoon = Some(p);
-                    g.issue_move(pts, dest);
-                }
-                ("--order", None, [x, y]) => {
-                    let id = g
-                        .picture()
-                        .own
-                        .iter()
-                        .find(|u| &u.callsign == cs)
-                        .map(|u| u.id)
-                        .ok_or(format!("no unit {cs}"))?;
-                    g.order_move(id, [*x, *y]);
-                }
-                _ => return Err(format!("bad {kind} {cs}:{n:?}")),
-            }
-        }
-        // `--select <platoon> --press F,W,T`: command-card keys, before and after `--advance`.
-        if let Some(cs) = &o.select {
-            g.sel_platoon = g.picture().platoons.iter().find(|p| &p.callsign == cs).map(|p| p.id);
-            g.sel_unit = None;
-        }
-        let press = |g: &mut Game, keys: &str| {
-            for k in keys.split(',').map(str::trim) {
-                match k {
-                    "F" => g.press(Cmd::Formation),
-                    "W" => g.press(Cmd::Weapons),
-                    "T" => g.press(Cmd::Technique),
-                    _ => {}
-                }
-            }
-        };
-        if let Some(keys) = &o.press {
-            press(g, keys);
-        }
-        if o.advance_s > 0.0 {
-            g.execute();
-            g.advance_ticks((o.advance_s * sim::TICK_HZ as f64) as u32);
-        }
-        if let Some(path) = &o.save_replay {
-            std::fs::write(path, sim::Replay::record(&g.sim).to_ron()).map_err(|e| format!("{path}: {e}"))?;
-        }
-        if o.aar {
-            g.open_aar();
-        }
+    if !shot {
+        gfx.set_fps(settings.fps_cap);
+        gfx.set_fullscreen(settings.fullscreen);
     }
 
     let mut app = App {
-        gfx,
+        screen: Screen::Title,
+        suspended: None,
+        overlay: None,
+        help: false,
+        focus: None,
+        backdrop: Backdrop::new(),
+        settings,
+        persist: !shot,
+        status: String::new(),
         data_dir,
         ds,
-        map_id: map_ref.id.clone(),
-        map,
-        view,
-        cam,
-        mode: Mode::Game,
-        game,
-        editor: None,
-        scenario_editor: None,
-        map_changed: false,
-        bake: BakeQueue::default(),
-        help: false,
+        font_path,
+        t: 0.0,
+        quit: false,
         last_input: Input::default(),
+        script_keys: o.keys.as_deref().map(parse_keys).transpose()?.unwrap_or_default(),
+        gfx,
     };
-    if o.edit || app.game.is_none() {
-        app.enter_editor()?;
-    } else if o.scenario_editor
-        && let Some(g) = &app.game
-    {
-        app.scenario_editor = Some(ScenarioEditor::new(g.scenario.clone(), &app.ds));
-        app.mode = Mode::Scenario;
+    if o.direct() {
+        app.screen = Screen::Map(Box::new(app.direct(&o)?));
+        if o.pause {
+            app.overlay = Some(Overlay::Pause);
+        }
+    } else if let Some(s) = &o.screen {
+        match s.as_str() {
+            "title" => {}
+            "main" => app.screen = Screen::Main,
+            "play" => app.screen = Screen::Scenarios(app.scenario_list(Purpose::Play)),
+            "edit-scenario" => app.screen = Screen::Scenarios(app.scenario_list(Purpose::Edit)),
+            "edit-terrain" => app.screen = Screen::Maps(app.map_list()),
+            "options" => {
+                app.screen = Screen::Main;
+                app.overlay = Some(Overlay::Options { over_pause: false });
+            }
+            _ => return Err(format!("unknown --screen {s}")),
+        }
     }
 
     let mut frame = 0u32;
-    while !app.gfx.should_close() {
+    while !app.gfx.should_close() && !app.quit {
         app.tick()?;
-        frame += 1;
+        // Loads take wall-clock time: scripted runs count only frames outside them.
+        if !matches!(app.screen, Screen::Loading(_)) {
+            frame += 1;
+        }
         if let Some(path) = &o.screenshot
             && frame >= o.frames
         {
@@ -291,461 +312,547 @@ fn run() -> Result<(), String> {
             break;
         }
     }
-    gfx_drop_guard(app);
     Ok(())
 }
 
-/// Textures must be released before the window closes; dropping the app in field order does it.
-fn gfx_drop_guard(app: App) {
-    let App { view, gfx, .. } = app;
-    drop(view);
-    drop(gfx);
-}
-
 impl App {
-    fn enter_editor(&mut self) -> Result<(), String> {
-        if self.editor.is_none() {
-            let dir = workflow::map_dir(&self.data_dir, &self.map_id);
-            let pkg = AuthoringPackage::load(&dir).map_err(|e| e.to_string())?;
-            self.editor = Some(Editor::new(pkg));
-        }
-        if let Some(g) = &mut self.game {
-            g.paused = true;
-        }
-        self.mode = Mode::Editor;
-        Ok(())
+    fn ctx(&self) -> Ctx<'_> {
+        Ctx { ds: &self.ds, data_dir: &self.data_dir, settings: &self.settings }
     }
 
-    fn leave_editor(&mut self) -> Result<(), String> {
-        if self.game.is_none() {
-            return Ok(()); // map-only session: stay in the editor
-        }
-        self.mode = Mode::Game;
-        if self.bake.pending() {
-            self.rebake();
-        }
-        if self.map_changed {
-            // The scenario restarts on the edited map.
-            let g = self.game.take().expect("game exists");
-            let mut ng = Game::new(g.scenario.clone(), self.ds.clone(), self.map.clone())?;
-            ng.log.push_back((String::new(), "MAP CHANGED. SCENARIO RESTARTED.".into()));
-            self.game = Some(ng);
-            self.map_changed = false;
-        }
-        Ok(())
-    }
-
-    /// Bake now on this thread (leaving the editor), superseding any background bake.
-    fn rebake(&mut self) {
-        self.bake.cancel();
-        if let Some(ed) = &mut self.editor {
-            let classes = workflow::mobility_classes(&self.ds);
-            let baked = editor::rebake(&ed.pkg, &self.ds.terrain, &classes);
-            self.map = Arc::new(baked);
-            self.view.invalidate(&self.map);
-            self.map_changed = true;
-            ed.status = "BAKED".into();
-        }
-    }
-
-    /// Start a background bake if one is wanted, and install a finished one.
-    fn poll_bake(&mut self) {
-        let Some(ed) = &mut self.editor else { return };
-        let (ds, base, class) = (&self.ds, self.view.base, &self.view.traffic_class);
-        let ev = self.bake.poll(|| {
-            let (pkg, ds, class) = (ed.pkg.clone(), ds.clone(), class.clone());
-            move || {
-                let map = editor::rebake(&pkg, &ds.terrain, &workflow::mobility_classes(&ds));
-                let img = build_layer(base, &class, &map, &ds.terrain);
-                Baked { map, base, img }
+    /// Scripted start (CLI options): load synchronously, apply orders, advance.
+    fn direct(&mut self, o: &Opts) -> Result<MapScreen, String> {
+        let load = |id: &str| DataSet::load_scenario(&self.data_dir, id).map_err(|e| e.to_string());
+        let scenario = match (&o.scenario, &o.map) {
+            (Some(s), _) => Some(load(s)?),
+            (None, Some(_)) => None,
+            (None, None) => Some(load("m1-move")?),
+        };
+        let map_ref = match (&scenario, &o.map) {
+            (Some(s), _) => s.map.clone(),
+            (None, Some(id)) => loose_map(id),
+            _ => unreachable!(),
+        };
+        let map = Arc::new(
+            workflow::ensure_map(&self.data_dir, &self.ds, &map_ref, |s| eprintln!("{s}"))
+                .map_err(|e| e.to_string())?,
+        );
+        let ctx = self.ctx();
+        let mut ms = match scenario {
+            Some(s) if o.scenario_editor && !o.edit => MapScreen::scenario_editor(map, s, &ctx),
+            Some(s) if !o.edit => MapScreen::game(map, s, &ctx)?,
+            _ => {
+                let pkg = AuthoringPackage::load(&workflow::map_dir(&self.data_dir, &map_ref.id))
+                    .map_err(|e| e.to_string())?;
+                MapScreen::terrain_editor(map_ref.id.clone(), map, pkg, &ctx)
             }
+        };
+        if let Some(l) = &o.layer {
+            ms.view.base = match l.as_str() {
+                "slope" => BaseLayer::Slope,
+                "traffic" => BaseLayer::Trafficability,
+                "cover" => BaseLayer::LandCover,
+                _ => BaseLayer::Tactical,
+            };
+        }
+        if let Some(z) = o.zoom {
+            ms.cam.mpp = z;
+        }
+        if let Some(c) = o.center {
+            ms.cam.centre = c;
+        }
+        if let Some(g) = ms.game_mut() {
+            script(g, o)?;
+        }
+        Ok(ms)
+    }
+
+    fn scenario_list(&self, purpose: Purpose) -> ScenarioList {
+        let entries = DataSet::scenario_ids(&self.data_dir)
+            .into_iter()
+            .map(|id| {
+                let def = DataSet::load_scenario(&self.data_dir, &id).map_err(|e| e.to_string());
+                ScenarioEntry { id, def }
+            })
+            .collect();
+        ScenarioList { purpose, entries, sel: 0 }
+    }
+
+    /// Maps named by scenarios, then map directories no scenario names.
+    fn map_list(&self) -> MapList {
+        let mut entries: Vec<MapEntry> = Vec::new();
+        for id in DataSet::scenario_ids(&self.data_dir) {
+            let Ok(def) = DataSet::load_scenario(&self.data_dir, &id) else { continue };
+            match entries.iter_mut().find(|e| e.map.id == def.map.id) {
+                Some(e) => e.used_by.push(def.name.clone()),
+                None => {
+                    entries.push(MapEntry { map: def.map.clone(), generated: false, used_by: vec![def.name.clone()] })
+                }
+            }
+        }
+        let mut loose: Vec<String> = std::fs::read_dir(self.data_dir.join("maps"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().join("map.toml").exists())
+            .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+            .filter(|id| !entries.iter().any(|e| &e.map.id == id))
+            .collect();
+        loose.sort();
+        entries.extend(loose.iter().map(|id| MapEntry { map: loose_map(id), generated: true, used_by: Vec::new() }));
+        for e in &mut entries {
+            e.generated = workflow::map_dir(&self.data_dir, &e.map.id).join("map.toml").exists();
+        }
+        MapList { entries, sel: 0 }
+    }
+
+    fn start_load(&mut self, what: String, map: MapRef, target: Target) {
+        let (tx, rx) = mpsc::channel();
+        let (dir, ds) = (self.data_dir.clone(), self.ds.clone());
+        let want_pkg = matches!(target, Target::TerrainEditor);
+        let map_id = map.id.clone();
+        std::thread::spawn(move || {
+            let log = tx.clone();
+            let r = workflow::ensure_map(&dir, &ds, &map, |s| {
+                let _ = log.send(LoadMsg::Log(s.to_owned()));
+            })
+            .map_err(|e| e.to_string())
+            .and_then(|b| {
+                if !want_pkg {
+                    return Ok((b, None));
+                }
+                let pkg = AuthoringPackage::load(&workflow::map_dir(&dir, &map.id)).map_err(|e| e.to_string())?;
+                Ok((b, Some(pkg)))
+            });
+            let _ = tx.send(LoadMsg::Done(Box::new(r)));
         });
-        match ev {
-            BakeEvent::Idle => {}
-            BakeEvent::Started => ed.status = "BAKING...".into(),
-            BakeEvent::Failed => ed.status = "BAKE FAILED".into(),
-            BakeEvent::Done(b) => {
-                ed.status = "BAKED".into();
-                self.map = Arc::new(b.map);
-                self.view.replace_map(&mut self.gfx, &self.map, b.base, &b.img);
-                self.map_changed = true;
+        self.go(Screen::Loading(Box::new(Loading {
+            what,
+            map_id,
+            lines: vec!["LOADING MAP".into()],
+            rx,
+            target: Some(target),
+            error: None,
+        })));
+    }
+
+    fn go(&mut self, s: Screen) {
+        self.screen = s;
+        self.focus = None;
+        self.help = false;
+    }
+
+    fn apply_option(&mut self, o: Opt) {
+        let s = &mut self.settings;
+        match o {
+            Opt::Fullscreen => s.fullscreen = !s.fullscreen,
+            Opt::Fps => s.next_fps(),
+            Opt::Font => s.ttf_font = !s.ttf_font,
+            Opt::Pan => s.next_pan(),
+            Opt::EdgePan => s.edge_pan = !s.edge_pan,
+            Opt::Contours => s.contours = !s.contours,
+            Opt::Grid => s.grid = !s.grid,
+        }
+        self.settings_changed();
+    }
+
+    fn settings_changed(&mut self) {
+        self.gfx.set_fullscreen(self.settings.fullscreen);
+        self.gfx.set_fps(self.settings.fps_cap);
+        if self.settings.ttf_font {
+            if let Err(e) = self.gfx.load_font(&self.font_path) {
+                self.status = format!("FONT NOT LOADED: {e}");
+                self.settings.ttf_font = false;
             }
+        } else {
+            self.gfx.builtin_font();
+        }
+        if self.persist
+            && let Err(e) = self.settings.save()
+        {
+            self.status = format!("OPTIONS NOT SAVED: {e}");
+        }
+    }
+
+    /// Leave the current map screen (after any unsaved-changes prompt).
+    fn leave(&mut self, to: Leave) {
+        self.overlay = None;
+        let s = std::mem::replace(&mut self.screen, Screen::Main);
+        if let (Screen::Map(ms), Leave::MainMenu) = (s, to)
+            && matches!(ms.mode, mapscreen::Mode::Game { .. })
+        {
+            self.suspended = Some(ms);
+        }
+        self.go(Screen::Main);
+        if to == Leave::Quit {
+            self.quit = true;
+        }
+    }
+
+    fn request_leave(&mut self, to: Leave) {
+        let unsaved = matches!(&self.screen, Screen::Map(ms) if ms.unsaved());
+        if unsaved {
+            self.overlay = Some(Overlay::Confirm(to));
+            self.focus = None;
+        } else {
+            self.leave(to);
         }
     }
 
     fn tick(&mut self) -> Result<(), String> {
-        let inp = self.gfx.input();
-        self.cam.screen = inp.screen;
-        let (app_buttons, game_buttons) = self.buttons(inp.screen);
-        let clicked = hud::clicked(&app_buttons, inp.mouse, inp.left_pressed)
-            .map(Clicked::App)
-            .or_else(|| hud::clicked(&game_buttons, inp.mouse, inp.left_pressed).map(Clicked::Game));
-        let minimap = self.minimap(inp.screen);
-        let in_minimap = minimap.is_some_and(|m| m.r.contains(inp.mouse));
-        let over_ui = inp.mouse[1] < hud::TOP_H
-            || inp.mouse[1] > inp.screen[1] - hud::STATUS_H
-            || hud::hovered(&game_buttons, inp.mouse).is_some()
-            || match self.mode {
-                Mode::Game => {
-                    self.game.as_ref().is_some_and(|g| g.panels(inp.screen).iter().any(|r| r.contains(inp.mouse)))
-                }
-                Mode::Editor => self.editor.as_ref().is_some_and(|e| e.over_ui(inp.mouse)),
-                Mode::Scenario => self.scenario_editor.as_ref().is_some_and(|e| e.over_ui(inp.mouse)),
-            };
-        // Minimap: click or drag to move the view.
-        if let Some(m) = minimap
-            && in_minimap
-            && (inp.left_pressed || inp.left_down)
+        let mut inp = self.gfx.input();
+        if !matches!(self.screen, Screen::Loading(_))
+            && let Some(Some(k)) = self.script_keys.pop_front()
         {
-            self.cam.centre = m.to_world(inp.mouse);
+            inp.pressed.push(k);
         }
-        if let Some(Clicked::App(a)) = clicked {
-            match a {
-                AppAction::Layer(b) => self.view.base = b,
-                AppAction::Contours => self.view.contours = !self.view.contours,
-                AppAction::Grid => self.view.grid = !self.view.grid,
-                AppAction::Help => self.help = !self.help,
-                AppAction::TerrainEditor => match self.mode {
-                    Mode::Editor => self.leave_editor()?,
-                    _ => {
-                        self.scenario_editor = None;
-                        self.enter_editor()?
-                    }
-                },
-                AppAction::ScenarioEditor => self.toggle_scenario_editor(),
+        self.t += inp.frame_time;
+        if inp.hit(Key::F(11)) {
+            self.apply_option(Opt::Fullscreen);
+        }
+        if self.help {
+            if inp.hit(Key::F(7)) || inp.hit(Key::Escape) || inp.left_pressed {
+                self.help = false;
             }
+        } else if let Some(o) = self.overlay {
+            self.overlay_input(o, &inp);
+        } else {
+            self.screen_input(&inp);
         }
-        let game_click = match clicked {
-            Some(Clicked::Game(a)) => Some(a),
-            _ => None,
-        };
-
-        // Camera: wheel zooms about the cursor; middle-drag or arrow keys pan.
-        if inp.wheel != 0.0 {
-            self.cam.zoom_at(inp.mouse, if inp.wheel > 0.0 { 1.0 / 1.25 } else { 1.25 });
+        if let Screen::Map(ms) = &mut self.screen {
+            ms.ensure_view(&mut self.gfx, &self.ds);
         }
-        if inp.middle_down {
-            self.cam.pan_px(inp.mouse_delta);
-        }
-        let pan = 600.0 * inp.frame_time;
-        for (k, d) in
-            [(Key::Left, [pan, 0.0]), (Key::Right, [-pan, 0.0]), (Key::Up, [0.0, pan]), (Key::Down, [0.0, -pan])]
-        {
-            if inp.down(k) {
-                self.cam.pan_px(d);
-            }
-        }
-
-        // Layers (F1–F4 base, F5 contours, F6 grid), help (F7), mode (E).
-        for (n, b) in
-            [(1, BaseLayer::Tactical), (2, BaseLayer::Slope), (3, BaseLayer::Trafficability), (4, BaseLayer::LandCover)]
-        {
-            if inp.hit(Key::F(n)) {
-                self.view.base = b;
-            }
-        }
-        if inp.hit(Key::F(5)) {
-            self.view.contours = !self.view.contours;
-        }
-        if inp.hit(Key::F(6)) {
-            self.view.grid = !self.view.grid;
-        }
-        if inp.hit(Key::F(7)) {
-            self.help = !self.help;
-        }
-        if inp.hit(Key::Char('e')) && !inp.ctrl {
-            match self.mode {
-                Mode::Game => self.enter_editor()?,
-                Mode::Editor => self.leave_editor()?,
-                Mode::Scenario => {}
-            }
-        }
-        if inp.hit(Key::F(9)) && self.mode == Mode::Game && self.game.is_some() {
-            self.toggle_scenario_editor();
-            self.last_input = inp;
-            self.draw();
-            return Ok(());
-        }
-
-        match self.mode {
-            Mode::Game => {
-                if let Some(g) = &mut self.game {
-                    let fx = g.update(&inp, &self.cam, over_ui || in_minimap, game_click);
-                    if let Some(c) = fx.center_on {
-                        self.cam.centre = c;
-                    }
-                    if fx.clear_overlay {
-                        self.view.overlay = None;
-                    }
-                    if let Some((rgba, w, h, ox, oy, step)) = fx.viewshed {
-                        let tex = self.gfx.texture(w, h, &rgba);
-                        self.view.overlay = Some((tex, [ox, oy, ox + w as f64 * step, oy + h as f64 * step]));
-                    }
-                }
-            }
-            Mode::Editor => {
-                let fx = {
-                    let map = Arc::make_mut(&mut self.map);
-                    let ed = self.editor.as_mut().expect("editor exists in editor mode");
-                    ed.update(&inp, &self.cam, map, over_ui)
-                };
-                if let Some(r) = fx.preview {
-                    self.view.refresh_rect(&mut self.gfx, &self.map, &self.ds.terrain, r);
-                    self.map_changed = true;
-                    self.bake.touch();
-                }
-                if fx.rebake {
-                    self.bake.request();
-                }
-                self.poll_bake();
-                if fx.save {
-                    self.save();
-                }
-            }
-            Mode::Scenario => {
-                let ed = self.scenario_editor.as_mut().expect("scenario editor exists in scenario mode");
-                let fx = ed.update(&inp, &self.cam, &self.ds, over_ui);
-                if fx.save {
-                    match sim_data::DataSet::save_scenario(&self.data_dir, &ed.def) {
-                        Ok(p) => {
-                            ed.unsaved = false;
-                            ed.status = format!("SAVED {}", p.display());
-                        }
-                        Err(e) => ed.status = format!("SAVE FAILED: {e}"),
-                    }
-                }
-                if fx.play {
-                    let def = ed.def.clone();
-                    match Game::new(def, self.ds.clone(), self.map.clone()) {
-                        Ok(mut g) => {
-                            g.log.push_back((String::new(), "SCENARIO EDITED. RESTARTED.".into()));
-                            self.game = Some(g);
-                            self.scenario_editor = None;
-                            self.mode = Mode::Game;
-                        }
-                        Err(e) => ed.status = format!("CANNOT START: {e}"),
-                    }
-                }
-            }
-        }
-
-        self.view.ensure(&mut self.gfx, &self.map, &self.ds.terrain);
         self.last_input = inp;
         self.draw();
         Ok(())
     }
 
-    fn toggle_scenario_editor(&mut self) {
-        match self.mode {
-            Mode::Scenario => {
-                // Leave without restarting the game (F9 in the scenario editor plays the edit).
-                self.scenario_editor = None;
-                self.mode = Mode::Game;
+    fn overlay_input(&mut self, o: Overlay, inp: &Input) {
+        let screen = inp.screen;
+        let mut b = match o {
+            Overlay::Pause => match &self.screen {
+                Screen::Map(ms) => menu::pause_buttons(screen, &ms.menu_items()),
+                _ => Vec::new(),
+            },
+            Overlay::Options { .. } => menu::options_buttons(screen, &self.settings),
+            Overlay::Confirm(_) => menu::confirm_buttons(screen),
+        };
+        let key = menu::nav(&mut b, &mut self.focus, inp);
+        let a = key.or_else(|| hud::clicked(&b, inp.mouse, inp.left_pressed));
+        let back = inp.hit(Key::Escape) || inp.hit(Key::F(10));
+        match (o, a) {
+            (Overlay::Pause, Some(MenuAction::Resume)) | (Overlay::Pause, None) if back || a.is_some() => {
+                self.overlay = None;
             }
-            _ => {
-                if let Some(g) = &mut self.game {
-                    g.paused = true;
-                    self.scenario_editor = Some(ScenarioEditor::new(g.scenario.clone(), &self.ds));
-                    self.mode = Mode::Scenario;
+            (Overlay::Pause, Some(MenuAction::Screen(sa))) => {
+                self.overlay = None;
+                self.run_screen_action(sa);
+            }
+            (Overlay::Pause, Some(MenuAction::Options)) => {
+                self.overlay = Some(Overlay::Options { over_pause: true });
+                self.focus = None;
+            }
+            (Overlay::Pause, Some(MenuAction::Help)) => {
+                self.overlay = None;
+                self.help = true;
+            }
+            (Overlay::Pause, Some(MenuAction::MainMenu)) => self.request_leave(Leave::MainMenu),
+            (Overlay::Pause, Some(MenuAction::Quit)) => self.request_leave(Leave::Quit),
+            (Overlay::Options { .. }, Some(MenuAction::Opt(opt))) => self.apply_option(opt),
+            (Overlay::Options { .. }, Some(MenuAction::Defaults)) => {
+                self.settings = Settings::default();
+                self.settings_changed();
+            }
+            (Overlay::Options { over_pause }, Some(MenuAction::Back)) | (Overlay::Options { over_pause }, None)
+                if back || a.is_some() =>
+            {
+                self.overlay = over_pause.then_some(Overlay::Pause);
+                self.focus = None;
+            }
+            (Overlay::Confirm(to), Some(MenuAction::Discard)) => self.leave(to),
+            (Overlay::Confirm(_), Some(MenuAction::Back)) | (Overlay::Confirm(_), None) if back || a.is_some() => {
+                self.overlay = Some(Overlay::Pause);
+                self.focus = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn run_screen_action(&mut self, sa: mapscreen::ScreenAction) {
+        let Screen::Map(ms) = &mut self.screen else { return };
+        let ctx = Ctx { ds: &self.ds, data_dir: &self.data_dir, settings: &self.settings };
+        if let Some(r) = ms.act(sa, &ctx) {
+            self.handle_request(r);
+        }
+    }
+
+    fn handle_request(&mut self, r: Request) {
+        match r {
+            Request::Menu => {
+                self.overlay = Some(Overlay::Pause);
+                self.focus = None;
+            }
+            Request::Help => self.help = true,
+            Request::MainMenu => self.request_leave(Leave::MainMenu),
+            Request::PlayTest | Request::BackToEditor => {
+                let Screen::Map(ms) = std::mem::replace(&mut self.screen, Screen::Main) else { return };
+                let ctx = Ctx { ds: &self.ds, data_dir: &self.data_dir, settings: &self.settings };
+                let ms = if r == Request::PlayTest { ms.play_test(&ctx) } else { ms.back_to_editor() };
+                self.screen = Screen::Map(Box::new(ms));
+            }
+        }
+    }
+
+    fn screen_input(&mut self, inp: &Input) {
+        let screen = inp.screen;
+        let back = inp.hit(Key::Escape);
+        match &mut self.screen {
+            Screen::Title => {
+                if !inp.pressed.is_empty() || inp.left_pressed || inp.right_pressed {
+                    self.go(Screen::Main);
                 }
             }
-        }
-    }
-
-    /// Minimap (game mode only, not in the after-action review).
-    fn minimap(&self, screen: [f32; 2]) -> Option<Minimap> {
-        let g = self.game.as_ref()?;
-        if self.mode != Mode::Game || g.aar.is_some() {
-            return None;
-        }
-        Some(Minimap::new(hud::minimap_frame(screen), self.map.manifest.width_m(), self.map.manifest.height_m()))
-    }
-
-    /// Top-bar buttons of the app (right-aligned) and every game-mode button.
-    fn buttons(&self, screen: [f32; 2]) -> (Vec<Button<AppAction>>, Vec<Button<GameAction>>) {
-        let z = Rect::new(0.0, 0.0, 0.0, 0.0);
-        let b = |l: &str, a: AppAction| Button::new(z, Look::Bar, l, a);
-        let base = self.view.base;
-        let mut items = vec![
-            b("RELIEF", AppAction::Layer(BaseLayer::Tactical))
-                .key("F1")
-                .tip("BASE MAP: SHADED RELIEF AND LAND COVER")
-                .active(base == BaseLayer::Tactical),
-            b("SLOPE", AppAction::Layer(BaseLayer::Slope))
-                .key("F2")
-                .tip("BASE MAP: SLOPE")
-                .active(base == BaseLayer::Slope),
-            b("GO/NO-GO", AppAction::Layer(BaseLayer::Trafficability))
-                .key("F3")
-                .tip("BASE MAP: TRAFFICABILITY FOR THE FIRST VEHICLE TYPE")
-                .active(base == BaseLayer::Trafficability),
-            b("COVER", AppAction::Layer(BaseLayer::LandCover))
-                .key("F4")
-                .tip("BASE MAP: LAND COVER CLASSES")
-                .active(base == BaseLayer::LandCover),
-            b("CONTOURS", AppAction::Contours).key("F5").tip("CONTOUR LINES").active(self.view.contours),
-            b("GRID", AppAction::Grid).key("F6").tip("1 KM GRID").active(self.view.grid),
-        ];
-        if self.game.is_some() {
-            items.push(
-                b("TERRAIN EDIT", AppAction::TerrainEditor)
-                    .key("E")
-                    .tip("TERRAIN EDITOR (THE SCENARIO RESTARTS IF THE MAP CHANGES)")
-                    .active(self.mode == Mode::Editor),
-            );
-            items.push(
-                b("SCENARIO EDIT", AppAction::ScenarioEditor)
-                    .key("F9")
-                    .tip("SCENARIO EDITOR: PLACE UNITS, OBJECTIVES, DATE")
-                    .active(self.mode == Mode::Scenario),
-            );
-        }
-        items.push(b("HELP", AppAction::Help).key("F7").tip("KEYBOARD AND MOUSE REFERENCE").active(self.help));
-        let x = screen[0] - hud::bar_width(&items) - 6.0;
-        let mut app = Vec::new();
-        hud::bar_row(&mut app, x, items);
-        let game = match (&self.game, self.mode) {
-            (Some(g), Mode::Game) => g.buttons(screen),
-            _ => Vec::new(),
-        };
-        (app, game)
-    }
-
-    fn save(&mut self) {
-        // Saving bakes the current package itself; a background bake would be older.
-        self.bake.cancel();
-        let Some(ed) = &mut self.editor else { return };
-        let dir = workflow::map_dir(&self.data_dir, &self.map_id);
-        let r = ed.pkg.save(&dir).and_then(|_| {
-            let classes = workflow::mobility_classes(&self.ds);
-            let baked = editor::rebake(&ed.pkg, &self.ds.terrain, &classes);
-            baked.save(&dir.join("baked"))?;
-            Ok(baked)
-        });
-        match r {
-            Ok(b) => {
-                self.map = Arc::new(b);
-                self.view.invalidate(&self.map);
-                ed.unsaved = false;
-                ed.status = format!("SAVED {}", dir.display());
+            Screen::Main => {
+                let title = self.suspended.as_ref().map(|s| s.title());
+                let mut b = menu::main_buttons(screen, title.as_deref());
+                let a =
+                    menu::nav(&mut b, &mut self.focus, inp).or_else(|| hud::clicked(&b, inp.mouse, inp.left_pressed));
+                match a {
+                    Some(MenuAction::Resume) => {
+                        if let Some(s) = self.suspended.take() {
+                            self.go(Screen::Map(s));
+                        }
+                    }
+                    Some(MenuAction::Play) => self.go(Screen::Scenarios(self.scenario_list(Purpose::Play))),
+                    Some(MenuAction::EditScenario) => self.go(Screen::Scenarios(self.scenario_list(Purpose::Edit))),
+                    Some(MenuAction::EditTerrain) => self.go(Screen::Maps(self.map_list())),
+                    Some(MenuAction::Options) => {
+                        self.overlay = Some(Overlay::Options { over_pause: false });
+                        self.focus = None;
+                    }
+                    Some(MenuAction::Quit) => self.quit = true,
+                    _ => {}
+                }
             }
-            Err(e) => ed.status = format!("SAVE FAILED: {e}"),
+            Screen::Scenarios(l) => {
+                menu::list_keys(inp, &mut l.sel, l.entries.len());
+                let b = l.buttons(screen);
+                let a = hud::clicked(&b, inp.mouse, inp.left_pressed)
+                    .or(inp.hit(Key::Enter).then_some(MenuAction::Start))
+                    .or(back.then_some(MenuAction::Back));
+                match a {
+                    Some(MenuAction::Pick(k)) => l.sel = k,
+                    Some(MenuAction::Back) => self.go(Screen::Main),
+                    Some(MenuAction::Start) => {
+                        if let Some(Ok(def)) = l.entries.get(l.sel).map(|e| &e.def) {
+                            let (def, purpose) = (def.clone(), l.purpose);
+                            let what = def.name.to_uppercase();
+                            let map = def.map.clone();
+                            let target =
+                                if purpose == Purpose::Play { Target::Game(def) } else { Target::ScenarioEditor(def) };
+                            if purpose == Purpose::Play {
+                                self.suspended = None;
+                            }
+                            self.start_load(what, map, target);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Screen::Maps(l) => {
+                menu::list_keys(inp, &mut l.sel, l.entries.len());
+                let b = l.buttons(screen);
+                let a = hud::clicked(&b, inp.mouse, inp.left_pressed)
+                    .or(inp.hit(Key::Enter).then_some(MenuAction::Start))
+                    .or(back.then_some(MenuAction::Back));
+                match a {
+                    Some(MenuAction::Pick(k)) => l.sel = k,
+                    Some(MenuAction::Back) => self.go(Screen::Main),
+                    Some(MenuAction::Start) => {
+                        if let Some(e) = l.entries.get(l.sel) {
+                            let map = e.map.clone();
+                            self.start_load(format!("MAP {}", map.id.to_uppercase()), map, Target::TerrainEditor);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Screen::Loading(ld) => {
+                if ld.error.is_some() {
+                    if back || inp.hit(Key::Enter) || inp.left_pressed {
+                        self.go(Screen::Main);
+                    }
+                    return;
+                }
+                let mut done = None;
+                loop {
+                    match ld.rx.try_recv() {
+                        Ok(LoadMsg::Log(s)) => ld.lines.push(s),
+                        Ok(LoadMsg::Done(r)) => {
+                            done = Some(*r);
+                            break;
+                        }
+                        Err(mpsc::TryRecvError::Empty) => break,
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            done = Some(Err("loader thread stopped".into()));
+                            break;
+                        }
+                    }
+                }
+                let Some(r) = done else { return };
+                let target = ld.target.take().expect("target until done");
+                let map_id = ld.map_id.clone();
+                let ctx = Ctx { ds: &self.ds, data_dir: &self.data_dir, settings: &self.settings };
+                let opened = r.and_then(|(map, pkg)| {
+                    let map = Arc::new(map);
+                    Ok(match (target, pkg) {
+                        (Target::Game(def), _) => MapScreen::game(map, def, &ctx)?,
+                        (Target::ScenarioEditor(def), _) => MapScreen::scenario_editor(map, def, &ctx),
+                        (Target::TerrainEditor, Some(pkg)) => MapScreen::terrain_editor(map_id, map, pkg, &ctx),
+                        (Target::TerrainEditor, None) => return Err("no authoring package".into()),
+                    })
+                });
+                match opened {
+                    Ok(ms) => self.go(Screen::Map(Box::new(ms))),
+                    Err(e) => ld.error = Some(e.to_uppercase()),
+                }
+            }
+            Screen::Map(ms) => {
+                let ctx = Ctx { ds: &self.ds, data_dir: &self.data_dir, settings: &self.settings };
+                if let Some(r) = ms.update(inp, &mut self.gfx, &ctx) {
+                    self.handle_request(r);
+                }
+            }
         }
     }
 
     fn draw(&mut self) {
-        let (app_buttons, game_buttons) = self.buttons(self.last_input.screen);
-        let minimap = self.minimap(self.last_input.screen);
         let inp = &self.last_input;
-        let (cam, view, map, ds) = (&self.cam, &self.view, &self.map, &self.ds);
-        let (mode, game, editor, help) = (self.mode, &self.game, &self.editor, self.help);
-        let scenario_editor = &self.scenario_editor;
+        let (screen, mouse) = (inp.screen, inp.mouse);
+        let (bd, t, ds) = (&self.backdrop, self.t, &self.ds);
+        let (sc, overlay, help, settings, status) =
+            (&self.screen, self.overlay, self.help, &self.settings, &self.status);
+        let suspended = self.suspended.as_ref().map(|s| s.title());
+        let focus = self.focus;
+        let focused = |mut b: Vec<hud::Button<MenuAction>>| {
+            for (k, x) in b.iter_mut().enumerate() {
+                x.focused = Some(k) == focus;
+            }
+            b
+        };
         self.gfx.frame(|f| {
-            f.clear(style::BG);
-            view.draw(f, cam, map);
-            if mode != Mode::Scenario
-                && let Some(g) = game
-            {
-                g.draw_world(f, cam, inp.mouse);
-            }
-            if let Some(e) = scenario_editor.as_ref().filter(|_| mode == Mode::Scenario) {
-                e.draw_world(f, cam);
-            }
-            if mode == Mode::Editor
-                && let Some(e) = editor
-            {
-                e.draw_world(f, cam, inp.mouse);
-            }
-            // Top bar (game state text is drawn by the game's own UI on top of it).
-            f.rect(0.0, 0.0, inp.screen[0], hud::TOP_H, style::PANEL);
-            f.line([0.0, hud::TOP_H], [inp.screen[0], hud::TOP_H], 1.0, style::PANEL_EDGE);
-            match mode {
-                Mode::Game => {
-                    if let Some(g) = game {
-                        g.draw_ui(f, inp.screen);
-                    }
-                    if let (Some(m), Some(g)) = (&minimap, game) {
-                        f.rect(m.r.x - 2.0, m.r.y - 2.0, m.r.w + 4.0, m.r.h + 4.0, style::PANEL);
-                        view.draw_minimap(f, m, cam);
-                        g.draw_minimap(f, m);
+            let mut help_lines: &[&str] = MENU_HELP;
+            match sc {
+                Screen::Title => menu::draw_title(f, bd, screen, t),
+                Screen::Main => {
+                    menu::draw_main(f, bd, screen, status);
+                    if overlay.is_none() {
+                        menu::draw_buttons(
+                            f,
+                            &focused(menu::main_buttons(screen, suspended.as_deref())),
+                            mouse,
+                            screen,
+                        );
                     }
                 }
-                Mode::Editor => {
-                    f.text("TERRAIN EDITOR", 10.0, 8.0, style::FONT_L - 4, style::AMBER);
-                    if let Some(e) = editor {
-                        e.draw_ui(f, inp.screen);
-                    }
+                Screen::Scenarios(l) => {
+                    l.draw(f, bd, screen);
+                    menu::draw_buttons(f, &l.buttons(screen), mouse, screen);
                 }
-                Mode::Scenario => {
-                    f.text("SCENARIO EDITOR", 10.0, 8.0, style::FONT_L - 4, style::AMBER);
-                    if let Some(e) = scenario_editor {
-                        e.draw_ui(f, inp.screen, ds);
-                    }
+                Screen::Maps(l) => {
+                    l.draw(f, bd, screen);
+                    menu::draw_buttons(f, &l.buttons(screen), mouse, screen);
+                }
+                Screen::Loading(ld) => {
+                    menu::draw_loading(f, bd, screen, &ld.what, &ld.lines, ld.error.as_deref(), t);
+                }
+                Screen::Map(ms) => {
+                    ms.draw(f, inp, ds);
+                    help_lines = ms.help_lines();
                 }
             }
-            hud::draw(f, &game_buttons, inp.mouse);
-            hud::draw(f, &app_buttons, inp.mouse);
-            status_line(f, inp, cam, map, ds, view.base);
+            match overlay {
+                Some(Overlay::Pause) => {
+                    if let Screen::Map(ms) = sc {
+                        let items = ms.menu_items();
+                        menu::draw_pause(f, screen, &ms.title(), items.len());
+                        menu::draw_buttons(f, &focused(menu::pause_buttons(screen, &items)), mouse, screen);
+                    }
+                }
+                Some(Overlay::Options { .. }) => {
+                    let note = Settings::path().map_or("OPTIONS ARE NOT SAVED (NO CONFIG DIRECTORY)".into(), |p| {
+                        format!("FILE {}", p.display())
+                    });
+                    menu::draw_options(f, screen, &note);
+                    menu::draw_buttons(f, &focused(menu::options_buttons(screen, settings)), mouse, screen);
+                }
+                Some(Overlay::Confirm(_)) => {
+                    menu::draw_confirm(f, screen);
+                    menu::draw_buttons(f, &focused(menu::confirm_buttons(screen)), mouse, screen);
+                }
+                None => {}
+            }
             if help {
-                help_overlay(f, inp.screen);
+                mapscreen::help_overlay(f, screen, help_lines);
             }
-            hud::tooltip(f, &app_buttons, inp.mouse, inp.screen);
-            hud::tooltip(f, &game_buttons, inp.mouse, inp.screen);
         });
     }
 }
 
-fn status_line(f: &mut render::Frame, inp: &Input, cam: &Camera, map: &BakedMap, ds: &DataSet, base: BaseLayer) {
-    let p = cam.to_world(inp.mouse);
-    let (w, h) = (map.manifest.width_m(), map.manifest.height_m());
-    let y = inp.screen[1] - 20.0;
-    f.rect(0.0, y - 4.0, inp.screen[0], 24.0, style::PANEL);
-    let mut s = String::new();
-    if p[0] >= 0.0 && p[1] >= 0.0 && p[0] < w && p[1] < h {
-        let hf = &map.elevation;
-        let (i, j) = hf.cell_of(p[0], p[1]);
-        let lc = ds.terrain.landcover(map.landcover.get(i, j));
-        s = format!(
-            "GRID {}   ELEV {:.1} M   SLOPE {:.0} %   {}",
-            format::grid8(p),
-            hf.height(p[0], p[1]),
-            hf.node_slope(i, j) * 100.0,
-            lc.name.to_uppercase().replace('_', " ")
-        );
-        let wd = map.water_depth.get(i, j);
-        if wd > 0.05 {
-            s.push_str(&format!("   WATER {wd:.1} M"));
+const MENU_HELP: &[&str] =
+    &["MENUS    UP / DOWN SELECT   ENTER OPEN   ESC BACK   MOUSE: HOVER AND CLICK", "ANYWHERE F11 FULLSCREEN"];
+
+/// `--order`, `--bp`, `--pl`, `--select`/`--press`, `--advance`, `--save-replay`, `--aar`.
+fn script(g: &mut Game, o: &Opts) -> Result<(), String> {
+    for (kind, cs, n) in &o.orders {
+        let platoon = g.picture().platoons.iter().find(|p| &p.callsign == cs).map(|p| p.id);
+        match (kind.as_str(), platoon, n.as_slice()) {
+            ("--bp", Some(p), [x, y, deg]) => {
+                g.sel_platoon = Some(p);
+                g.issue_bp([*x, *y], deg.to_radians());
+            }
+            ("--pl", _, pts) if pts.len() >= 4 && pts.len() % 2 == 0 => {
+                g.add_phase_line(pts.chunks(2).map(|c| [c[0], c[1]]).collect());
+            }
+            // `--order <platoon>:x,y[,x,y..]`: checkpoints, then the destination.
+            ("--order", Some(p), pts) if pts.len() >= 2 && pts.len() % 2 == 0 => {
+                let mut pts: Vec<[f64; 2]> = pts.chunks(2).map(|c| [c[0], c[1]]).collect();
+                let dest = pts.pop().expect("non-empty");
+                g.sel_platoon = Some(p);
+                g.issue_move(pts, dest);
+            }
+            ("--order", None, [x, y]) => {
+                let id =
+                    g.picture().own.iter().find(|u| &u.callsign == cs).map(|u| u.id).ok_or(format!("no unit {cs}"))?;
+                g.order_move(id, [*x, *y]);
+            }
+            _ => return Err(format!("bad {kind} {cs}:{n:?}")),
         }
     }
-    f.text(&s, 10.0, y, style::FONT_L - 8, style::TEXT);
-    let right = format!("{}   {:.1} M/PX   F7 HELP", base.label(), cam.mpp);
-    let tw = f.text_width(&right, style::FONT_L - 8);
-    f.text(&right, inp.screen[0] - tw - 10.0, y, style::FONT_L - 8, style::TEXT_DIM);
-}
-
-fn help_overlay(f: &mut render::Frame, screen: [f32; 2]) {
-    let lines = [
-        "EVERY BUTTON SHOWS ITS HOTKEY; HOVER FOR A DESCRIPTION.",
-        "",
-        "MAP     WHEEL ZOOM   MMB DRAG / ARROWS PAN   CLICK/DRAG MINIMAP TO MOVE",
-        "LAYERS  F1 RELIEF  F2 SLOPE  F3 GO/NO-GO  F4 LAND COVER  F5 CONTOURS  F6 GRID",
-        "SELECT  LMB PLATOON (CTRL: SINGLE TANK)  ROSTER / PANEL ROWS (CLICK AGAIN: CENTRE)  TAB NEXT  ESC CLEAR",
-        "MOVE    RMB MOVE   M MOVE TOOL   SHIFT+RMB ADD CHECKPOINT (RELEASE SHIFT TO SEND, APPENDS TO ROUTE)",
-        "        R ROUTE TOOL: LMB CHECKPOINTS, RMB DESTINATION, BKSP UNDO   H HALT",
-        "ORDERS  F FORMATION  T TECHNIQUE  B BATTLE POSITION ([ ] RADIUS)  W WEAPONS  A / CTRL+RMB ENGAGE",
-        "TIME    SPACE PAUSE  1-4 SPEED X1 X2 X4 X8   V VIEWSHED  L LINE OF SIGHT",
-        "PLAN    ENTER EXECUTE (PLANNING PHASE)  G GRAPHICS (PL/OBJ/TRP)  K TIMING OF THE NEXT ORDER",
-        "        RMB CANCELS A TARGETING TOOL   F8 AFTER-ACTION REVIEW (CTRL+R SAVE REPLAY)",
-        "SCENARIO F9 EDIT/PLAY  P PLACE  LMB DRAG  R ROTATE  DEL REMOVE  TAB SIDE  V VEHICLE  N PLATOON",
-        "        O OBJECTIVE  Y/U YEAR  T START TIME  CTRL+S SAVE",
-        "EDITOR  E TOGGLE  1-4 BRUSHES  5 RIVER  6 ROAD  7 FOREST  8 BUILDING  DEL DELETE  [ ] RADIUS  - = RATE",
-        "        CTRL+Z/Y UNDO/REDO  B BAKE  CTRL+S SAVE",
-    ];
-    let (w, h) = (980.0, lines.len() as f32 * 20.0 + 20.0);
-    let (x, y) = ((screen[0] - w) / 2.0, (screen[1] - h) / 2.0);
-    f.rect(x, y, w, h, style::PANEL);
-    f.rect_lines(x, y, w, h, style::PANEL_EDGE);
-    for (k, l) in lines.iter().enumerate() {
-        f.text(l, x + 12.0, y + 12.0 + k as f32 * 20.0, style::FONT_L - 8, style::TEXT);
+    // `--select <platoon> --press F,W,T`: command-card keys, before `--advance`.
+    if let Some(cs) = &o.select {
+        g.sel_platoon = g.picture().platoons.iter().find(|p| &p.callsign == cs).map(|p| p.id);
+        g.sel_unit = None;
     }
+    if let Some(keys) = &o.press {
+        for k in keys.split(',').map(str::trim) {
+            match k {
+                "F" => g.press(Cmd::Formation),
+                "W" => g.press(Cmd::Weapons),
+                "T" => g.press(Cmd::Technique),
+                _ => {}
+            }
+        }
+    }
+    if o.advance_s > 0.0 {
+        g.execute();
+        g.advance_ticks((o.advance_s * sim::TICK_HZ as f64) as u32);
+    }
+    if let Some(path) = &o.save_replay {
+        std::fs::write(path, sim::Replay::record(&g.sim).to_ron()).map_err(|e| format!("{path}: {e}"))?;
+    }
+    if o.aar {
+        g.open_aar();
+    }
+    Ok(())
 }

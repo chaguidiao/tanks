@@ -101,7 +101,7 @@ tanks/                     (Cargo workspace)
 │   ├── terrain/    # map format, heightfield, layers, LOS/viewshed, contours, cost grids
 │   ├── terragen/   # procedural generation pipeline + importers (DEM/OSM later). No graphics deps.
 │   ├── ai/         # platoon/vehicle/commander AI
-│   ├── client/     # raylib app: game + terrain editor modes. Talks to sim via Commands/Events/PerceivedWorld
+│   ├── client/     # raylib app: menus, game, terrain + scenario editor screens. Talks to sim via Commands/Events/PerceivedWorld
 │   └── headless/   # CLI: generate/bake maps, batch runs, validation harness, replay verifier, benchmarks
 ├── data/           # vehicles/, ammo/, doctrine/, eras/, scenarios/, maps/
 └── docs/
@@ -402,7 +402,7 @@ Packs can also carry era-dependent variants, e.g., a modern pack that assumes a 
 Borrowed from RTS conventions (StarCraft / Command & Conquer): every order is a visible button that also shows its hotkey, so the game is learnable with the mouse alone and fast with the keyboard.
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ TOP BAR: clock · state · EXECUTE / PAUSE · X1 X2 X4 X8 · AAR │ map layers · editors · HELP │
+│ TOP BAR: clock · state · EXECUTE / PAUSE · X1 X2 X4 X8 · AAR │ map layers · HELP · MENU    │
 ├────────────┬─────────────────────────────────────────────────┬───────────────┤
 │ ORDER OF   │              (tool prompt, centred)              │ SELECTION     │
 │ BATTLE     │                                                  │ platoon task, │
@@ -427,7 +427,24 @@ Command card rows: orders (move, route, halt, battle position, engage), posture 
 - Mouse or keyboard: space = pause, 1–4 speed, a hotkey for every card button, Tab cycles platoons; clicking a selected roster entry centres the map; minimap click/drag pans.
 - **After-action review**: timeline scrubber, ground truth toggle, LOS lines of every shot, statistics (detections first, rounds fired, hits, Pk by range).
 
-### 10.4 Audio
+### 10.4 Screens and flow
+The client is a set of screens, not one view with modes. The game and the two editors are separate screens, each with its own top bar, help (F7) and menu (Esc / F10); none of them can switch to another in place.
+```
+TITLE ──any key──▶ MAIN MENU ─┬─ PLAY SCENARIO ──▶ scenario list + briefing ──▶ LOADING ──▶ GAME
+                              ├─ SCENARIO EDITOR ─▶ scenario list ──▶ LOADING ──▶ SCENARIO EDITOR ⇄ PLAY TEST (F9)
+                              ├─ TERRAIN EDITOR ──▶ map list ──▶ LOADING ──▶ TERRAIN EDITOR
+                              ├─ OPTIONS (overlay)        RESUME <game> when a game was left for the menu
+                              └─ QUIT
+```
+- **Loading** generates/bakes/loads the map on a worker thread (progress lines from the generator), so the window never stalls; a failure shows the error and returns to the main menu.
+- **Screen menu (Esc)** over any map screen: resume, screen entries (game: AAR, restart, back to the editor when play testing; terrain editor: save, bake; scenario editor: save, play test), options, help, main menu, quit. Esc first cancels whatever a tool is doing (targeting tool, drafted route, feature being drawn).
+- Leaving a game for the main menu suspends it (RESUME on the main menu); starting a new scenario discards it. Leaving an editor with unsaved edits asks first.
+- **Mission end**: a panel with the result and AFTER-ACTION REVIEW / RESTART / MAIN MENU / CLOSE.
+- **Scenario select** shows date, map, sides (strength, doctrine, player or computer), objectives, victory conditions and the scenario's `briefing` text.
+- **Options** (saved at once to `<config dir>/tanks/settings.cfg`, or `$TANKS_CONFIG`): borderless fullscreen (also F11), frame-rate cap, UI font (IBM Plex Mono / built-in), pan speed, edge pan, contours and grid when a map opens.
+- Every menu works with the mouse and with Up/Down/Enter/Esc; the visual language is the map's (contour backdrop, same panels and buttons).
+
+### 10.5 Audio
 Sparse: radio clicks, squelch, terse synthesised or recorded callouts (optional), distant gunfire. No music during play (optional menu music).
 
 ---
@@ -487,7 +504,9 @@ Sparse: radio clicks, squelch, terse synthesised or recorded callouts (optional)
 | M3 | Fire-control timeline (traverse, lay, lase, fire, reload, adjusted fire), linear-decay ballistics, Ph error budget sampled against the visible silhouette, Lanz–Odermatt KE penetration (constant `c` calibrated, see `data/combat/penetration.ron`), per-face armour with obliquity, data-driven damage tables (M/F/K-kill, crew, sights), duel harness (`tanks-headless duel` → CSV) | HEAT/CE rounds and ERA, internal component model and spall, ammunition types per target, coaxial MG, fire-on-the-move doctrine differences |
 | M4 | Platoons from scenario data; doctrine packs (formation slots, spacing, bound length, delays, engagement range, drills); formation movement with virtual leader and slot re-planning; traveling / traveling overwatch / bounding overwatch; Occupy BP with hull-down finder (coarse grid + 3 m micro-search, threat observers, gun depression, dispersion, assignment), crews report position type; frontal fire distribution; react-to-contact drill (halt, orient, engage, resume when quiet); order delay over the radio | Alternate/supplementary/hide positions, displacement on trigger, skyline/military-crest scoring, break-contact drill, smoke, cross/depth fire patterns, HTN method library |
 | M5 | Scenario objectives, victory conditions (force destroyed, objective seized and held 2 min, time limit with defender tie-break) and per-side AI plans; commander AI (`ai::commander`, 0.2 Hz) reading only the side's picture: attack template march → pre-battle → battle formation → consolidate with break-off on losses, defend template; orders go over the radio with delay; scenario `m5-hold-the-village` playable start to finish (also headless with both AIs) | Re-planning/COA choice (HTN/utility), reserves and counter-attacks, OPFOR reconnaissance, artillery preparation, Blue auto-commander option in the UI |
-| M6 | Planning phase (clock stopped at H-hour; orders, graphics and contingencies apply at once, ENTER executes); control measures drawn in the client (phase lines, objectives, TRPs, battle positions) and held in each side's picture; triggers (enemy crosses PL, platoon crosses PL, at time) that release orders as code words; replays = scenario + player command log (`sim::Replay`, CTRL+R in the AAR, `tanks-headless replay` verifies the hash); AAR with timeline scrub over recorded truth frames, shots and per-side stats (rounds/hits/kills/losses, first contact, hits by range band); scenario editor (F9: place/drag/rotate/delete units, platoons, vehicle by in-service year, objectives, date, start time, save to `data/scenarios/<id>-custom.ron`, play); generated village buildings (footprints in `buildings.geojson`, baked to a height grid that blocks LOS and movement); terrain editor building tool and feature delete | Town blocks/streets beyond villages, building damage, AI use of buildings, AAR replay by re-simulation (frames are recorded live), graphics in the AAR, editing AI plans and victory conditions in the scenario editor, trigger/graphic editing after placement, PL-relative report text |
+| M6 | Planning phase (clock stopped at H-hour; orders, graphics and contingencies apply at once, ENTER executes); control measures drawn in the client (phase lines, objectives, TRPs, battle positions) and held in each side's picture; triggers (enemy crosses PL, platoon crosses PL, at time) that release orders as code words; replays = scenario + player command log (`sim::Replay`, CTRL+R in the AAR, `tanks-headless replay` verifies the hash); AAR with timeline scrub over recorded truth frames, shots and per-side stats (rounds/hits/kills/losses, first contact, hits by range band); scenario editor (place/drag/rotate/delete units, platoons, vehicle by in-service year, objectives, date, start time, save to `data/scenarios/<id>-custom.ron`, play); generated village buildings (footprints in `buildings.geojson`, baked to a height grid that blocks LOS and movement); terrain editor building tool and feature delete | Town blocks/streets beyond villages, building damage, AI use of buildings, AAR replay by re-simulation (frames are recorded live), graphics in the AAR, editing AI plans and victory conditions in the scenario editor, trigger/graphic editing after placement, PL-relative report text |
+
+**Game shell (2026-10-12):** title screen, main menu, scenario select with briefing (`briefing` field in the scenario format), threaded loading screen, options (persisted), screen menu (Esc), mission-end panel, game suspended/resumed from the main menu; terrain and scenario editors moved out of the game into their own screens, the scenario editor play-tests and returns with F9 (§10.4). Deferred: new map from a recipe and new blank scenario from the menus, map preview in the select screens, campaign/scenario progress, key rebinding, UI scaling, audio volume (no audio yet).
 
 **UX pass (2026-10-12, after M6):** clickable top bar (time control, map layers, editors, help), order-of-battle roster, selection panel with clickable vehicle rows, StarCraft-style command card with hotkey labels, tooltips and placement sub-cards, minimap, wrapped radio net; multi-checkpoint routes (sim `via`, see §10.3). Deferred: box/multi-platoon selection, control groups, a real order queue (sequential *different* orders, e.g. move then occupy BP), auto-pause options, LOS profile chart.
 
@@ -514,6 +533,8 @@ Sparse: radio clicks, squelch, terse synthesised or recorded callouts (optional)
 | 14 | Replay input | A replay holds only externally given commands (`generated == false`) plus the sides a human played; AI and trigger orders are regenerated by re-simulation. Control measures carry no radio delay and draw no random numbers, so `Sim::settle` may apply them during the planning phase without changing replay results |
 | 15 | Buildings | Footprints are authored features; the baker rasterises them to a building-height grid (`buildings.bin`) used by LOS (opaque to roof height) and as NO-GO in every mobility raster |
 | 16 | Multi-point routes | A route with checkpoints is **one** order (`via: Vec<Vec2>` on `Move`/`PlatoonMove`, omitted from RON when empty so old replays load unchanged), not a client-side queue of moves: it crosses the radio once, replays deterministically and the platoon AI owns resumption after contact. Legs are planned separately (`Pathfinder::find_via`) so checkpoints are actually visited |
+
+| 17 | Client screens | The game, the terrain editor and the scenario editor are separate screens reached from the main menu (`client/src/mapscreen.rs`), not modes toggled inside one view: each has its own top bar, help and menu, and an editor never restarts a running game. The only in-place switch is the scenario editor's play test (F9 there and back). Map loads run on a worker thread. Options are a plain `key = value` file in the user's config directory (no new crate, unknown keys ignored) |
 
 ### Remaining open questions
 None blocking. Development environment: see `docs/DEVELOPMENT.md`.

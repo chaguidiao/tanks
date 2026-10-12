@@ -146,7 +146,7 @@ Automatic checks with a report in the editor: river continuity (flows downhill t
 
 ## 4. Terrain editor
 
-The editor is a **mode of the game client** (same renderer, same map display, same LOS tools), not a separate application. Heavy jobs (generation, bake) also run from the CLI.
+The editor is a **screen of the game client** (main menu → TERRAIN EDITOR → pick a map; same renderer, same map display), not a separate application, and separate from the game screen: scenarios on the edited map pick up the saved ground the next time they start. Heavy jobs (generation, bake) also run from the CLI.
 
 ### 4.1 Tools
 | Category | Tools |

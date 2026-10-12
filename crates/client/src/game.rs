@@ -221,6 +221,11 @@ impl Game {
         Ok(g)
     }
 
+    /// Esc would cancel a tool or a drafted route (otherwise the app opens its menu).
+    pub fn esc_in_use(&self) -> bool {
+        self.tool != Tool::None || !self.draft.is_empty()
+    }
+
     pub fn picture(&self) -> &PerceivedWorld {
         self.sim.perceived(self.side)
     }
@@ -1566,6 +1571,7 @@ impl Game {
             OrderMode::InFiveMinutes => "NEXT ORDER AT +5 MIN".into(),
         };
         let mut py = TOP_H + 6.0;
+        // (The end-of-mission panel is the app's: it carries menu buttons.)
         for (t, c) in [(prompt, style::AMBER), (mode, style::SELECT)] {
             if t.is_empty() {
                 continue;
@@ -1575,15 +1581,6 @@ impl Game {
             hud::panel(f, Rect::new(x, py, w, 24.0));
             f.text(&t, x + 12.0, py + 6.0, style::FONT_S, c);
             py += 28.0;
-        }
-
-        if let Some(end) = &self.ended {
-            let w = f.text_width(end, style::FONT_L) + 40.0;
-            let (x, y) = ((screen[0] - w) / 2.0, py + 30.0);
-            f.rect(x, y, w, 64.0, style::PANEL);
-            f.rect_lines(x, y, w, 64.0, style::AMBER);
-            f.text(end, x + 20.0, y + 12.0, style::FONT_L, style::AMBER);
-            f.text("AAR (F8): AFTER-ACTION REVIEW", x + 20.0, y + 40.0, style::FONT_S, style::TEXT);
         }
 
         // Roster.

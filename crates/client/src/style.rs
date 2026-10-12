@@ -44,3 +44,8 @@ pub const EDIT_CURSOR: Rgba = Rgba(230, 200, 120, 200);
 pub const FONT: i32 = 10;
 pub const FONT_S: i32 = 12;
 pub const FONT_L: i32 = 20;
+/// Menu entries.
+pub const FONT_M: i32 = 16;
+/// Title screen.
+pub const FONT_TITLE: i32 = 48;
+pub const FONT_XL: i32 = 32;
