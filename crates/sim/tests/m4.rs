@@ -238,3 +238,52 @@ fn platoon_route_passes_its_checkpoints_in_order() {
     assert!(set, "platoon reports set at the destination");
     assert!(dist(sim.truth().transform[0].pos, dest) < 200.0);
 }
+
+#[test]
+fn halt_keeps_the_route_and_resume_continues_it() {
+    let ds = data();
+    let m = map(&ds, 250, 750, "grassland", |_, _| 0.0);
+    let mut sim = Sim::new(&scenario(DAY, platoon(300.0), vec![]), ds, m).unwrap();
+    sim.submit_immediate(
+        BLUE,
+        Command::PlatoonMove {
+            platoon: P1,
+            destination: [500.0, 2300.0],
+            via: vec![[300.0, 1200.0]],
+            formation: Some(Formation::Wedge),
+            technique: Technique::Traveling,
+        },
+    );
+    run(&mut sim, 40.0);
+    sim.submit_immediate(BLUE, Command::Halt { to: Addressee::Platoon(P1) });
+    run(&mut sim, 30.0);
+    let pv = sim.perceived(BLUE).platoon(P1).unwrap().clone();
+    assert!(pv.held, "route held: {}", pv.task);
+    assert_eq!(pv.waypoints.last(), Some(&[500.0, 2300.0]), "the plot stays on the map");
+    let stopped: Vec<_> = (0..4).map(|k| sim.truth().transform[k].pos).collect();
+    run(&mut sim, 20.0);
+    for (k, p) in stopped.iter().enumerate() {
+        assert!(dist(sim.truth().transform[k].pos, *p) < 1.0, "tank {k} stays halted");
+    }
+    sim.submit_immediate(BLUE, Command::Resume { to: Addressee::Platoon(P1) });
+    let events = run(&mut sim, 400.0);
+    assert!(events.iter().any(|e| matches!(e, Event::PlatoonReport { report: PlatoonReport::SetAt { .. }, .. })));
+    assert!(!sim.perceived(BLUE).platoon(P1).unwrap().held);
+    for k in 0..4 {
+        assert!(dist(sim.truth().transform[k].pos, [500.0, 2300.0]) < 350.0);
+    }
+
+    // A single vehicle keeps its own route the same way.
+    let u = sim.perceived(BLUE).own[0].id;
+    sim.submit_immediate(
+        BLUE,
+        Command::Move { unit: u, destination: [500.0, 1500.0], via: vec![], speed_limit_mps: None },
+    );
+    run(&mut sim, 20.0);
+    sim.submit_immediate(BLUE, Command::Halt { to: Addressee::Unit(u) });
+    run(&mut sim, 10.0);
+    assert!(sim.perceived(BLUE).unit(u).unwrap().held);
+    sim.submit_immediate(BLUE, Command::Resume { to: Addressee::Unit(u) });
+    let events = run(&mut sim, 200.0);
+    assert!(events.iter().any(|e| matches!(e, Event::Arrived { unit } if *unit == u)));
+}

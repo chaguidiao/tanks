@@ -186,6 +186,7 @@ impl Sim {
                                 slot_targets: Vec::new(),
                                 bp: Vec::new(),
                                 resume: None,
+                                held: None,
                                 quiet_since: 0,
                                 last_strength: 0,
                             });
@@ -637,7 +638,25 @@ impl Sim {
                 if let Addressee::Platoon(p) = to
                     && let Some(p) = self.platoon_mut(c.side, *p)
                 {
-                    p.order = platoon::PlatoonOrder::None;
+                    p.halt();
+                    events.push(Event::OrderReceived { side: c.side, to: *to });
+                }
+            }
+            Command::Resume { to } => {
+                let resumed = match to {
+                    Addressee::Platoon(p) => self.platoon_mut(c.side, *p).is_some_and(|p| match p.held.take() {
+                        Some(o) => {
+                            p.order = o;
+                            p.replanned = 0;
+                            p.contact_reported = false;
+                            true
+                        }
+                        None => false,
+                    }),
+                    Addressee::Unit(_) => self.members(c.side, *to).into_iter().any(|k| self.world.resume(k)),
+                };
+                if resumed {
+                    events.push(Event::OrderReceived { side: c.side, to: *to });
                 }
             }
             Command::WeaponsControl { to, status } => {
@@ -673,14 +692,8 @@ impl Sim {
                         p.formation = f;
                     }
                     p.technique = t;
-                    p.order = platoon::PlatoonOrder::Move {
-                        destination: dest,
-                        via: via.clone(),
-                        checkpoints: Vec::new(),
-                        route: Vec::new(),
-                        progress: [0.0, 0.0],
-                        active: 0,
-                    };
+                    p.order = platoon::PlatoonOrder::new_move(dest, via.clone());
+                    p.held = None;
                     p.replanned = 0;
                     p.contact_reported = false;
                     events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
@@ -727,6 +740,7 @@ impl Sim {
                 };
                 if let Some(p) = self.platoon_mut(c.side, *platoon) {
                     p.order = o;
+                    p.held = None;
                     events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
                 }
             }

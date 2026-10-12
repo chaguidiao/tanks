@@ -67,8 +67,10 @@ pub struct OwnUnit {
     pub condition: Condition,
     pub weapons: WeaponsStatus,
     pub task: Task,
-    /// Remaining route, starting at the unit's position.
+    /// Remaining route, starting at the unit's position (also while halted with it held).
     pub route: Vec<Vec2>,
+    /// Halted with its own (single-vehicle) route held for RESUME.
+    pub held: bool,
     /// Hull-down state reported by the crew for its current position, if set in a BP.
     pub position_note: Option<String>,
     /// Crew fit for duty, of the vehicle's establishment.
@@ -125,8 +127,11 @@ pub struct PlatoonView {
     pub task: String,
     /// Remaining planned route of the platoon's virtual leader (empty when not moving).
     pub route: Vec<Vec2>,
-    /// Checkpoints not yet passed, then the destination (also kept while in a contact drill).
+    /// Checkpoints not yet passed, then the destination (also kept while in a contact drill
+    /// or halted with the route held).
     pub waypoints: Vec<Vec2>,
+    /// Halted with an interrupted order that RESUME continues.
+    pub held: bool,
 }
 
 /// Control measures (DESIGN.md §8.4; MIL-STD-2525D tactical graphics).

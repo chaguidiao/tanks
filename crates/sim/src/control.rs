@@ -99,6 +99,7 @@ pub fn describe(c: &Command) -> String {
         Command::PlatoonMove { .. } => "MOVE".into(),
         Command::OccupyPosition { .. } => "OCCUPY BP".into(),
         Command::Halt { .. } => "HALT".into(),
+        Command::Resume { .. } => "RESUME".into(),
         Command::WeaponsControl { status, .. } => format!("WEAPONS {status:?}").to_uppercase(),
         Command::Move { .. } => "MOVE".into(),
         Command::SetFormation { formation, .. } => format!("FORMATION {formation:?}").to_uppercase(),

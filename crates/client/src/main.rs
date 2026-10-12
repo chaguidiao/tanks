@@ -864,7 +864,7 @@ fn script(g: &mut Game, o: &Opts) -> Result<(), String> {
             _ => return Err(format!("bad {kind} {cs}:{n:?}")),
         }
     }
-    // `--select <platoon> --press F,W,T`: command-card keys, before `--advance`.
+    // `--select <platoon> --press F,W,T,H`: command-card keys, before `--advance`.
     // `--select <platoon or vehicle callsign>`.
     if let Some(cs) = &o.select {
         g.sel_platoon = g.picture().platoons.iter().find(|p| &p.callsign == cs).map(|p| p.id);
@@ -879,6 +879,7 @@ fn script(g: &mut Game, o: &Opts) -> Result<(), String> {
                 "F" => g.press(Cmd::Formation),
                 "W" => g.press(Cmd::Weapons),
                 "T" => g.press(Cmd::Technique),
+                "H" => g.press(Cmd::Halt),
                 _ => {}
             }
         }

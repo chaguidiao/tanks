@@ -58,6 +58,8 @@ pub struct VehicleAi {
     /// What the crew reports its position as (e.g. "HULL-DOWN") once set.
     pub position_note: Option<String>,
     pub set: bool,
+    /// Own (single-vehicle) move interrupted by a HALT, continued by RESUME.
+    pub held: Option<Order>,
 }
 
 /// A vehicle's own picture of an enemy (crew level, before reporting).
@@ -158,7 +160,7 @@ impl World {
             cmd_speed: 0.0,
             cmd_heading: heading,
         }));
-        self.ai.push(Some(VehicleAi { order: Order::Idle, position_note: None, set: false }));
+        self.ai.push(Some(VehicleAi { order: Order::Idle, position_note: None, set: false, held: None }));
         let sensors = def
             .sensors
             .iter()
@@ -187,6 +189,7 @@ impl World {
         if let Some(ai) = &mut self.ai[k] {
             ai.order = Order::Move { route, segment: 0, speed_limit, face, platoon_slot: slot, arrive };
             ai.set = false;
+            ai.held = None;
             ai.position_note = None;
         }
         if let Some(m) = &mut self.mobility[k] {
@@ -194,13 +197,31 @@ impl World {
         }
     }
 
+    /// Stop in place. A vehicle's own move is kept for `resume`; platoon slot routes are not
+    /// (the platoon keeps its order instead).
     pub fn halt(&mut self, k: usize) {
         if let Some(ai) = &mut self.ai[k] {
-            ai.order = Order::Idle;
+            let o = std::mem::replace(&mut ai.order, Order::Idle);
+            if matches!(o, Order::Move { platoon_slot: false, .. }) {
+                ai.held = Some(o);
+            }
         }
         if let Some(m) = &mut self.mobility[k] {
             m.cmd_speed = 0.0;
         }
+    }
+
+    /// Continue a held move. Returns false if nothing was held.
+    pub fn resume(&mut self, k: usize) -> bool {
+        let Some(ai) = &mut self.ai[k] else { return false };
+        let Some(o) = ai.held.take() else { return false };
+        ai.order = o;
+        ai.set = false;
+        ai.position_note = None;
+        if let Some(m) = &mut self.mobility[k] {
+            m.stalled_s = 0.0;
+        }
+        true
     }
 
     pub(crate) fn hash_into(&self, h: &mut StableHasher) {

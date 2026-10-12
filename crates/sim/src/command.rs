@@ -29,7 +29,12 @@ pub enum Command {
         via: Vec<Vec2>,
         speed_limit_mps: Option<f64>,
     },
+    /// Halt in place, keeping the interrupted order (route, battle position) for `Resume`.
     Halt {
+        to: Addressee,
+    },
+    /// Continue the order interrupted by the last `Halt`.
+    Resume {
         to: Addressee,
     },
     /// Platoon movement in a formation using a movement technique (ATP 3-20.15 ch. 3), along a

@@ -180,6 +180,8 @@ pub struct Game {
     /// step, or for the radio): the card shows and cycles from these. (target, value, sent at)
     pending_formation: Vec<(PlatoonId, Formation, f64)>,
     pending_weapons: Vec<(Addressee, WeaponsStatus, f64)>,
+    /// HALT (true) / RESUME (false) sent but not yet received.
+    pending_held: Vec<(Addressee, bool, f64)>,
 }
 
 impl Game {
@@ -212,6 +214,7 @@ impl Game {
             counts: [0; 3],
             pending_formation: Vec::new(),
             pending_weapons: Vec::new(),
+            pending_held: Vec::new(),
         };
         if let Some((id, p)) = g.picture().own.first().map(|u| (u.id, u.platoon)) {
             g.sel_unit = Some(id);
@@ -663,10 +666,24 @@ impl Game {
             Cmd::BattlePosition if self.sel_platoon.is_some() => {
                 self.toggle_tool(Tool::BattlePosition { centre: None });
             }
+            // One toggle: HALT keeps the route (or BP order); pressed again it is RESUME.
             Cmd::Halt => {
                 if let Some(to) = self.addressee() {
                     self.draft.clear();
-                    self.order(Command::Halt { to });
+                    let cs = self.addressee_cs(to);
+                    let resume = self.shown_held(to);
+                    if resume {
+                        self.order(Command::Resume { to });
+                        self.radio(format!("TO {cs}: CONTINUE MISSION."));
+                    } else {
+                        self.order(Command::Halt { to });
+                        self.radio(format!("TO {cs}: HALT."));
+                    }
+                    let busy = self.has_plan(to);
+                    if self.order_mode == OrderMode::Now && (resume || busy) {
+                        self.pending_held.retain(|x| x.0 != to);
+                        self.pending_held.push((to, !resume, self.sim.time_s()));
+                    }
                 }
             }
             Cmd::Formation => {
@@ -783,6 +800,40 @@ impl Game {
         self.actual_weapons(to)
     }
 
+    /// Halted with an order held for RESUME, or as just ordered if not yet received.
+    fn shown_held(&self, to: Addressee) -> bool {
+        if let Some(h) = self.pending_held.iter().find(|x| x.0 == to) {
+            return h.1;
+        }
+        self.actual_held(to)
+    }
+
+    fn actual_held(&self, to: Addressee) -> bool {
+        let pic = self.picture();
+        match to {
+            Addressee::Unit(u) => pic.unit(u).is_some_and(|u| u.held),
+            Addressee::Platoon(p) => pic.platoon(p).is_some_and(|v| v.held),
+        }
+    }
+
+    /// Moving or occupying: something a HALT would hold.
+    fn has_plan(&self, to: Addressee) -> bool {
+        let pic = self.picture();
+        match to {
+            Addressee::Unit(u) => pic.unit(u).is_some_and(|u| u.platoon.is_none() && u.route.len() >= 2),
+            Addressee::Platoon(p) => {
+                pic.platoon(p).is_some_and(|v| !v.waypoints.is_empty() || v.task.starts_with("OCCUPYING"))
+            }
+        }
+    }
+
+    fn addressee_cs(&self, to: Addressee) -> String {
+        match to {
+            Addressee::Platoon(p) => self.platoon_cs(p),
+            Addressee::Unit(u) => self.picture().unit(u).map_or("?".into(), |x| x.callsign.clone()),
+        }
+    }
+
     /// Platoon formation, or the one just ordered if not yet acknowledged.
     fn shown_formation(&self, p: PlatoonId) -> Option<Formation> {
         if let Some(f) = self.pending_formation.iter().find(|x| x.0 == p) {
@@ -801,6 +852,9 @@ impl Game {
         let mut pw = std::mem::take(&mut self.pending_weapons);
         pw.retain(|&(to, w, t)| fresh(t) && self.actual_weapons(to).is_some_and(|a| a != w));
         self.pending_weapons = pw;
+        let mut ph = std::mem::take(&mut self.pending_held);
+        ph.retain(|&(to, h, t)| fresh(t) && self.actual_held(to) != h);
+        self.pending_held = ph;
     }
 
     fn actual_weapons(&self, to: Addressee) -> Option<WeaponsStatus> {
@@ -1394,7 +1448,17 @@ impl Game {
                     .active(is(&Tool::Route))
                     .tip("ROUTE WITH CHECKPOINTS: CLICK CPS, RIGHT CLICK DESTINATION (OR SHIFT+RIGHT CLICKS)"),
             ),
-            (2, b("HALT", Cmd::Halt).key("H").enabled(sel).tip("HALT IN PLACE")),
+            (2, {
+                let resume = self.addressee().is_some_and(|to| self.shown_held(to));
+                if resume {
+                    b("RESUME", Cmd::Halt).key("H").value("ROUTE HELD").tip("CONTINUE THE HALTED ROUTE OR BP ORDER")
+                } else {
+                    b("HALT", Cmd::Halt)
+                        .key("H")
+                        .enabled(sel)
+                        .tip("HALT IN PLACE (KEEPS THE ROUTE: PRESS AGAIN TO RESUME)")
+                }
+            }),
             (
                 3,
                 b("BATTLE POS", Cmd::BattlePosition)
@@ -1847,6 +1911,7 @@ fn checkpoints(f: &mut Frame, cam: &Camera, pts: &[[f64; 2]], c: Rgba) {
 
 fn short_task(u: &sim::view::OwnUnit) -> String {
     let t = match &u.task {
+        Task::Idle if u.held => "HALTED, ROUTE HELD".to_owned(),
         Task::Idle => "HALTED".to_owned(),
         Task::Moving { remaining_m } => format!("MOVING {}", format::distance(*remaining_m)),
         Task::Set => u.position_note.clone().unwrap_or("SET".into()),

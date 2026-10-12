@@ -162,10 +162,9 @@ fn contact_drill(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
     else {
         return;
     };
-    if let PlatoonOrder::Move { destination, via, checkpoints, progress, .. } = &p.order {
-        // Checkpoints already passed are not revisited when the move resumes.
-        let ahead = via.iter().zip(checkpoints).filter(|(_, s)| **s > progress[0]).map(|(v, _)| *v).collect();
-        p.resume = Some((*destination, ahead, p.technique));
+    // Checkpoints already passed are not revisited when the move resumes.
+    if let Some((destination, ahead)) = p.order.move_ahead() {
+        p.resume = Some((destination, ahead, p.technique));
     }
     p.order = PlatoonOrder::Contact;
     p.quiet_since = ctx.tick;
@@ -190,14 +189,7 @@ fn contact_step(p: &mut Platoon, ctx: &mut Ctx) {
         match p.resume.take() {
             Some((dest, via, tech)) => {
                 p.technique = tech;
-                p.order = PlatoonOrder::Move {
-                    destination: dest,
-                    via,
-                    checkpoints: Vec::new(),
-                    route: Vec::new(),
-                    progress: [0.0, 0.0],
-                    active: 0,
-                };
+                p.order = PlatoonOrder::new_move(dest, via);
                 ctx.report(p, PlatoonReport::ContinuingMission);
             }
             None => p.order = PlatoonOrder::None,

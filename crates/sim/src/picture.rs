@@ -258,7 +258,14 @@ impl SideState {
                         (Task::Moving { remaining_m: remaining }, r, ai.position_note.clone())
                     }
                     _ if ai.set => (Task::Set, Vec::new(), ai.position_note.clone()),
-                    _ => (Task::Idle, Vec::new(), ai.position_note.clone()),
+                    _ => {
+                        let mut r = Vec::new();
+                        if let Some(Order::Move { route, segment, .. }) = &ai.held {
+                            r.push(t.pos);
+                            r.extend_from_slice(&route[(*segment + 1).min(route.len())..]);
+                        }
+                        (Task::Idle, r, ai.position_note.clone())
+                    }
                 },
                 None => (Task::Idle, Vec::new(), None),
             };
@@ -294,6 +301,7 @@ impl SideState {
                 weapons: w.weapons[k],
                 task,
                 route,
+                held: w.ai[k].as_ref().is_some_and(|a| a.held.is_some()),
                 position_note: note,
                 crew,
                 sights_degraded,
