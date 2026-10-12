@@ -122,6 +122,25 @@ fn slot(b: BaseLayer) -> usize {
     b as usize
 }
 
+/// RGBA image of a base layer (pure CPU work, safe on a worker thread).
+pub fn build_layer(base: BaseLayer, traffic_class: &str, baked: &BakedMap, td: &TerrainData) -> Vec<u8> {
+    let hf = &baked.elevation;
+    match base {
+        BaseLayer::Tactical => {
+            shade::tactical(hf, &baked.landcover, &baked.water_depth, td, hf.min_max(), CellRect::full(hf.z.w, hf.z.h))
+        }
+        BaseLayer::Slope => shade::slope_view(hf),
+        BaseLayer::LandCover => shade::landcover_view(&baked.landcover, td),
+        BaseLayer::Trafficability => match baked.mobility(traffic_class).or(baked.mobility.first()) {
+            Some(m) => {
+                let r = (m.class.cross_country_speed / terrain::mobility::SPEED_QUANTUM) as u8;
+                shade::trafficability_view(&m.speed, r)
+            }
+            None => shade::slope_view(hf),
+        },
+    }
+}
+
 impl MapView {
     pub fn new(baked: &BakedMap, traffic_class: &str) -> Self {
         let mut v = Self {
@@ -155,26 +174,22 @@ impl MapView {
     }
 
     fn build(&self, baked: &BakedMap, td: &TerrainData) -> Vec<u8> {
-        let hf = &baked.elevation;
-        match self.base {
-            BaseLayer::Tactical => shade::tactical(
-                hf,
-                &baked.landcover,
-                &baked.water_depth,
-                td,
-                self.range,
-                CellRect::full(hf.z.w, hf.z.h),
-            ),
-            BaseLayer::Slope => shade::slope_view(hf),
-            BaseLayer::LandCover => shade::landcover_view(&baked.landcover, td),
-            BaseLayer::Trafficability => match baked.mobility(&self.traffic_class).or(baked.mobility.first()) {
-                Some(m) => {
-                    let r = (m.class.cross_country_speed / terrain::mobility::SPEED_QUANTUM) as u8;
-                    shade::trafficability_view(&m.speed, r)
-                }
-                None => shade::slope_view(hf),
-            },
-        }
+        build_layer(self.base, &self.traffic_class, baked, td)
+    }
+
+    /// Swap in a new baked map whose `base` layer image was built off the UI thread
+    /// (`build_layer`): the existing texture is updated in place, other layers rebuild lazily.
+    pub fn replace_map(&mut self, gfx: &mut Gfx, baked: &BakedMap, base: BaseLayer, img: &[u8]) {
+        let s = slot(base);
+        let keep = self.textures[s].take().filter(|t| t.w == baked.elevation.z.w && t.h == baked.elevation.z.h);
+        self.invalidate(baked);
+        self.textures[s] = Some(match keep {
+            Some(mut t) => {
+                gfx.update(&mut t, img);
+                t
+            }
+            None => gfx.texture(baked.elevation.z.w, baked.elevation.z.h, img),
+        });
     }
 
     pub fn ensure(&mut self, gfx: &mut Gfx, baked: &BakedMap, td: &TerrainData) {

@@ -3,7 +3,10 @@
 //! and re-bake.
 //!
 //! Brushes preview live on the baked elevation; releasing the mouse re-bakes the whole map
-//! (contours, carving, mobility). Incremental per-tile baking comes later.
+//! (contours, carving, mobility) on a worker thread (`BakeQueue`), so editing never stalls.
+//! Incremental per-tile baking comes later.
+
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use sim_data::TerrainData;
 use terrain::features::{
@@ -516,6 +519,93 @@ fn inside(ring: &[[f64; 2]], p: [f64; 2]) -> bool {
     c
 }
 
+/// Background re-bake: at most one job runs; edits made meanwhile make its result stale, and
+/// a stale result is dropped and the job restarted from the current package (latest wins).
+pub struct BakeQueue<T> {
+    /// Edit generation: bumped by every brush preview and package change.
+    edit: u64,
+    /// A package change still needs a bake.
+    wanted: bool,
+    running: Option<Receiver<(u64, T)>>,
+}
+
+impl<T> Default for BakeQueue<T> {
+    fn default() -> Self {
+        Self { edit: 0, wanted: false, running: None }
+    }
+}
+
+#[derive(Debug)]
+pub enum BakeEvent<T> {
+    Idle,
+    Started,
+    Done(T),
+    Failed,
+}
+
+impl<T: Send + 'static> BakeQueue<T> {
+    /// The baked map was changed by a live preview (its bake result would undo that).
+    pub fn touch(&mut self) {
+        self.edit += 1;
+    }
+
+    /// The authoring package changed: bake it.
+    pub fn request(&mut self) {
+        self.edit += 1;
+        self.wanted = true;
+    }
+
+    /// A bake is wanted or running: the current baked map may be out of date.
+    pub fn pending(&self) -> bool {
+        self.wanted || self.running.is_some()
+    }
+
+    /// Forget wanted and running bakes (the caller bakes synchronously instead).
+    pub fn cancel(&mut self) {
+        self.wanted = false;
+        self.running = None;
+    }
+
+    /// Collect a finished bake and start a wanted one. `job` is called only when a bake
+    /// starts and returns the work to run on the worker thread.
+    pub fn poll<J>(&mut self, job: impl FnOnce() -> J) -> BakeEvent<T>
+    where
+        J: FnOnce() -> T + Send + 'static,
+    {
+        let mut ev = BakeEvent::Idle;
+        if let Some(rx) = &self.running {
+            match rx.try_recv() {
+                Ok((edit, out)) => {
+                    self.running = None;
+                    if edit == self.edit {
+                        ev = BakeEvent::Done(out);
+                    } else {
+                        self.wanted = true;
+                    }
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    self.running = None;
+                    ev = BakeEvent::Failed;
+                }
+            }
+        }
+        if self.running.is_none() && self.wanted {
+            self.wanted = false;
+            let (tx, rx) = mpsc::channel();
+            let (edit, work) = (self.edit, job());
+            std::thread::spawn(move || {
+                let _ = tx.send((edit, work()));
+            });
+            self.running = Some(rx);
+            if matches!(ev, BakeEvent::Idle) {
+                ev = BakeEvent::Started;
+            }
+        }
+        ev
+    }
+}
+
 /// Re-bake helper used by the app (kept here so the editor owns its package).
 pub fn rebake(pkg: &AuthoringPackage, td: &TerrainData, classes: &[terrain::mobility::MobilityClass]) -> BakedMap {
     terrain::bake(pkg, td, classes)
@@ -546,6 +636,57 @@ mod tests {
 
     fn input(mouse: P2) -> Input {
         Input { mouse, frame_time: 0.5, screen: [400.0, 400.0], ..Default::default() }
+    }
+
+    fn wait<T: Send + 'static>(q: &mut BakeQueue<T>, job: impl Fn() -> T + Send + Clone + 'static) -> BakeEvent<T> {
+        for _ in 0..500 {
+            let j = job.clone();
+            match q.poll(move || j) {
+                BakeEvent::Idle => std::thread::sleep(std::time::Duration::from_millis(5)),
+                e => return e,
+            }
+        }
+        panic!("bake did not finish");
+    }
+
+    #[test]
+    fn bake_queue_delivers_and_drops_stale_results() {
+        let mut q = BakeQueue::<u32>::default();
+        assert!(matches!(q.poll(|| || 1), BakeEvent::Idle));
+        q.request();
+        assert!(matches!(q.poll(|| || 1), BakeEvent::Started));
+        assert!(q.pending());
+        assert!(matches!(wait(&mut q, || 1), BakeEvent::Done(1)));
+        assert!(!q.pending());
+        // An edit while the job runs makes its result stale: it restarts instead.
+        q.request();
+        assert!(matches!(q.poll(|| || 2), BakeEvent::Started));
+        q.touch();
+        assert!(matches!(wait(&mut q, || 3), BakeEvent::Started));
+        assert!(matches!(wait(&mut q, || 3), BakeEvent::Done(3)));
+    }
+
+    #[test]
+    fn background_bake_matches_a_synchronous_bake() {
+        let (mut ed, mut baked, cam, ds) = setup();
+        let mut i = input([200.0, 200.0]);
+        i.left_pressed = true;
+        i.left_down = true;
+        ed.update(&i, &cam, &mut baked, false);
+        let mut i = input([200.0, 200.0]);
+        i.left_released = true;
+        assert!(ed.update(&i, &cam, &mut baked, false).rebake);
+        let td = std::sync::Arc::new(ds.terrain.clone());
+        let mut q = BakeQueue::default();
+        q.request();
+        let job = {
+            let (pkg, td) = (ed.pkg.clone(), td.clone());
+            move || rebake(&pkg, &td, &[]).output_hash()
+        };
+        let first = q.poll(|| job.clone());
+        assert!(matches!(first, BakeEvent::Started));
+        let BakeEvent::Done(h) = wait(&mut q, job) else { panic!("no result") };
+        assert_eq!(h, rebake(&ed.pkg, &ds.terrain, &[]).output_hash());
     }
 
     #[test]

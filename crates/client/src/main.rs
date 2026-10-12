@@ -25,12 +25,12 @@ use sim_data::{DataSet, MapRef};
 use terragen::workflow;
 use terrain::{AuthoringPackage, BakedMap};
 
-use crate::editor::Editor;
+use crate::editor::{BakeEvent, BakeQueue, Editor};
 use crate::game::{Cmd, Game, GameAction};
 use crate::hud::{Button, Look, Rect};
 use crate::render::{Gfx, Input, Key};
 use crate::scenedit::ScenarioEditor;
-use crate::view::{BaseLayer, Camera, MapView, Minimap};
+use crate::view::{BaseLayer, Camera, MapView, Minimap, build_layer};
 
 /// Top-bar actions handled by the app (map layers, modes, help).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,8 +125,17 @@ struct App {
     editor: Option<Editor>,
     scenario_editor: Option<ScenarioEditor>,
     map_changed: bool,
+    /// Terrain-editor bakes run on a worker thread so the editor stays responsive.
+    bake: BakeQueue<Baked>,
     help: bool,
     last_input: Input,
+}
+
+/// Background re-bake result: the baked map plus the image of the layer that was on screen.
+struct Baked {
+    map: BakedMap,
+    base: BaseLayer,
+    img: Vec<u8>,
 }
 
 fn main() {
@@ -255,6 +264,7 @@ fn run() -> Result<(), String> {
         editor: None,
         scenario_editor: None,
         map_changed: false,
+        bake: BakeQueue::default(),
         help: false,
         last_input: Input::default(),
     };
@@ -308,6 +318,9 @@ impl App {
             return Ok(()); // map-only session: stay in the editor
         }
         self.mode = Mode::Game;
+        if self.bake.pending() {
+            self.rebake();
+        }
         if self.map_changed {
             // The scenario restarts on the edited map.
             let g = self.game.take().expect("game exists");
@@ -319,7 +332,9 @@ impl App {
         Ok(())
     }
 
+    /// Bake now on this thread (leaving the editor), superseding any background bake.
     fn rebake(&mut self) {
+        self.bake.cancel();
         if let Some(ed) = &mut self.editor {
             let classes = workflow::mobility_classes(&self.ds);
             let baked = editor::rebake(&ed.pkg, &self.ds.terrain, &classes);
@@ -327,6 +342,31 @@ impl App {
             self.view.invalidate(&self.map);
             self.map_changed = true;
             ed.status = "BAKED".into();
+        }
+    }
+
+    /// Start a background bake if one is wanted, and install a finished one.
+    fn poll_bake(&mut self) {
+        let Some(ed) = &mut self.editor else { return };
+        let (ds, base, class) = (&self.ds, self.view.base, &self.view.traffic_class);
+        let ev = self.bake.poll(|| {
+            let (pkg, ds, class) = (ed.pkg.clone(), ds.clone(), class.clone());
+            move || {
+                let map = editor::rebake(&pkg, &ds.terrain, &workflow::mobility_classes(&ds));
+                let img = build_layer(base, &class, &map, &ds.terrain);
+                Baked { map, base, img }
+            }
+        });
+        match ev {
+            BakeEvent::Idle => {}
+            BakeEvent::Started => ed.status = "BAKING...".into(),
+            BakeEvent::Failed => ed.status = "BAKE FAILED".into(),
+            BakeEvent::Done(b) => {
+                ed.status = "BAKED".into();
+                self.map = Arc::new(b.map);
+                self.view.replace_map(&mut self.gfx, &self.map, b.base, &b.img);
+                self.map_changed = true;
+            }
         }
     }
 
@@ -449,10 +489,12 @@ impl App {
                 if let Some(r) = fx.preview {
                     self.view.refresh_rect(&mut self.gfx, &self.map, &self.ds.terrain, r);
                     self.map_changed = true;
+                    self.bake.touch();
                 }
                 if fx.rebake {
-                    self.rebake();
+                    self.bake.request();
                 }
+                self.poll_bake();
                 if fx.save {
                     self.save();
                 }
@@ -567,6 +609,8 @@ impl App {
     }
 
     fn save(&mut self) {
+        // Saving bakes the current package itself; a background bake would be older.
+        self.bake.cancel();
         let Some(ed) = &mut self.editor else { return };
         let dir = workflow::map_dir(&self.data_dir, &self.map_id);
         let r = ed.pkg.save(&dir).and_then(|_| {
