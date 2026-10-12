@@ -46,6 +46,15 @@ pub enum Command {
         via: Vec<Vec2>,
         formation: Option<Formation>,
         technique: Technique,
+        /// March speed: no vehicle exceeds it (None = as fast as the formation allows).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        speed_limit_mps: Option<f64>,
+    },
+    /// Change the speed limit of the current (or held) move and later platoon moves.
+    SetSpeed {
+        to: Addressee,
+        #[serde(default)]
+        speed_limit_mps: Option<f64>,
     },
     SetFormation {
         platoon: PlatoonId,

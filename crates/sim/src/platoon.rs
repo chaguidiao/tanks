@@ -43,6 +43,8 @@ pub struct Platoon {
     pub members: Vec<usize>,
     pub formation: Formation,
     pub technique: Technique,
+    /// March speed limit (m/s) set by the last move or speed order; None = formation speed.
+    pub speed_limit: Option<f64>,
     pub order: PlatoonOrder,
     /// Formation heading (compass rad).
     pub heading: f64,
@@ -166,6 +168,7 @@ impl Platoon {
             technique: self.technique,
             task,
             held: self.held.is_some(),
+            speed_limit: self.speed_limit,
         }
     }
 }

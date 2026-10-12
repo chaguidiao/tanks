@@ -83,6 +83,7 @@ pub enum Cmd {
     Engage,
     Formation,
     Technique,
+    Speed,
     Weapons,
     Contingency,
     NextPlatoon,
@@ -159,6 +160,8 @@ pub struct Game {
     pub paused: bool,
     pub speed: usize,
     pub technique: Technique,
+    /// March speed for the next move (m/s); None = MAX (formation speed).
+    pub move_speed: Option<f64>,
     pub tool: Tool,
     pub bp_radius: f64,
     pub graphics: Vec<OrderGraphic>,
@@ -198,6 +201,7 @@ impl Game {
             paused: true,
             speed: 0,
             technique: Technique::Traveling,
+            move_speed: None,
             tool: Tool::None,
             bp_radius: 250.0,
             graphics: Vec::new(),
@@ -298,6 +302,7 @@ impl Game {
         match (self.sel_platoon, self.sel_unit) {
             (Some(p), _) => {
                 let technique = self.technique;
+                let speed_limit_mps = self.move_speed;
                 self.graphics.retain(|g| g.platoon != Some(p));
                 self.graphics.push(OrderGraphic {
                     platoon: Some(p),
@@ -307,11 +312,19 @@ impl Game {
                 });
                 let cs = self.platoon_cs(p);
                 self.radio(format!(
-                    "TO {cs}: MOVE{route_txt} TO GRID {}, {}.",
+                    "TO {cs}: MOVE{route_txt} TO GRID {}, {}{}.",
                     format::grid(dest),
-                    format_technique(technique)
+                    format_technique(technique),
+                    speed_radio(speed_limit_mps)
                 ));
-                self.order(Command::PlatoonMove { platoon: p, destination: dest, via, formation: None, technique });
+                self.order(Command::PlatoonMove {
+                    platoon: p,
+                    destination: dest,
+                    via,
+                    formation: None,
+                    technique,
+                    speed_limit_mps,
+                });
             }
             (None, Some(u)) => {
                 self.graphics.retain(|g| g.unit != Some(u));
@@ -321,11 +334,12 @@ impl Game {
                     kind: GraphicKind::Route { points },
                     acknowledged: false,
                 });
-                if !cps.is_empty() {
+                if !cps.is_empty() || self.move_speed.is_some() {
                     let cs = self.picture().unit(u).map_or("?".into(), |x| x.callsign.clone());
-                    self.radio(format!("TO {cs}: MOVE{route_txt} TO GRID {}.", format::grid(dest)));
+                    let sp = speed_radio(self.move_speed);
+                    self.radio(format!("TO {cs}: MOVE{route_txt} TO GRID {}{sp}.", format::grid(dest)));
                 }
-                self.order(Command::Move { unit: u, destination: dest, via, speed_limit_mps: None });
+                self.order(Command::Move { unit: u, destination: dest, via, speed_limit_mps: self.move_speed });
             }
             _ => {}
         }
@@ -438,6 +452,7 @@ impl Game {
             (Key::LeftBracket, C::RadiusDown),
             (Key::RightBracket, C::RadiusUp),
             (Key::Char('t'), C::Technique),
+            (Key::Char('s'), C::Speed),
             (Key::Char('f'), C::Formation),
             (Key::Char('w'), C::Weapons),
             (Key::Char('h'), C::Halt),
@@ -708,6 +723,19 @@ impl Game {
                     Technique::BoundingOverwatch => Technique::Traveling,
                 };
             }
+            // March speed for the next move; the selection is ordered to it as well (applies to
+            // its current or held move).
+            Cmd::Speed => {
+                let presets = self.speed_presets();
+                let i = presets.iter().position(|s| *s == self.move_speed).map_or(0, |i| (i + 1) % presets.len());
+                self.move_speed = presets[i];
+                if let Some(to) = self.addressee() {
+                    let cs = self.addressee_cs(to);
+                    self.order(Command::SetSpeed { to, speed_limit_mps: self.move_speed });
+                    let sp = self.move_speed.map_or("MAX".into(), |v| format!("{} KM/H", format::kmh(v)));
+                    self.radio(format!("TO {cs}: SPEED {sp}."));
+                }
+            }
             Cmd::Weapons => {
                 if let Some(to) = self.addressee() {
                     let next = match self.selection_weapons().unwrap_or(WeaponsStatus::Free) {
@@ -825,6 +853,15 @@ impl Game {
                 pic.platoon(p).is_some_and(|v| !v.waypoints.is_empty() || v.task.starts_with("OCCUPYING"))
             }
         }
+    }
+
+    /// MAX, then the side's doctrine march speeds.
+    fn speed_presets(&self) -> Vec<Option<f64>> {
+        let mut v = vec![None];
+        if let Some(d) = self.sim.doctrine(self.side) {
+            v.extend(d.speed_limits_mps.iter().map(|s| Some(s.get())));
+        }
+        v
     }
 
     fn addressee_cs(&self, to: Addressee) -> String {
@@ -1495,7 +1532,13 @@ impl Game {
                     .tip("WEAPONS CONTROL: FREE / TIGHT / HOLD"),
             ),
             (8, contingency()),
-            (9, b("NEXT PLT", Cmd::NextPlatoon).key("TAB").tip("SELECT THE NEXT PLATOON")),
+            (
+                9,
+                b("MOVE SPEED", Cmd::Speed)
+                    .key("S")
+                    .value(speed_short(self.move_speed))
+                    .tip("MARCH SPEED: ORDERS THE SELECTION AND SETS THE NEXT MOVE (MAX / DOCTRINE SPEEDS)"),
+            ),
             (
                 10,
                 b("PHASE LINE", Cmd::PhaseLine)
@@ -1549,9 +1592,11 @@ impl Game {
             head.push((pv.task.clone(), style::TEXT));
             head.push((
                 format!(
-                    "FORM {}   NEXT MOVE {}",
+                    "FORM {}   SPEED {}   NEXT {}, {}",
                     format_formation(self.shown_formation(pv.id).unwrap_or(pv.formation)),
-                    short_technique(self.technique)
+                    speed_short(pv.speed_limit),
+                    short_technique(self.technique),
+                    speed_short(self.move_speed)
                 ),
                 style::TEXT_DIM,
             ));
@@ -1672,8 +1717,13 @@ impl Game {
         }
         out.push((row("TASK", task), style::TEXT));
         out.push((row("GRID", format!("{}   HDG {}", format::grid8(u.pos), format::mils(u.heading))), style::TEXT));
-        let top =
-            def.map_or(String::new(), |d| format!(" (ROAD {})", format::kmh(d.mobility.max_speed_road_mps.get())));
+        // Ordered limit: the vehicle's own move, else its platoon's march speed.
+        let limit = u.speed_limit.or_else(|| u.platoon.and_then(|p| pic.platoon(p)).and_then(|v| v.speed_limit));
+        let top = match (limit, def) {
+            (Some(l), _) => format!(" (LIMIT {})", format::kmh(l)),
+            (None, Some(d)) => format!(" (ROAD {})", format::kmh(d.mobility.max_speed_road_mps.get())),
+            _ => String::new(),
+        };
         out.push((row("SPEED", format!("{} KM/H{top}", format::kmh(u.speed))), style::TEXT));
         let litres =
             def.map_or(String::new(), |d| format!("   {:.0} L", u.fuel_fraction * d.mobility.fuel_capacity_l.get()));
@@ -1907,6 +1957,15 @@ fn checkpoints(f: &mut Frame, cam: &Camera, pts: &[[f64; 2]], c: Rgba) {
     let s = cam.to_screen(*last);
     f.line([s[0] - 6.0, s[1] - 6.0], [s[0] + 6.0, s[1] + 6.0], 1.5, c);
     f.line([s[0] - 6.0, s[1] + 6.0], [s[0] + 6.0, s[1] - 6.0], 1.5, c);
+}
+
+fn speed_short(v: Option<f64>) -> String {
+    v.map_or("MAX".into(), |v| format!("{} KM/H", format::kmh(v)))
+}
+
+/// Radio suffix for an ordered march speed.
+fn speed_radio(v: Option<f64>) -> String {
+    v.map_or(String::new(), |v| format!(", SPEED {}", format::kmh(v)))
 }
 
 fn short_task(u: &sim::view::OwnUnit) -> String {

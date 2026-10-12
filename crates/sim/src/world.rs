@@ -211,6 +211,16 @@ impl World {
         }
     }
 
+    /// Change the speed limit of a vehicle's own move (current and held).
+    pub fn set_speed_limit(&mut self, k: usize, limit: Option<f64>) {
+        let Some(ai) = &mut self.ai[k] else { return };
+        for o in [Some(&mut ai.order), ai.held.as_mut()].into_iter().flatten() {
+            if let Order::Move { speed_limit, platoon_slot: false, .. } = o {
+                *speed_limit = limit;
+            }
+        }
+    }
+
     /// Continue a held move. Returns false if nothing was held.
     pub fn resume(&mut self, k: usize) -> bool {
         let Some(ai) = &mut self.ai[k] else { return false };

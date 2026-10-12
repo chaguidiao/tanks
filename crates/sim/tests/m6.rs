@@ -88,6 +88,7 @@ fn enemy_crossing_a_phase_line_releases_the_planned_order() {
         via: vec![],
         formation: None,
         technique: Technique::Traveling,
+        speed_limit_mps: None,
     };
     sim.submit_immediate(
         BLUE,
@@ -144,6 +145,7 @@ fn planning_phase_measures_show_at_once_and_replay_identically() {
                 via: vec![],
                 formation: None,
                 technique: Technique::Traveling,
+                speed_limit_mps: None,
             }),
         },
     );

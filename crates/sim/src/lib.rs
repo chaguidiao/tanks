@@ -187,6 +187,7 @@ impl Sim {
                                 bp: Vec::new(),
                                 resume: None,
                                 held: None,
+                                speed_limit: None,
                                 quiet_since: 0,
                                 last_strength: 0,
                             });
@@ -278,6 +279,11 @@ impl Sim {
 
     pub fn data(&self) -> &Arc<DataSet> {
         &self.data
+    }
+
+    /// The doctrine pack a side uses (its own data; the UI reads speed presets from it).
+    pub fn doctrine(&self, side: SideId) -> Option<&sim_data::DoctrinePack> {
+        self.sides.get(side.0 as usize).map(|s| &s.doctrine)
     }
 
     pub fn scenario(&self) -> &ScenarioDef {
@@ -432,6 +438,7 @@ impl Sim {
                                 via: Vec::new(),
                                 formation: Some(formation),
                                 technique,
+                                speed_limit_mps: None,
                             }
                         }
                         ai::commander::Order::Occupy { platoon, centre, radius, facing } => Command::OccupyPosition {
@@ -659,6 +666,21 @@ impl Sim {
                     events.push(Event::OrderReceived { side: c.side, to: *to });
                 }
             }
+            Command::SetSpeed { to, speed_limit_mps } => {
+                match to {
+                    Addressee::Platoon(p) => {
+                        if let Some(p) = self.platoon_mut(c.side, *p) {
+                            p.speed_limit = *speed_limit_mps;
+                        }
+                    }
+                    Addressee::Unit(_) => {
+                        for k in self.members(c.side, *to) {
+                            self.world.set_speed_limit(k, *speed_limit_mps);
+                        }
+                    }
+                }
+                events.push(Event::OrderReceived { side: c.side, to: *to });
+            }
             Command::WeaponsControl { to, status } => {
                 for k in self.members(c.side, *to) {
                     self.world.weapons[k] = *status;
@@ -685,13 +707,14 @@ impl Sim {
                     self.world.weapons[k] = WeaponsStatus::Tight;
                 }
             }
-            Command::PlatoonMove { platoon, destination, via, formation, technique } => {
+            Command::PlatoonMove { platoon, destination, via, formation, technique, speed_limit_mps } => {
                 let (dest, f, t) = (*destination, *formation, *technique);
                 if let Some(p) = self.platoon_mut(c.side, *platoon) {
                     if let Some(f) = f {
                         p.formation = f;
                     }
                     p.technique = t;
+                    p.speed_limit = *speed_limit_mps;
                     p.order = platoon::PlatoonOrder::new_move(dest, via.clone());
                     p.held = None;
                     p.replanned = 0;

@@ -92,6 +92,7 @@ fn wedge_move_keeps_formation_and_reports_set() {
             via: vec![],
             formation: Some(Formation::Wedge),
             technique: Technique::Traveling,
+            speed_limit_mps: None,
         },
     );
     run(&mut sim, 90.0);
@@ -123,6 +124,7 @@ fn bounding_overwatch_alternates_sections() {
             via: vec![],
             formation: Some(Formation::Line),
             technique: Technique::BoundingOverwatch,
+            speed_limit_mps: None,
         },
     );
     let mut saw_split = false;
@@ -171,6 +173,7 @@ fn platoon_reacts_to_contact_and_distributes_fire() {
             via: vec![],
             formation: Some(Formation::Line),
             technique: Technique::Traveling,
+            speed_limit_mps: None,
         },
     );
     // The own picture reports each crew's gun state and target (the selected-vehicle card).
@@ -214,6 +217,7 @@ fn platoon_route_passes_its_checkpoints_in_order() {
             via: vec![cp],
             formation: Some(Formation::Column),
             technique: Technique::Traveling,
+            speed_limit_mps: None,
         },
     );
     run(&mut sim, 2.0);
@@ -252,6 +256,7 @@ fn halt_keeps_the_route_and_resume_continues_it() {
             via: vec![[300.0, 1200.0]],
             formation: Some(Formation::Wedge),
             technique: Technique::Traveling,
+            speed_limit_mps: None,
         },
     );
     run(&mut sim, 40.0);
@@ -286,4 +291,39 @@ fn halt_keeps_the_route_and_resume_continues_it() {
     sim.submit_immediate(BLUE, Command::Resume { to: Addressee::Unit(u) });
     let events = run(&mut sim, 200.0);
     assert!(events.iter().any(|e| matches!(e, Event::Arrived { unit } if *unit == u)));
+}
+
+#[test]
+fn march_speed_caps_every_vehicle_and_can_be_changed_on_the_move() {
+    let ds = data();
+    let m = map(&ds, 250, 750, "grassland", |_, _| 0.0);
+    let mut sim = Sim::new(&scenario(DAY, platoon(300.0), vec![]), ds, m).unwrap();
+    let slow = 15.0 / 3.6;
+    sim.submit_immediate(
+        BLUE,
+        Command::PlatoonMove {
+            platoon: P1,
+            destination: [500.0, 2600.0],
+            via: vec![],
+            formation: Some(Formation::Wedge),
+            technique: Technique::Traveling,
+            speed_limit_mps: Some(slow),
+        },
+    );
+    let mut top: f64 = 0.0;
+    for _ in 0..120 {
+        run(&mut sim, 1.0);
+        top = (0..4).map(|k| sim.truth().mobility[k].as_ref().unwrap().speed).fold(top, f64::max);
+    }
+    assert!(top <= slow + 0.05, "top speed {:.1} km/h over the 15 km/h limit", top * 3.6);
+    assert!(top > slow * 0.8, "the platoon does move at about the limit ({:.1} km/h)", top * 3.6);
+    assert_eq!(sim.perceived(BLUE).platoon(P1).unwrap().speed_limit, Some(slow));
+    // Lifted on the move: the platoon speeds up to formation speed.
+    sim.submit_immediate(BLUE, Command::SetSpeed { to: Addressee::Platoon(P1), speed_limit_mps: None });
+    let mut top: f64 = 0.0;
+    for _ in 0..60 {
+        run(&mut sim, 1.0);
+        top = (0..4).map(|k| sim.truth().mobility[k].as_ref().unwrap().speed).fold(top, f64::max);
+    }
+    assert!(top > slow * 1.3, "faster without the limit ({:.1} km/h)", top * 3.6);
 }

@@ -453,12 +453,17 @@ fn formation(f: sim_data::Formation) -> String {
 }
 
 fn doctrine_sheet(d: &DoctrinePack) -> Sheet {
-    let l = vec![
+    let mut l = vec![
         section("MOVEMENT"),
         fact("DEFAULT FORMATION", formation(d.default_formation)),
         stat("VEHICLE INTERVAL", &d.spacing_m, |x| format!("{x:.0} M")),
         stat("BOUND LENGTH", &d.bound_length_m, |x| format!("{x:.0} M")),
         stat("OVERWATCH DISTANCE", &d.overwatch_distance_m, |x| format!("{x:.0} M")),
+    ];
+    for (i, sp) in d.speed_limits_mps.iter().enumerate() {
+        l.push(stat(&format!("ORDERED SPEED {}", i + 1), sp, |x| format!("{:.0} KM/H", x * 3.6)));
+    }
+    l.extend([
         Line::Formations(d.formations.iter().map(|f| (formation(f.formation), f.slots.clone())).collect()),
         section("COMMAND AND REPORTING"),
         stat("SPOT REPORT DELAY, MIN", &d.report_delay_min_s, secs),
@@ -476,7 +481,7 @@ fn doctrine_sheet(d: &DoctrinePack) -> Sheet {
         fact("PRE-BATTLE FORMATION", formation(d.prebattle_formation)),
         stat("BATTLE DEPLOYMENT AT", &d.battle_distance_m, |x| format!("{:.1} KM FROM OBJECTIVE", x / 1000.0)),
         fact("BATTLE FORMATION", formation(d.battle_formation)),
-    ];
+    ]);
     Sheet {
         title: d.name.to_uppercase(),
         sub: format!("PACK {} · {}", d.id.to_uppercase(), d.source.to_uppercase()),

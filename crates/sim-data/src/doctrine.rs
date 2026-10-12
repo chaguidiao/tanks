@@ -79,6 +79,10 @@ pub struct DoctrinePack {
     pub battle_formation: Formation,
     /// Fraction of a platoon lost after which it stops advancing and fights in place.
     pub break_off_losses: Stat<f64>,
+    /// March speeds (m/s) the commander can order on a move, fastest first; "MAX" (no
+    /// limit) is always offered as well.
+    #[serde(default)]
+    pub speed_limits_mps: Vec<Stat<f64>>,
 }
 
 impl DoctrinePack {

@@ -71,6 +71,8 @@ pub struct OwnUnit {
     pub route: Vec<Vec2>,
     /// Halted with its own (single-vehicle) route held for RESUME.
     pub held: bool,
+    /// Speed limit (m/s) of its own (single-vehicle) move, current or held.
+    pub speed_limit: Option<f64>,
     /// Hull-down state reported by the crew for its current position, if set in a BP.
     pub position_note: Option<String>,
     /// Crew fit for duty, of the vehicle's establishment.
@@ -132,6 +134,8 @@ pub struct PlatoonView {
     pub waypoints: Vec<Vec2>,
     /// Halted with an interrupted order that RESUME continues.
     pub held: bool,
+    /// March speed limit (m/s), None = formation speed.
+    pub speed_limit: Option<f64>,
 }
 
 /// Control measures (DESIGN.md §8.4; MIL-STD-2525D tactical graphics).

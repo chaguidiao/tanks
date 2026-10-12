@@ -302,6 +302,11 @@ impl SideState {
                 task,
                 route,
                 held: w.ai[k].as_ref().is_some_and(|a| a.held.is_some()),
+                speed_limit: w.ai[k].as_ref().and_then(|a| match (&a.order, &a.held) {
+                    (Order::Move { speed_limit, platoon_slot: false, .. }, _) => *speed_limit,
+                    (_, Some(Order::Move { speed_limit, .. })) => *speed_limit,
+                    _ => None,
+                }),
                 position_note: note,
                 crew,
                 sights_degraded,

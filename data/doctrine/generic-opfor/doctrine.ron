@@ -31,4 +31,10 @@
     prebattle_formation: column,
     battle_formation: line,
     break_off_losses: (value: 0.67, source: "estimate", confidence: estimate),
+    // Ordered march speeds (m/s): 40, 25 and 15 km/h.
+    speed_limits_mps: [
+        (value: 11.11, source: "estimate", confidence: estimate, notes: "40 km/h: a road march speed for tracked columns; the column commander sets it in the march order."),
+        (value: 6.94, source: "estimate", confidence: estimate, notes: "25 km/h: cross-country move keeping formation over rough ground."),
+        (value: 4.17, source: "estimate", confidence: estimate, notes: "15 km/h: slow, deliberate movement (less dust and noise, easier to keep station)."),
+    ],
 )

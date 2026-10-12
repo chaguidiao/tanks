@@ -235,7 +235,9 @@ fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
         .filter_map(|&k| ctx.world.vehicle[k])
         .map(|vi| ctx.vehicles[vi].mobility.max_speed_cross_country_mps.get())
         .fold(f64::INFINITY, f64::min);
-    let mut v = slowest * FORMATION_SPEED_FRACTION;
+    // A march speed caps the virtual leader and every vehicle (catching up included).
+    let cap = p.speed_limit.unwrap_or(f64::INFINITY);
+    let mut v = (slowest * FORMATION_SPEED_FRACTION).min(cap);
     let fdef = d.formation(p.formation).clone();
     let n = p.members.len();
     let slot_of = |i: usize, progress: &[f64; 2]| -> (Vec2, f64) {
@@ -311,7 +313,8 @@ fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
                     .mobility
                     .max_speed_road_mps
                     .get()
-                    .min(v.max(slowest * 0.5) * 1.6);
+                    .min(v.max(slowest * 0.5) * 1.6)
+                    .min(cap);
                 ctx.world.set_route(k, r, Some(limit), Some(h), true, SLOT_ARRIVE);
             }
             p.slot_targets[i] = sp;
