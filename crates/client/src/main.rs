@@ -162,7 +162,10 @@ fn run() -> Result<(), String> {
     let map =
         Arc::new(workflow::ensure_map(&data_dir, &ds, &map_ref, |s| eprintln!("{s}")).map_err(|e| e.to_string())?);
 
-    let gfx = Gfx::open(1600, 900, "TANKS", o.screenshot.is_some());
+    let mut gfx = Gfx::open(1600, 900, "TANKS", o.screenshot.is_some());
+    if let Err(e) = gfx.load_font(&data_dir.join("fonts/IBMPlexMono-Medium.ttf")) {
+        eprintln!("warning: UI font not loaded, using the built-in font: {e}");
+    }
     let traffic_class = scenario
         .as_ref()
         .and_then(|s| s.sides.first())

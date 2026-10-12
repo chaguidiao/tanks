@@ -76,8 +76,48 @@ pub struct Tex {
 }
 
 pub struct Gfx {
+    // Declared before `rl`: fonts are unloaded before the window closes.
+    fonts: Fonts,
     rl: RaylibHandle,
     thread: RaylibThread,
+}
+
+/// UI font sizes (logical px, as used by `style::FONT*`) that get their own glyph atlas.
+const FONT_SIZES: &[i32] = &[8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 24];
+
+/// Glyphs in the atlas: printable ASCII plus the few symbols the UI prints.
+const FONT_CHARS: &str =
+    " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°·×–—→≤≥";
+
+/// TrueType UI font, one atlas per logical size, rasterised at the pixel size whose character
+/// advance matches raylib's built-in font (layouts were made with it) and shifted so capitals
+/// sit where the built-in font puts them. Empty = built-in font.
+#[derive(Default)]
+struct Fonts {
+    faces: Vec<Face>,
+}
+
+struct Face {
+    logical: i32,
+    px: f32,
+    dy: f32,
+    font: Font,
+}
+
+/// Top and height (px) of the inked part of `H`, at the font's base size.
+fn cap_box(font: &impl AsRef<ffi::Font>) -> (f32, f32) {
+    // SAFETY: plain value calls on a loaded font.
+    unsafe {
+        let g = ffi::GetGlyphInfo(*font.as_ref(), 'H' as i32);
+        let b = ffi::GetImageAlphaBorder(g.image, 0.25);
+        (g.offsetY as f32 + b.y, b.height)
+    }
+}
+
+impl Fonts {
+    fn face(&self, size: i32) -> Option<&Face> {
+        self.faces.iter().min_by_key(|f| (f.logical - size).abs())
+    }
 }
 
 const KEYMAP: &[(KeyboardKey, Key)] = &[
@@ -158,7 +198,30 @@ impl Gfx {
             rl.set_target_fps(60);
         }
         rl.set_exit_key(None);
-        Self { rl, thread }
+        Self { fonts: Fonts::default(), rl, thread }
+    }
+
+    /// Use a TrueType font for all UI text; on failure the built-in font stays.
+    pub fn load_font(&mut self, path: &std::path::Path) -> Result<(), String> {
+        let file = path.to_str().ok_or("font path is not UTF-8")?;
+        let probe = self.rl.load_font_ex(&self.thread, file, 64, Some(FONT_CHARS)).map_err(|e| e.to_string())?;
+        let adv = probe.measure_text("0000000000", 64.0, 0.0).x / 640.0;
+        let default = self.rl.get_font_default();
+        let (d_top, d_h) = cap_box(&default);
+        let d_base = default.base_size() as f32;
+        let mut faces = Vec::new();
+        for &size in FONT_SIZES {
+            let want = self.rl.measure_text("0000000000", size) as f32 / 10.0;
+            let px = (want / adv).round().max(6.0);
+            let font =
+                self.rl.load_font_ex(&self.thread, file, px as i32, Some(FONT_CHARS)).map_err(|e| e.to_string())?;
+            let (top, h) = cap_box(&font);
+            let scale = size.max(10) as f32 / d_base;
+            let dy = ((d_top + d_h / 2.0) * scale - (top + h / 2.0)).round();
+            faces.push(Face { logical: size, px, dy, font });
+        }
+        self.fonts.faces = faces;
+        Ok(())
     }
 
     pub fn should_close(&self) -> bool {
@@ -224,7 +287,7 @@ impl Gfx {
 
     pub fn frame(&mut self, draw: impl FnOnce(&mut Frame)) {
         let d = self.rl.begin_drawing(&self.thread);
-        let mut f = Frame { d };
+        let mut f = Frame { d, fonts: &self.fonts };
         draw(&mut f);
     }
 
@@ -235,6 +298,7 @@ impl Gfx {
 
 pub struct Frame<'a> {
     d: RaylibDrawHandle<'a>,
+    fonts: &'a Fonts,
 }
 
 impl Frame<'_> {
@@ -300,10 +364,21 @@ impl Frame<'_> {
     }
 
     pub fn text(&mut self, s: &str, x: f32, y: f32, size: i32, c: Rgba) {
-        self.d.draw_text(s, x as i32, y as i32, size, Color::from(c));
+        match self.fonts.face(size) {
+            Some(f) => {
+                // Exact atlas size, whole-pixel position: crisp glyphs.
+                let px = f.px * size as f32 / f.logical as f32;
+                let pos = Vector2::new(x.round(), (y + f.dy).round());
+                self.d.draw_text_ex(&f.font, s, pos, px, 0.0, Color::from(c));
+            }
+            None => self.d.draw_text(s, x as i32, y as i32, size, Color::from(c)),
+        }
     }
 
     pub fn text_width(&self, s: &str, size: i32) -> f32 {
-        self.d.measure_text(s, size) as f32
+        match self.fonts.face(size) {
+            Some(f) => f.font.measure_text(s, f.px * size as f32 / f.logical as f32, 0.0).x,
+            None => self.d.measure_text(s, size) as f32,
+        }
     }
 }
