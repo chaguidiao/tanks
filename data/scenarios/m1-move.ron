@@ -7,6 +7,7 @@
     start_time_s: 21600, // 06:00
     map: (id: "demo", recipe: "rolling-farmland", seed: 42, size_m: 8000.0),
     seed: 1,
+    briefing: "SITUATION: QUIET SECTOR, 06:00. ONE RED TANK REPORTED NE OF THE FARMLAND.\n\nMISSION: 1ST PLATOON MOVES CROSS-COUNTRY AND BY ROAD TO LEARN THE GROUND. NO TIME LIMIT.\n\nNOTES: RIGHT CLICK TO MOVE, SHIFT+RIGHT CLICK FOR CHECKPOINTS. TRY THE GO/NO-GO LAYER (F3).",
     sides: [
         (
             name: "BLUE",

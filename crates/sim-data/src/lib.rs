@@ -128,6 +128,21 @@ impl DataSet {
         load_ron(&root.join("scenarios").join(format!("{id}.ron")))
     }
 
+    /// Ids of every scenario in `data/scenarios/`, sorted.
+    pub fn scenario_ids(root: &Path) -> Vec<String> {
+        let mut ids: Vec<String> = std::fs::read_dir(root.join("scenarios"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let p = e.path();
+                (p.extension()? == "ron").then(|| p.file_stem()?.to_str().map(str::to_owned))?
+            })
+            .collect();
+        ids.sort();
+        ids
+    }
+
     /// Write a scenario to `data/scenarios/<id>.ron` (scenario editor). Returns the path.
     pub fn save_scenario(root: &Path, def: &ScenarioDef) -> Result<PathBuf, DataError> {
         let path = root.join("scenarios").join(format!("{}.ron", def.id));
@@ -162,6 +177,23 @@ pub fn find_data_dir() -> Option<PathBuf> {
         }
         if !dir.pop() {
             return None;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_listed_scenario_loads() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let ids = DataSet::scenario_ids(&root);
+        assert!(ids.contains(&"m1-move".to_owned()) && ids.contains(&"m5-hold-the-village".to_owned()));
+        assert!(ids.windows(2).all(|w| w[0] < w[1]));
+        for id in &ids {
+            let s = DataSet::load_scenario(&root, id).unwrap_or_else(|e| panic!("{id}: {e}"));
+            assert_eq!(&s.id, id);
         }
     }
 }

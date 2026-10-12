@@ -9,6 +9,7 @@
     start_time_s: 21600, // 06:00
     map: (id: "demo", recipe: "rolling-farmland", seed: 42, size_m: 8000.0),
     seed: 5,
+    briefing: "SITUATION: A RED TANK COMPANY IS EXPECTED FROM THE NORTH-EAST AT FIRST LIGHT.\n\nMISSION: 1ST AND 2ND PLATOONS HOLD THE VILLAGE CROSSROADS FOR 45 MINUTES. RED WINS BY HOLDING THE VILLAGE UNCONTESTED FOR 2 MINUTES. A SIDE THAT LOSES 70 % OF ITS TANKS LOSES.\n\nNOTES: USE THE PLANNING PHASE. OCCUPY BATTLE POSITIONS (B) FACING NE, DRAW A PHASE LINE, THEN EXECUTE (ENTER).",
     objectives: [(name: "VILLAGE", centre: (4500.0, 4300.0), radius_m: 350.0)],
     victory: (time_limit_s: 2700.0, objective: "VILLAGE", attacker: 1, destroyed_fraction: 0.7),
     sides: [

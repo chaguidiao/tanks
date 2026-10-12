@@ -16,6 +16,9 @@ pub struct ScenarioDef {
     pub objectives: Vec<ObjectiveDef>,
     #[serde(default)]
     pub victory: Option<VictoryDef>,
+    /// Situation and mission text for the scenario select screen (plain, terse).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub briefing: Option<String>,
 }
 
 /// A named terrain objective (circle).

@@ -356,6 +356,7 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                 ],
                 objectives: vec![],
                 victory: None,
+                briefing: None,
             };
             let mut sim = Sim::new(&sc, data.clone(), map.clone())?;
             sim.submit_immediate(

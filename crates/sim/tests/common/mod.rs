@@ -66,6 +66,7 @@ pub fn scenario(start_time_s: u32, blue: Vec<UnitDef>, red: Vec<UnitDef>) -> Sce
         ],
         objectives: vec![],
         victory: None,
+        briefing: None,
     }
 }
 
