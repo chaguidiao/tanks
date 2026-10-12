@@ -31,6 +31,8 @@ pub enum MenuAction {
     Play,
     EditScenario,
     EditTerrain,
+    /// Vehicle / ammunition / terrain / doctrine data viewer.
+    Database,
     Options,
     Help,
     Quit,
@@ -196,13 +198,13 @@ fn footer(f: &mut Frame, screen: P2) {
     f.text(&l, 24.0, screen[1] - 28.0, style::FONT_S, style::TEXT_OFF);
 }
 
-fn heading(f: &mut Frame, x: f32, y: f32, text: &str, sub: &str) {
+pub fn heading(f: &mut Frame, x: f32, y: f32, text: &str, sub: &str) {
     f.text(text, x, y, style::FONT_XL, style::AMBER);
     f.text(sub, x, y + 42.0, style::FONT_S, style::TEXT_DIM);
 }
 
 /// Greedy word wrap to a pixel width; blank lines between paragraphs are kept.
-fn wrap(f: &Frame, text: &str, size: i32, w: f32) -> Vec<String> {
+pub fn wrap(f: &Frame, text: &str, size: i32, w: f32) -> Vec<String> {
     let mut out = Vec::new();
     for para in text.split('\n') {
         let mut cur = String::new();
@@ -228,7 +230,7 @@ fn modal(screen: P2, w: f32, h: f32) -> Rect {
     Rect::new(((screen[0] - w) / 2.0).round(), ((screen[1] - h) / 2.0).round(), w, h)
 }
 
-pub fn draw_buttons(f: &mut Frame, buttons: &[Button<MenuAction>], mouse: P2, screen: P2) {
+pub fn draw_buttons<A>(f: &mut Frame, buttons: &[Button<A>], mouse: P2, screen: P2) {
     hud::draw(f, buttons, mouse);
     hud::tooltip(f, buttons, mouse, screen);
 }
@@ -276,6 +278,7 @@ pub fn main_buttons(screen: P2, suspended: Option<&str>) -> Vec<Button<MenuActio
         ("PLAY SCENARIO".to_owned(), MenuAction::Play, ""),
         ("SCENARIO EDITOR".to_owned(), MenuAction::EditScenario, ""),
         ("TERRAIN EDITOR".to_owned(), MenuAction::EditTerrain, ""),
+        ("DATABASE".to_owned(), MenuAction::Database, ""),
         ("OPTIONS".to_owned(), MenuAction::Options, ""),
         ("QUIT".to_owned(), MenuAction::Quit, ""),
     ]);
@@ -283,6 +286,7 @@ pub fn main_buttons(screen: P2, suspended: Option<&str>) -> Vec<Button<MenuActio
         "CHOOSE A SCENARIO, READ THE BRIEFING, TAKE COMMAND",
         "PLACE UNITS AND OBJECTIVES, SET DATE AND TIME, PLAY TEST",
         "SHAPE THE GROUND: HEIGHT BRUSHES, RIVERS, ROADS, FORESTS, BUILDINGS",
+        "VEHICLES, AMMUNITION, TERRAIN, DOCTRINE AND COMBAT MODELS, WITH SOURCES",
         "DISPLAY, CONTROLS AND MAP DEFAULTS",
         "EXIT TO DESKTOP",
     ];
@@ -305,7 +309,7 @@ pub fn draw_main(f: &mut Frame, bd: &Backdrop, screen: P2, status: &str) {
     f.text("TANK COMMAND SIMULATION", x + 4.0, y - 86.0, style::FONT_M, style::AMBER);
     f.line([x + 4.0, y - 30.0], [x + 380.0, y - 30.0], 1.0, style::PANEL_EDGE);
     if !status.is_empty() {
-        f.text(status, x, y + 6.0 * (ROW_H + ROW_GAP) + 16.0, style::FONT_S, style::HOSTILE);
+        f.text(status, x, y + 7.0 * (ROW_H + ROW_GAP) + 16.0, style::FONT_S, style::HOSTILE);
     }
     let hint = "UP/DOWN SELECT   ENTER OPEN";
     f.text(hint, x, screen[1] - 56.0, style::FONT_S, style::TEXT_DIM);
@@ -629,12 +633,13 @@ pub fn draw_options(f: &mut Frame, screen: P2, note: &str) {
 }
 
 pub fn pause_buttons(screen: P2, items: &[(&'static str, ScreenAction, &'static str)]) -> Vec<Button<MenuAction>> {
-    let n = items.len() + 5;
+    let n = items.len() + 6;
     let h = 70.0 + n as f32 * (ROW_H + ROW_GAP) + 10.0;
     let r = modal(screen, 440.0, h);
     let mut v: Vec<(String, MenuAction, &'static str)> = vec![("RESUME".into(), MenuAction::Resume, "ESC")];
     v.extend(items.iter().map(|(l, a, k)| ((*l).to_owned(), MenuAction::Screen(*a), *k)));
     v.extend([
+        ("DATABASE".to_owned(), MenuAction::Database, ""),
         ("OPTIONS".to_owned(), MenuAction::Options, ""),
         ("HELP".to_owned(), MenuAction::Help, "F7"),
         ("MAIN MENU".to_owned(), MenuAction::MainMenu, ""),
@@ -644,7 +649,7 @@ pub fn pause_buttons(screen: P2, items: &[(&'static str, ScreenAction, &'static 
 }
 
 pub fn draw_pause(f: &mut Frame, screen: P2, title: &str, n_items: usize) {
-    let n = n_items + 5;
+    let n = n_items + 6;
     let h = 70.0 + n as f32 * (ROW_H + ROW_GAP) + 10.0;
     let r = modal(screen, 440.0, h);
     f.rect(0.0, 0.0, screen[0], screen[1], Rgba(0, 0, 0, 120));

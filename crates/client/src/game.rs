@@ -7,8 +7,8 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use sim::view::{
-    Condition, ContactLevel, Graphic, GraphicKind as SimGraphic, PerceivedWorld, PlatoonId, Task, TriggerCondition,
-    WeaponsStatus,
+    Condition, ContactLevel, Graphic, GraphicKind as SimGraphic, GunActivity, OwnUnit, PerceivedWorld, PlatoonId, Task,
+    TriggerCondition, WeaponsStatus,
 };
 use sim::{Addressee, Command, EndReason, EntityId, Event, KillKind, PlatoonReport, PositionKind, SideId, Sim};
 use sim_data::{DataSet, Formation, ScenarioDef, Technique};
@@ -108,6 +108,8 @@ pub enum GameAction {
     Aar,
     SelectPlatoon(PlatoonId),
     SelectUnit(EntityId),
+    /// DATABASE on the selected vehicle's type.
+    VehicleData,
     Cmd(Cmd),
 }
 
@@ -144,6 +146,8 @@ pub struct GameFx {
     pub clear_overlay: bool,
     /// Centre the camera here.
     pub center_on: Option<[f64; 2]>,
+    /// Open the DATABASE on this vehicle type.
+    pub vehicle_data: Option<String>,
 }
 
 pub struct Game {
@@ -459,6 +463,9 @@ impl Game {
         if inp.hit(Key::Space) {
             a.push(GameAction::Pause);
         }
+        if inp.hit(Key::Char('i')) {
+            a.push(GameAction::VehicleData);
+        }
         for k in 0..SPEEDS.len() {
             if inp.hit(Key::Num(k as u8 + 1)) {
                 a.push(GameAction::Speed(k));
@@ -624,6 +631,9 @@ impl Game {
                     self.sel_platoon = None;
                     self.draft.clear();
                 }
+            }
+            GameAction::VehicleData => {
+                fx.vehicle_data = self.sel_unit.and_then(|u| self.picture().unit(u)).map(|u| u.vehicle_id.clone());
             }
             GameAction::Cmd(c) => self.command(c, fx),
         }
@@ -1448,7 +1458,9 @@ impl Game {
         ]
     }
 
-    /// Selection panel (top right): frame, header lines, member rows, footer lines.
+    /// Selection panel (top right): frame, header lines, member rows (and the DATA button),
+    /// footer lines. A single vehicle gets a full status card; a platoon a summary and one row
+    /// per vehicle.
     #[allow(clippy::type_complexity)]
     fn info(&self, screen: P2) -> (Rect, Vec<(String, Rgba)>, Vec<Button<GameAction>>, Vec<(String, Rgba)>) {
         const W: f32 = 320.0;
@@ -1458,8 +1470,18 @@ impl Game {
         let mut head: Vec<(String, Rgba)> = Vec::new();
         let mut rows = Vec::new();
         let mut members = Vec::new();
+        let mut back_to: Option<(PlatoonId, String)> = None;
         if let Some(pv) = self.sel_platoon.and_then(|p| pic.platoon(p)) {
-            head.push((format!("PLATOON {}", pv.callsign), style::FRIENDLY));
+            members = pv.members.iter().filter_map(|m| pic.unit(*m)).collect();
+            let mut types: Vec<(String, usize)> = Vec::new();
+            for u in &members {
+                match types.iter_mut().find(|(n, _)| *n == u.vehicle_name) {
+                    Some(t) => t.1 += 1,
+                    None => types.push((u.vehicle_name.clone(), 1)),
+                }
+            }
+            let types: Vec<String> = types.iter().map(|(n, k)| format!("{k}× {n}")).collect();
+            head.push((format!("PLATOON {}   {}", pv.callsign, types.join(", ")), style::FRIENDLY));
             head.push((pv.task.clone(), style::TEXT));
             head.push((
                 format!(
@@ -1479,18 +1501,33 @@ impl Game {
                     style::TEXT_DIM,
                 ));
             }
-            members = pv.members.iter().filter_map(|m| pic.unit(*m)).collect();
-        } else if let Some(u) = self.sel_unit.and_then(|id| pic.unit(id)) {
-            head.push((format!("{}  {}", u.callsign, u.vehicle_name), style::FRIENDLY));
-            head.push((format!("GRID {}  HDG {}", format::grid8(u.pos), format::mils(u.heading)), style::TEXT));
+            let up = members.iter().filter(|u| u.condition == Condition::Operational).count();
+            let rounds: u32 = members.iter().filter(|u| u.condition != Condition::Destroyed).map(|u| u.ammo).sum();
+            let fuel = members
+                .iter()
+                .filter(|u| u.condition != Condition::Destroyed)
+                .map(|u| u.fuel_fraction)
+                .fold(f64::INFINITY, f64::min);
+            let fuel = if fuel.is_finite() { format!("{:.0} %", fuel * 100.0) } else { "-".into() };
             head.push((
-                format!("FUEL {:.0} %   WEAPONS {}", u.fuel_fraction * 100.0, weapons_str(u.weapons)),
-                style::TEXT,
+                format!("UP {up}/{}   MAIN GUN {rounds} RDS   FUEL LOW {fuel}", members.len()),
+                if up < members.len() { style::AMBER } else { style::TEXT },
             ));
-            members.push(u);
+        } else if let Some(u) = self.sel_unit.and_then(|id| pic.unit(id)) {
+            head = self.unit_card(u, pic);
+            if let Some(p) = u.platoon {
+                back_to = Some((p, self.platoon_cs(p)));
+            }
         } else {
             head.push(("NO UNIT SELECTED".into(), style::TEXT_DIM));
             head.push(("CLICK A UNIT OR A PLATOON IN THE ROSTER".into(), style::TEXT_DIM));
+        }
+        if self.sel_unit.is_some() {
+            rows.push(
+                Button::new(Rect::new(x + W - 64.0, y + 5.0, 58.0, 20.0), Look::Bar, "DATA", GameAction::VehicleData)
+                    .key("I")
+                    .tip("VEHICLE DATA AND SOURCES (DATABASE)"),
+            );
         }
         let mut cy = y + 8.0 + head.len() as f32 * LINE + 4.0;
         for m in members {
@@ -1500,7 +1537,21 @@ impl Game {
                     .value(short_task(m))
                     .colour(condition_colour(m.condition))
                     .active(self.sel_unit == Some(m.id) && self.sel_platoon.is_none())
-                    .tip("SELECT THIS VEHICLE ALONE (CLICK AGAIN TO CENTRE)"),
+                    .tip("SELECT THIS VEHICLE ALONE: FULL STATUS (CLICK AGAIN TO CENTRE)"),
+            );
+            cy += 22.0;
+        }
+        if let Some((p, cs)) = back_to {
+            rows.push(
+                Button::new(
+                    Rect::new(x + 6.0, cy, W - 12.0, 20.0),
+                    Look::Row,
+                    format!("PLATOON {cs}"),
+                    GameAction::SelectPlatoon(p),
+                )
+                .value("SELECT")
+                .colour(style::FRIENDLY)
+                .tip("SELECT THE WHOLE PLATOON"),
             );
             cy += 22.0;
         }
@@ -1532,6 +1583,84 @@ impl Game {
         ));
         let h = cy - y + 4.0 + foot.len() as f32 * LINE + 6.0;
         (Rect::new(x, y, W, h), head, rows, foot)
+    }
+
+    /// Status card of one own vehicle: what its crew reports (own units are reported exactly).
+    fn unit_card(&self, u: &OwnUnit, pic: &PerceivedWorld) -> Vec<(String, Rgba)> {
+        let ds = self.sim.data();
+        let def = ds.vehicle(&u.vehicle_id);
+        let year = self.scenario.date.0;
+        let mut out = vec![(format!("{}   {}", u.callsign, u.vehicle_name), style::FRIENDLY)];
+        let state = match u.condition {
+            Condition::Operational => "OPERATIONAL",
+            Condition::MobilityKill => "MOBILITY KILL",
+            Condition::FirepowerKill => "FIREPOWER KILL",
+            Condition::Destroyed => "DESTROYED",
+        };
+        let crew_c = if u.crew.0 < u.crew.1 { style::AMBER } else { condition_colour(u.condition) };
+        out.push((format!("{state}   CREW {}/{}", u.crew.0, u.crew.1), crew_c));
+        let row = |k: &str, v: String| format!("{k:<8} {v}");
+        let mut task = short_task(u);
+        if let (Task::Set, Some(n)) = (&u.task, &u.position_note)
+            && !task.contains(n.as_str())
+        {
+            task = format!("{task} · {n}");
+        }
+        out.push((row("TASK", task), style::TEXT));
+        out.push((row("GRID", format!("{}   HDG {}", format::grid8(u.pos), format::mils(u.heading))), style::TEXT));
+        let top =
+            def.map_or(String::new(), |d| format!(" (ROAD {})", format::kmh(d.mobility.max_speed_road_mps.get())));
+        out.push((row("SPEED", format!("{} KM/H{top}", format::kmh(u.speed))), style::TEXT));
+        let litres =
+            def.map_or(String::new(), |d| format!("   {:.0} L", u.fuel_fraction * d.mobility.fuel_capacity_l.get()));
+        let fuel_c = if u.fuel_fraction < 0.25 { style::AMBER } else { style::TEXT };
+        out.push((row("FUEL", format!("{:.0} %{litres}", u.fuel_fraction * 100.0)), fuel_c));
+        let load: u32 = def.map_or(0, |d| d.armament.load.iter().map(|l| l.count).sum());
+        let gun = match (u.condition, u.gun) {
+            (Condition::FirepowerKill | Condition::Destroyed, _) => "OUT OF ACTION",
+            (_, GunActivity::Ready) => "READY",
+            (_, GunActivity::Laying) => "LAYING",
+            (_, GunActivity::Lasing) => "LASING",
+            (_, GunActivity::Reloading) => "RELOADING",
+        };
+        let rounds = def
+            .and_then(|d| d.armament.load.first())
+            .and_then(|l| ds.ammo(&l.ammo))
+            .map_or(String::new(), |a| format!(" {}", a.name));
+        let ammo_c = if load > 0 && u.ammo * 4 < load { style::AMBER } else { style::TEXT };
+        out.push((row("MAIN GUN", format!("{}/{load}{rounds}   {gun}", u.ammo)), ammo_c));
+        out.push((
+            row("TURRET", format!("{}   WEAPONS {}", format::mils(u.turret), weapons_str(u.weapons))),
+            style::TEXT,
+        ));
+        let target = u.target.and_then(|c| pic.contact(c)).map_or("NONE".to_owned(), |c| {
+            let what = match (&c.type_name, c.level) {
+                (Some(t), _) => t.clone(),
+                (None, ContactLevel::Recognised) => "TANK".into(),
+                (None, _) => "UNKNOWN".into(),
+            };
+            let d = ((c.pos[0] - u.pos[0]).powi(2) + (c.pos[1] - u.pos[1]).powi(2)).sqrt();
+            format!("{what}, {} DIR {}", format::distance(d), format::mils(ai::drive::bearing(u.pos, c.pos)))
+        });
+        out.push((row("TARGET", target), if u.target.is_some() { style::HOSTILE } else { style::TEXT_DIM }));
+        let mut kinds: Vec<&str> = Vec::new();
+        for s in def.iter().flat_map(|d| d.sensors.iter()).filter(|s| s.in_service.contains(year)) {
+            let k = match s.kind {
+                sim_data::SensorKind::Optical => "DAY",
+                sim_data::SensorKind::NightChannel => "NIGHT",
+                sim_data::SensorKind::Thermal => "THERMAL",
+            };
+            if !kinds.contains(&k) {
+                kinds.push(k);
+            }
+        }
+        let sights = kinds.join(" · ");
+        if u.sights_degraded {
+            out.push((row("SIGHTS", format!("DAMAGED ({sights})")), style::AMBER));
+        } else {
+            out.push((row("SIGHTS", sights), style::TEXT));
+        }
+        out
     }
 
     /// Panels that block map clicks (besides buttons and the top bar).

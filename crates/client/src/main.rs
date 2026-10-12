@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! client                                   title screen → main menu
-//! client [--screen title|main|play|edit-scenario|edit-terrain|options]
+//! client [--screen title|main|play|edit-scenario|edit-terrain|database|options]
 //! client [--scenario <id>] [--map <id>] [--edit] [--scenario-editor] [--pause]
 //!        [--screenshot <png> [--frames <n>] [--order <unit-or-platoon>:<x>,<y>[,<x>,<y>..]] [--bp <platoon>:<x>,<y>,<deg>]
 //!         [--pl -:<x>,<y>,<x>,<y>..] [--advance <s>] [--aar] [--save-replay <ron>]
@@ -13,6 +13,7 @@
 //! Screenshot runs use default options and never write the options file.
 
 mod aar;
+mod database;
 mod editor;
 mod format;
 mod game;
@@ -182,6 +183,8 @@ struct App {
     /// A game left for the main menu (RESUME).
     suspended: Option<Box<MapScreen>>,
     overlay: Option<Overlay>,
+    /// DATABASE screen, over the main menu or a map screen (which stays paused under it).
+    database: Option<database::Database>,
     help: bool,
     focus: Option<usize>,
     backdrop: Backdrop,
@@ -263,6 +266,7 @@ fn run() -> Result<(), String> {
         screen: Screen::Title,
         suspended: None,
         overlay: None,
+        database: None,
         help: false,
         focus: None,
         backdrop: Backdrop::new(),
@@ -290,6 +294,10 @@ fn run() -> Result<(), String> {
             "play" => app.screen = Screen::Scenarios(app.scenario_list(Purpose::Play)),
             "edit-scenario" => app.screen = Screen::Scenarios(app.scenario_list(Purpose::Edit)),
             "edit-terrain" => app.screen = Screen::Maps(app.map_list()),
+            "database" => {
+                app.screen = Screen::Main;
+                app.database = Some(database::Database::new(false));
+            }
             "options" => {
                 app.screen = Screen::Main;
                 app.overlay = Some(Overlay::Options { over_pause: false });
@@ -514,6 +522,16 @@ impl App {
             if inp.hit(Key::F(7)) || inp.hit(Key::Escape) || inp.left_pressed {
                 self.help = false;
             }
+        } else if let Some(db) = &mut self.database {
+            if inp.hit(Key::F(7)) {
+                self.help = true;
+            } else if db.update(&self.ds, &inp) {
+                if db.from_pause {
+                    self.overlay = Some(Overlay::Pause);
+                }
+                self.database = None;
+                self.focus = None;
+            }
         } else if let Some(o) = self.overlay {
             self.overlay_input(o, &inp);
         } else {
@@ -551,6 +569,10 @@ impl App {
             (Overlay::Pause, Some(MenuAction::Options)) => {
                 self.overlay = Some(Overlay::Options { over_pause: true });
                 self.focus = None;
+            }
+            (Overlay::Pause, Some(MenuAction::Database)) => {
+                self.overlay = None;
+                self.database = Some(database::Database::new(true));
             }
             (Overlay::Pause, Some(MenuAction::Help)) => {
                 self.overlay = None;
@@ -593,6 +615,7 @@ impl App {
                 self.focus = None;
             }
             Request::Help => self.help = true,
+            Request::VehicleData(id) => self.database = Some(database::Database::vehicle(&self.ds, &id, false)),
             Request::MainMenu => self.request_leave(Leave::MainMenu),
             Request::PlayTest | Request::BackToEditor => {
                 let Screen::Map(ms) = std::mem::replace(&mut self.screen, Screen::Main) else { return };
@@ -626,6 +649,7 @@ impl App {
                     Some(MenuAction::Play) => self.go(Screen::Scenarios(self.scenario_list(Purpose::Play))),
                     Some(MenuAction::EditScenario) => self.go(Screen::Scenarios(self.scenario_list(Purpose::Edit))),
                     Some(MenuAction::EditTerrain) => self.go(Screen::Maps(self.map_list())),
+                    Some(MenuAction::Database) => self.database = Some(database::Database::new(false)),
                     Some(MenuAction::Options) => {
                         self.overlay = Some(Overlay::Options { over_pause: false });
                         self.focus = None;
@@ -734,6 +758,7 @@ impl App {
             (&self.screen, self.overlay, self.help, &self.settings, &self.status);
         let suspended = self.suspended.as_ref().map(|s| s.title());
         let focus = self.focus;
+        let db = self.database.as_ref();
         let focused = |mut b: Vec<hud::Button<MenuAction>>| {
             for (k, x) in b.iter_mut().enumerate() {
                 x.focused = Some(k) == focus;
@@ -744,9 +769,10 @@ impl App {
             let mut help_lines: &[&str] = MENU_HELP;
             match sc {
                 Screen::Title => menu::draw_title(f, bd, screen, t),
+                Screen::Main if db.is_some() => {}
                 Screen::Main => {
                     menu::draw_main(f, bd, screen, status);
-                    if overlay.is_none() {
+                    if overlay.is_none() && db.is_none() {
                         menu::draw_buttons(
                             f,
                             &focused(menu::main_buttons(screen, suspended.as_deref())),
@@ -792,12 +818,21 @@ impl App {
                 }
                 None => {}
             }
+            if let Some(db) = db {
+                db.draw(f, bd, ds, inp, matches!(sc, Screen::Map(_)));
+                help_lines = DATABASE_HELP;
+            }
             if help {
                 mapscreen::help_overlay(f, screen, help_lines);
             }
         });
     }
 }
+
+const DATABASE_HELP: &[&str] = &[
+    "DATABASE  LEFT / RIGHT OR 1-5 TAB   UP / DOWN ENTRY   WHEEL, PGUP / PGDN SCROLL   ESC BACK",
+    "          HOVER A VALUE: SOURCE, CONFIDENCE AND NOTES (CALC = DERIVED WITH THE SIM'S FORMULAS)",
+];
 
 const MENU_HELP: &[&str] =
     &["MENUS    UP / DOWN SELECT   ENTER OPEN   ESC BACK   MOUSE: HOVER AND CLICK", "ANYWHERE F11 FULLSCREEN"];
@@ -830,9 +865,13 @@ fn script(g: &mut Game, o: &Opts) -> Result<(), String> {
         }
     }
     // `--select <platoon> --press F,W,T`: command-card keys, before `--advance`.
+    // `--select <platoon or vehicle callsign>`.
     if let Some(cs) = &o.select {
         g.sel_platoon = g.picture().platoons.iter().find(|p| &p.callsign == cs).map(|p| p.id);
-        g.sel_unit = None;
+        g.sel_unit = match g.sel_platoon {
+            Some(p) => g.picture().platoon(p).and_then(|v| v.members.first().copied()),
+            None => g.picture().own.iter().find(|u| &u.callsign == cs).map(|u| u.id),
+        };
     }
     if let Some(keys) = &o.press {
         for k in keys.split(',').map(str::trim) {

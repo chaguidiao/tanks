@@ -405,10 +405,10 @@ Borrowed from RTS conventions (StarCraft / Command & Conquer): every order is a 
 │ TOP BAR: clock · state · EXECUTE / PAUSE · X1 X2 X4 X8 · AAR │ map layers · HELP · MENU    │
 ├────────────┬─────────────────────────────────────────────────┬───────────────┤
 │ ORDER OF   │              (tool prompt, centred)              │ SELECTION     │
-│ BATTLE     │                                                  │ platoon task, │
-│ (roster)   │                 TACTICAL MAP                     │ route, member │
-│            │   contours · grid · graphics · routes + CPs      │ rows (click → │
-│            │                                                  │ single tank)  │
+│ BATTLE     │                                                  │ platoon: task,│
+│ (roster)   │                 TACTICAL MAP                     │ strength, rows│
+│            │   contours · grid · graphics · routes + CPs      │ tank: status  │
+│            │                                                  │ card · DATA   │
 ├──────────┬─┴──────────────────────────────────────┬──────────┴───────────────┤
 │ MINIMAP  │ RADIO NET (terse, timestamped)          │ COMMAND CARD 5 × 3       │
 │          │                                         │ (sub-card while placing) │
@@ -416,6 +416,8 @@ Borrowed from RTS conventions (StarCraft / Command & Conquer): every order is a 
 │ STATUS: cursor grid, elevation, slope, land cover · layer · m/px               │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
+Selection panel: a platoon shows its vehicle types, task, formation, route and a strength line (vehicles up, main-gun rounds, lowest fuel), then one row per vehicle; clicking a row selects that vehicle alone. A single vehicle shows its status card, what its crew reports: condition and crew fit, task (and hull-down note), grid and heading, speed, fuel (% and litres), main-gun rounds and gun state (ready / laying / lasing / reloading), turret bearing and weapons control, current target (from the crew's own track: type, range, direction) and sights in service (or damaged). DATA (I) opens the DATABASE on that vehicle type. Own units are reported exactly (§6.2), so the card reads `PerceivedWorld` only.
+
 Command card rows: orders (move, route, halt, battle position, engage), posture (formation, technique, weapons control, timing, next platoon), planning tools (phase line, objective, TRP, viewshed, LOS). While a route, phase line or battle position is being placed, the card swaps to a sub-card (send/finish, undo point, radius, cancel). Hovering any button shows a tooltip with its hotkey.
 
 ### 10.3 Interaction
@@ -433,6 +435,7 @@ The client is a set of screens, not one view with modes. The game and the two ed
 TITLE ──any key──▶ MAIN MENU ─┬─ PLAY SCENARIO ──▶ scenario list + briefing ──▶ LOADING ──▶ GAME
                               ├─ SCENARIO EDITOR ─▶ scenario list ──▶ LOADING ──▶ SCENARIO EDITOR ⇄ PLAY TEST (F9)
                               ├─ TERRAIN EDITOR ──▶ map list ──▶ LOADING ──▶ TERRAIN EDITOR
+                              ├─ DATABASE (overlay)       vehicles · ammunition · terrain · doctrine · combat models
                               ├─ OPTIONS (overlay)        RESUME <game> when a game was left for the menu
                               └─ QUIT
 ```
@@ -441,6 +444,7 @@ TITLE ──any key──▶ MAIN MENU ─┬─ PLAY SCENARIO ──▶ scenari
 - Leaving a game for the main menu suspends it (RESUME on the main menu); starting a new scenario discards it. Leaving an editor with unsaved edits asks first.
 - **Mission end**: a panel with the result and AFTER-ACTION REVIEW / RESTART / MAIN MENU / CLOSE.
 - **Scenario select** shows date, map, sides (strength, doctrine, player or computer), objectives, victory conditions and the scenario's `briefing` text.
+- **Database**: the data the simulation loads, read-only, in five tabs: vehicles, ammunition, terrain (land cover and soils), doctrine packs (with formation diagrams) and combat models (detection, penetration, damage). Every value shows its confidence (HIGH / MED / LOW / EST); hovering shows its source and notes. Values marked CALC are derived with the simulation's own functions (power-to-weight, ground pressure, velocity, drop and penetration by range, range at which each round defeats each vehicle's frontal armour, power-limited speed per soil). Opened from the main menu, the screen menu, or a vehicle's DATA button in the game; the game stays paused underneath.
 - **Options** (saved at once to `<config dir>/tanks/settings.cfg`, or `$TANKS_CONFIG`): borderless fullscreen (also F11), frame-rate cap, UI font (IBM Plex Mono / built-in), pan speed, edge pan, contours and grid when a map opens.
 - Every menu works with the mouse and with Up/Down/Enter/Esc; the visual language is the map's (contour backdrop, same panels and buttons).
 
@@ -505,6 +509,8 @@ Sparse: radio clicks, squelch, terse synthesised or recorded callouts (optional)
 | M4 | Platoons from scenario data; doctrine packs (formation slots, spacing, bound length, delays, engagement range, drills); formation movement with virtual leader and slot re-planning; traveling / traveling overwatch / bounding overwatch; Occupy BP with hull-down finder (coarse grid + 3 m micro-search, threat observers, gun depression, dispersion, assignment), crews report position type; frontal fire distribution; react-to-contact drill (halt, orient, engage, resume when quiet); order delay over the radio | Alternate/supplementary/hide positions, displacement on trigger, skyline/military-crest scoring, break-contact drill, smoke, cross/depth fire patterns, HTN method library |
 | M5 | Scenario objectives, victory conditions (force destroyed, objective seized and held 2 min, time limit with defender tie-break) and per-side AI plans; commander AI (`ai::commander`, 0.2 Hz) reading only the side's picture: attack template march → pre-battle → battle formation → consolidate with break-off on losses, defend template; orders go over the radio with delay; scenario `m5-hold-the-village` playable start to finish (also headless with both AIs) | Re-planning/COA choice (HTN/utility), reserves and counter-attacks, OPFOR reconnaissance, artillery preparation, Blue auto-commander option in the UI |
 | M6 | Planning phase (clock stopped at H-hour; orders, graphics and contingencies apply at once, ENTER executes); control measures drawn in the client (phase lines, objectives, TRPs, battle positions) and held in each side's picture; triggers (enemy crosses PL, platoon crosses PL, at time) that release orders as code words; replays = scenario + player command log (`sim::Replay`, CTRL+R in the AAR, `tanks-headless replay` verifies the hash); AAR with timeline scrub over recorded truth frames, shots and per-side stats (rounds/hits/kills/losses, first contact, hits by range band); scenario editor (place/drag/rotate/delete units, platoons, vehicle by in-service year, objectives, date, start time, save to `data/scenarios/<id>-custom.ron`, play); generated village buildings (footprints in `buildings.geojson`, baked to a height grid that blocks LOS and movement); terrain editor building tool and feature delete | Town blocks/streets beyond villages, building damage, AI use of buildings, AAR replay by re-simulation (frames are recorded live), graphics in the AAR, editing AI plans and victory conditions in the scenario editor, trigger/graphic editing after placement, PL-relative report text |
+
+**Database and vehicle card (2026-10-12):** DATABASE screen (§10.4) and the selected-vehicle status card (§10.2); the own-unit picture now carries crew fit, gun state, current target and sight damage. Deferred: filtering by scenario date, side-by-side comparison, silhouettes/profile drawings.
 
 **Game shell (2026-10-12):** title screen, main menu, scenario select with briefing (`briefing` field in the scenario format), threaded loading screen, options (persisted), screen menu (Esc), mission-end panel, game suspended/resumed from the main menu; terrain and scenario editors moved out of the game into their own screens, the scenario editor play-tests and returns with F9 (§10.4). Deferred: new map from a recipe and new blank scenario from the menus, map preview in the select screens, campaign/scenario progress, key rebinding, UI scaling, audio volume (no audio yet).
 

@@ -38,6 +38,8 @@ pub enum Key {
     Minus,
     Equal,
     Delete,
+    PageUp,
+    PageDown,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -90,7 +92,7 @@ const FONT_SIZES: &[i32] = &[8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 32, 48];
 
 /// Glyphs in the atlas: printable ASCII plus the few symbols the UI prints.
 const FONT_CHARS: &str =
-    " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°·×–—→≤≥";
+    " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°·×–—→≤≥²³";
 
 /// TrueType UI font, one atlas per logical size, rasterised at the pixel size whose character
 /// advance matches raylib's built-in font (layouts were made with it) and shifted so capitals
@@ -172,6 +174,9 @@ const KEYMAP: &[(KeyboardKey, Key)] = &[
     (KeyboardKey::KEY_V, Key::Char('v')),
     (KeyboardKey::KEY_X, Key::Char('x')),
     (KeyboardKey::KEY_DELETE, Key::Delete),
+    (KeyboardKey::KEY_PAGE_UP, Key::PageUp),
+    (KeyboardKey::KEY_PAGE_DOWN, Key::PageDown),
+    (KeyboardKey::KEY_I, Key::Char('i')),
     (KeyboardKey::KEY_H, Key::Char('h')),
     (KeyboardKey::KEY_K, Key::Char('k')),
     (KeyboardKey::KEY_O, Key::Char('o')),

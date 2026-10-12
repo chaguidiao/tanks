@@ -51,10 +51,12 @@ enum Clicked {
 }
 
 /// What a map screen asks the app to do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     Menu,
     Help,
+    /// DATABASE on this vehicle type (the game's selected-vehicle card).
+    VehicleData(String),
     MainMenu,
     /// Scenario editor → game on the edited scenario.
     PlayTest,
@@ -325,6 +327,7 @@ impl MapScreen {
                 MAP,
                 "         CLICK/DRAG MINIMAP TO MOVE",
                 "SELECT   LMB PLATOON (CTRL: SINGLE TANK)  ROSTER / PANEL ROWS (CLICK AGAIN: CENTRE)  TAB NEXT",
+                "         SINGLE TANK: STATUS CARD (CREW, FUEL, ROUNDS, GUN, TARGET, SIGHTS)   I VEHICLE DATA (DATABASE)",
                 "MOVE     RMB MOVE   M MOVE TOOL   SHIFT+RMB ADD CHECKPOINT (RELEASE SHIFT TO SEND, APPENDS TO ROUTE)",
                 "         R ROUTE TOOL: LMB CHECKPOINTS, RMB DESTINATION, BKSP UNDO   H HALT",
                 "ORDERS   F FORMATION  T TECHNIQUE  B BATTLE POSITION ([ ] RADIUS)  W WEAPONS  A / CTRL+RMB ENGAGE",
@@ -533,6 +536,9 @@ impl MapScreen {
                 let fx = game.update(inp, &self.cam, over_ui || in_minimap, game_click);
                 if let Some(c) = fx.center_on {
                     self.cam.centre = c;
+                }
+                if let Some(id) = fx.vehicle_data {
+                    req = Some(Request::VehicleData(id));
                 }
                 if fx.clear_overlay {
                     self.view.overlay = None;
