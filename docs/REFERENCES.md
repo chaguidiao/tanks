@@ -64,6 +64,16 @@ A reading list grouped by subsystem. ★ = read first. Public sources only — n
 - **D. Isla**, "Handling Complexity in the Halo 2 AI" (GDC 2005) — behaviour trees.
 - **Ontañón et al.**, "A Survey of Real-Time Strategy Game AI Research and Competition in StarCraft" (IEEE TCIAIG, 2013); **Vinyals et al.**, AlphaStar (Nature, 2019) — why learned policies are not our v1 approach.
 
+## Smoke, weather, light and fire support (M7)
+- **FM 3-11.50 / ATP 3-11.50**, *Obscuration Operations* — smoke effects, screening, cloud behaviour in wind; tank self-screening doctrine in **ATP 3-20.15** (React to contact: employ smoke).
+- **Koschmieder** relation: extinction k = 3.912 / V (meteorological visibility V, 2 % contrast) — fog/haze/rain presets in `data/combat/weather.ron`.
+- **Beer–Lambert** law for smoke transmittance T = exp(-k * CL), concentration-length; smoke mass extinction coefficients in open literature on HC and red-phosphorus screens (e.g. Palmer & Williams, *Appl. Opt.* 1974 on IR extinction of fog and smoke).
+- **J. Meeus**, *Astronomical Algorithms* (2nd ed., 1998) — low-precision solar position for sun elevation from date, time, latitude.
+- **Johnson / NVESD** and thermal-sight literature — thermal crossover at dawn and dusk (target-background contrast passes through zero).
+- **ATP 3-09.30** *Observers*, **ATP 3-09.42** *Fire Support for the Brigade Combat Team*, **FM 6-40** — call-for-fire format (observer ID, warning order, target location, description, method of engagement and control), SHOT / SPLASH / ROUNDS COMPLETE.
+- **ATP 3-20.15** *Tank Platoon* and **FM 3-90.1** — break contact (suppress, smoke, bound back), react to indirect fire.
+- Suppression: Dunnigan, Marshall and later suppression-model discussions are *qualitative only*; values in data are `estimate`.
+
 ## Symbology & presentation
 - **milsymbol** (MIT): https://github.com/spatialillusions/milsymbol — 2525/APP-6 SVG generation.
 - **raylib** (zlib): https://www.raylib.com — `raylib-rs` bindings: https://docs.rs/raylib

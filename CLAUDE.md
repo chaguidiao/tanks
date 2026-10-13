@@ -6,7 +6,7 @@
 - Terrain, map format, generation, editor: `docs/TERRAIN.md`
 - Sources: `docs/REFERENCES.md`
 - Dev environment (container, commands): `docs/DEVELOPMENT.md`
-- Status: **M0–M6 done** (lean versions; deferred items in DESIGN.md §13.1). Stack: **Rust sim core + raylib 6.x client (`raylib-rs`)**. Licence MIT. Next: milestone M7 v1.0 content (DESIGN.md §13).
+- Status: **M0–M6 done** (lean versions; deferred items in DESIGN.md §13.1). Stack: **Rust sim core + raylib 6.x client (`raylib-rs`)**. Licence MIT. In progress: M7a–d "Tier 1" (smoke, ammo variety + IFV/recon targets, weather/time of day, indirect fire + suppression; DESIGN.md §13, §13.2), then M7e v1.0 content.
 
 ## Architecture rules (non-negotiable)
 1. **`sim` is graphics-agnostic.** No raylib/rendering/UI types in `sim`, `terrain`, `terragen`, `ai`, `sim-data`. All raylib calls live in `client` behind a small `render` module. The client talks to the sim only via `Command` in, `Event` out, and `PerceivedWorld` reads.

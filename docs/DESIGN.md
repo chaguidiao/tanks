@@ -44,7 +44,7 @@ Touchstones:
 - Scenario format + a small set of scenarios; after-action review (replay with ground truth).
 
 ### 2.2 Explicitly out of scope for v1.0 (designed for, not built)
-- Infantry, IFVs, ATGM teams, artillery, aviation, UAS/drones, engineers, logistics vehicles.
+- Infantry, ATGM teams, aviation, UAS/drones, engineers, logistics vehicles. (IFVs and recon vehicles enter in M7b; artillery arrives only as *fire support* called by the player, M7d: no gun lines are simulated.)
   *The sim core must not assume "everything is a tank" — use component-based entities so these can be added.*
 - Multiplayer (keep the sim deterministic so lockstep is possible later).
 - Campaign layer (M1TP-style persistent crews) — planned for after v1.0.
@@ -460,10 +460,10 @@ Sparse: radio clicks, squelch, terse synthesised or recorded callouts (optional)
 - **Scenario editor** (v1, basic): place units, draw graphics, set weather/time, triggers, victory conditions.
 - **Terrain editor + procedural generator** (v1): see `docs/TERRAIN.md`. **Real-world import** (DEM + OSM) in v1.x, same format.
 - **Saves** (v1): snapshot of sim state; replays via command logs.
-- Weather and time of day (v1: day/night/dusk, clear/rain/fog); dust; thermal crossover.
-- Smoke (v1 self-screening; artillery smoke later).
+- Weather and time of day (M7c: sun elevation from date/time/latitude, clear/haze/fog/rain/dust presets from data, wind, thermal crossover, dust plumes).
+- Smoke (M7a, layered): vehicle self-screening grenades, engine exhaust smoke, tank smoke rounds, then artillery smoke (M7d). A drifting, decaying cloud field that attenuates each sensor band separately (§6.1).
 - Obstacles & minefields (v1 static; breaching later).
-- Indirect fire / call for fire (v1.x).
+- Indirect fire / call for fire (M7d, pulled forward from v1.x): fire support as a scenario asset, with suppression.
 - Recovery & resupply (v1.x).
 - Campaign with persistent crews and vehicle damage (v2).
 - More unit types (v2+): IFVs, dismounts, ATGM teams, recon, UAS.
@@ -496,8 +496,13 @@ Sparse: radio clicks, squelch, terse synthesised or recorded callouts (optional)
 | M4 | Platoon | Formations, movement techniques, Occupy BP with hull-down position finder, fire distribution, drills |
 | M5 | Opponent | OPFOR AI with doctrine templates; first full scenario playable start-to-finish |
 | M6 | Commander UX | Planning phase, graphics, triggers, AAR replay, scenario editor, urban generation + editor polish |
-| M7 | v1.0 | Cold War + Modern content sets, 5–8 scenarios, 4–6 vehicle types per era, packaging for Win/Linux/macOS |
-| M8 | v1.x | Real-world import (DEM/OSM), indirect fire, resupply |
+| M7a | Smoke | Self-screening, engine smoke, tank smoke rounds, drifting/decaying cloud field in LOS per sensor band, break-contact drill, SMOKE order |
+| M7b | Ammo and targets | HEAT/HE-FRAG/APDS-style rounds, coax MG, CE vs. KE armour and ERA, IFV and recon vehicles, mixed OPFOR, ammo selection (AI and player) |
+| M7c | Weather and time | Sun elevation, night/dusk/fog/rain/dust presets as scenario data, wind, thermal crossover, dust cue; scenarios that use them |
+| M7d | Fire support | Call for fire (HE, smoke), FDC delay, time of flight, dispersion, suppression model, react-to-indirect-fire drill, SHOT/SPLASH reports |
+| M7e | v1.0 | Cold War + Modern content sets, 5–8 scenarios, 4–6 vehicle types per era, packaging for Win/Linux/macOS (the former M7) |
+| M8 | v1.x | Real-world import (DEM/OSM), resupply, **Tier 2** (§13.2) |
+| M9 | v1.5 | **Tier 3** (§13.2): speculative systems as data/era packs |
 
 ### 13.1 Implementation status (2026-10-11)
 
@@ -522,7 +527,17 @@ Sparse: radio clicks, squelch, terse synthesised or recorded callouts (optional)
 
 **UX pass (2026-10-12, after M6):** clickable top bar (time control, map layers, editors, help), order-of-battle roster, selection panel with clickable vehicle rows, StarCraft-style command card with hotkey labels, tooltips and placement sub-cards, minimap, wrapped radio net; multi-checkpoint routes (sim `via`, see §10.3). Deferred: box/multi-platoon selection, control groups, a real order queue (sequential *different* orders, e.g. move then occupy BP), auto-pause options, LOS profile chart.
 
-**Suggested start for M7 (v1.0):** content first. Add Modern-era vehicles and sensors (thermal sights, APFSDS generations) as data with sources, 5–8 scenarios across both eras using the scenario editor, then packaging (release builds per OS with `data/` alongside). Keep re-running the duel harness when adding vehicles.
+**Suggested start for M7 (v1.0):** the Tier 1 systems (M7a–d) come first, because they change what a scenario can say (night, fog, smoke, a mixed enemy, supporting fires) and so what content is worth authoring. Then M7e: Modern-era vehicles and sensors (thermal sights, APFSDS generations) as data with sources, 5–8 scenarios across both eras using the scenario editor, then packaging (release builds per OS with `data/` alongside). Keep re-running the duel harness when adding vehicles.
+
+### 13.2 Feature tiers (review of 2026-10-13)
+
+Prioritised from a review for two audiences: the casual player who likes military sims (wants readable tension and variety within a few minutes) and the enthusiast (wants doctrine and physics to be recognisable and sourced).
+
+**Tier 1, M7a–d (in progress).** Smoke; ammunition variety and a mixed target set; weather and time of day; indirect fire with suppression. These make every existing system matter more (smoke breaks LOS, so fire distribution and positions change; night makes thermal sights decisive; HEAT/ERA make ammo choice and target type matter).
+
+**Tier 2, M8.** Company-level tools: a real order queue and phase-line-driven plans; engineer obstacles and breaching, minefields and mine plough/roller; ATGM teams and dismounts (the first non-tank classes, using the component model of §4.4); cheap UAS reconnaissance feeding the picture; electronic and communications effects on reporting; resupply and recovery.
+
+**Tier 3, M9 (speculative, as data/era packs, never code branches).** Active protection (hard-kill with a finite magazine, soft-kill jammers); top-attack munitions and the counters they force; loitering munitions; directed-energy dazzlers; unmanned ground vehicles as platoon members; multispectral camouflage and signature management; networked fire control (one platoon's contact handed off to another's gun). Each carries `estimate` confidence plus an explicit "speculative" note in the database screen.
 
 ---
 
@@ -545,8 +560,11 @@ Sparse: radio clicks, squelch, terse synthesised or recorded callouts (optional)
 | 14 | Replay input | A replay holds only externally given commands (`generated == false`) plus the sides a human played; AI and trigger orders are regenerated by re-simulation. Control measures carry no radio delay and draw no random numbers, so `Sim::settle` may apply them during the planning phase without changing replay results |
 | 15 | Buildings | Footprints are authored features; the baker rasterises them to a building-height grid (`buildings.bin`) used by LOS (opaque to roof height) and as NO-GO in every mobility raster |
 | 16 | Multi-point routes | A route with checkpoints is **one** order (`via: Vec<Vec2>` on `Move`/`PlatoonMove`, omitted from RON when empty so old replays load unchanged), not a client-side queue of moves: it crosses the radio once, replays deterministically and the platoon AI owns resumption after contact. Legs are planned separately (`Pathfinder::find_via`) so checkpoints are actually visited |
-
 | 17 | Client screens | The game, the terrain editor and the scenario editor are separate screens reached from the main menu (`client/src/mapscreen.rs`), not modes toggled inside one view: each has its own top bar, help and menu, and an editor never restarts a running game. The only in-place switch is the scenario editor's play test (F9 there and back). Map loads run on a worker thread. Options are a plain `key = value` file in the user's config directory (no new crate, unknown keys ignored) |
+| 18 | Smoke model | Smoke is a sim-side list of 2D clouds (centre, radius, density, age) advected by the scenario wind and decayed over time; it is part of `state_hash`. Line of sight is unchanged: `sim::smoke` integrates chord length x extinction through the clouds along the sight line, separately for the visual/near-IR band (optical, night channel) and the thermal band. A pair whose every sensor is blocked is simply not refreshed, so tracks time out and engagement stops without special cases |
+| 19 | Ammunition | A vehicle carries a loadout of round types (data), not one round. `AmmoKind` gains Heat, HeFrag, Apds (flat penetration) and Smoke; armour gains optional chemical-energy values and ERA. Selection is by target class (AI) or an explicit command (player). Non-rod rounds use flat penetration, with no Lanz–Odermatt term |
+| 20 | Weather and light | A scenario carries a `weather` block (preset id from `data/combat/weather.ron`, wind). Light comes from sun elevation computed from date, time and map latitude (replacing the fixed hours), so season matters. Mobility is not weather-dependent yet: baked speed rasters cannot change at run time |
+| 21 | Fire support | Fire support is a scenario asset per side (missions available, rounds, FDC delay), not simulated gun lines. A call for fire is a `Command`; impacts are scheduled projectiles with their own RNG stream, hashed. Suppression is a per-crew state that degrades search, aiming and willingness to move |
 
 ### Remaining open questions
 None blocking. Development environment: see `docs/DEVELOPMENT.md`.
