@@ -30,7 +30,7 @@ A reading list grouped by subsystem. ★ = read first. Public sources only — n
 - **J. Y. Wong, *Theory of Ground Vehicles*** (Wiley, 5th ed.) — tracked vehicle traction, steering, resistance.
 - **M. G. Bekker, *Theory of Land Locomotion* / *Off-the-Road Locomotion*** — terramechanics.
 - **NATO AVT-248, *Next-Generation NATO Reference Mobility Model (NG-NRMM)*** final report (2018) — speed-made-good over terrain, soil cone index, slope, vegetation override.
-- **R. P. Hunnicutt, *Abrams: A History of the American Main Battle Tank*** (1990); **S. Zaloga** Osprey titles (T-72, T-80, M1, Leopard 2) — specs and development history.
+- **R. P. Hunnicutt, *Abrams: A History of the American Main Battle Tank*** (1990); **S. Zaloga** Osprey titles (T-72, T-80, M1, Leopard 2) — specs and development history. BMP-2 and FV107 Scimitar data: Zaloga, *BMP-1&BMP-2 Infantry Fighting Vehicle* (Osprey 1995) and open editions of Jane's Armour and Artillery; ERA and HEAT figures are open-source estimates marked `estimate`/`low` in the data.
 - Manufacturer brochures, defence-expo data sheets, Jane's Armour & Artillery (older editions) — cite edition/year per stat.
 
 ## Ballistics & terminal effects

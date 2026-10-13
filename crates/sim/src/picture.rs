@@ -229,7 +229,14 @@ impl SideState {
         }
     }
 
-    pub fn rebuild_own(&mut self, w: &World, vehicles: &[VehicleDef], platoons: &[PlatoonView], tick: u64) {
+    pub fn rebuild_own(
+        &mut self,
+        w: &World,
+        vehicles: &[VehicleDef],
+        round_labels: &[Vec<&'static str>],
+        platoons: &[PlatoonView],
+        tick: u64,
+    ) {
         let now = tick as f64 * DT;
         let p = &mut self.picture;
         p.tick = tick;
@@ -269,7 +276,14 @@ impl SideState {
                 },
                 None => (Task::Idle, Vec::new(), None),
             };
-            let (turret, ammo) = w.gun[k].as_ref().map_or((t.heading, 0), |g| (g.turret, g.ammo));
+            let (turret, ammo) = w.gun[k].as_ref().map_or((t.heading, 0), |g| (g.turret, g.rounds()));
+            let (rounds, ammo_selected) = match (w.vehicle[k], w.gun[k].as_ref()) {
+                (Some(vi), Some(g)) => (
+                    round_labels[vi].iter().zip(&g.stock).map(|(&l, &n)| (l.to_owned(), n)).collect(),
+                    g.selected.map(|k| k.label().to_owned()),
+                ),
+                _ => (Vec::new(), None),
+            };
             let establishment = w.vehicle[k].map_or(0, |vi| vehicles[vi].crew);
             let lost = w.gun[k].as_ref().map_or(0, |g| g.crew_loss);
             let crew = (establishment.saturating_sub(lost), establishment);
@@ -297,6 +311,9 @@ impl SideState {
                 speed,
                 fuel_fraction,
                 ammo,
+                rounds,
+                ammo_selected,
+                era_left: w.era[k],
                 condition: w.condition[k],
                 weapons: w.weapons[k],
                 task,

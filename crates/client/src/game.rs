@@ -13,7 +13,7 @@ use sim::view::{
 use sim::{
     Addressee, Command, EndReason, EntityId, Event, KillKind, PlatoonReport, PositionKind, SideId, Sim, SmokeMode,
 };
-use sim_data::{DataSet, Formation, ScenarioDef, Technique};
+use sim_data::{AmmoKind, DataSet, Formation, ScenarioDef, Technique};
 use terrain::BakedMap;
 use terrain::ground::Ground;
 
@@ -41,6 +41,8 @@ pub enum Tool {
     Route,
     /// Engage: the next left click picks a contact.
     Engage,
+    /// Smoke round: the next left click is the aim point.
+    SmokeRound,
     /// Battle position: centre chosen, waiting for the threat direction click.
     BattlePosition {
         centre: Option<[f64; 2]>,
@@ -89,6 +91,8 @@ pub enum Cmd {
     Weapons,
     Smoke,
     EngineSmoke,
+    SmokeRound,
+    Ammo,
     BreakContact,
     Contingency,
     NextPlatoon,
@@ -462,6 +466,8 @@ impl Game {
             (Key::Char('w'), C::Weapons),
             (Key::Char('z'), C::Smoke),
             (Key::Char('e'), C::EngineSmoke),
+            (Key::Char('n'), C::SmokeRound),
+            (Key::Char('q'), C::Ammo),
             (Key::Char('x'), C::BreakContact),
             (Key::Char('h'), C::Halt),
             (Key::Char('m'), C::Move),
@@ -536,6 +542,10 @@ impl Game {
                     self.engage_at(cam, inp.mouse);
                     self.tool = Tool::None;
                 }
+                Tool::SmokeRound => {
+                    self.fire_smoke_round(world);
+                    self.tool = Tool::None;
+                }
                 Tool::BattlePosition { centre: None } => self.tool = Tool::BattlePosition { centre: Some(world) },
                 Tool::BattlePosition { centre: Some(c) } => {
                     let facing = ai::drive::bearing(c, world);
@@ -580,7 +590,7 @@ impl Game {
                     self.send_route();
                 }
                 // Right click cancels a targeting mode (RTS convention).
-                Tool::Move | Tool::Engage | Tool::BattlePosition { .. } | Tool::Graphic { .. } => {
+                Tool::Move | Tool::Engage | Tool::SmokeRound | Tool::BattlePosition { .. } | Tool::Graphic { .. } => {
                     self.tool = Tool::None;
                 }
                 _ if inp.ctrl => self.engage_at(cam, inp.mouse),
@@ -686,6 +696,8 @@ impl Game {
                 self.toggle_tool(Tool::Route);
             }
             Cmd::Engage if self.sel_unit.is_some() => self.toggle_tool(Tool::Engage),
+            Cmd::SmokeRound if self.smoke_rounds(self.addressee()) > 0 => self.toggle_tool(Tool::SmokeRound),
+            Cmd::Ammo => self.cycle_ammo(),
             Cmd::BattlePosition if self.sel_platoon.is_some() => {
                 self.toggle_tool(Tool::BattlePosition { centre: None });
             }
@@ -836,7 +848,7 @@ impl Game {
             }
             Cmd::RadiusDown => self.bp_radius = (self.bp_radius / 1.25).max(100.0),
             Cmd::RadiusUp => self.bp_radius = (self.bp_radius * 1.25).min(800.0),
-            Cmd::Move | Cmd::Route | Cmd::Engage | Cmd::BattlePosition => {
+            Cmd::Move | Cmd::Route | Cmd::Engage | Cmd::BattlePosition | Cmd::SmokeRound => {
                 self.radio("NO UNIT SELECTED.".into());
             }
         }
@@ -935,6 +947,65 @@ impl Game {
     }
 
     /// Grenade salvos left across the selection.
+    /// Rounds of tank-gun smoke carried by the selection.
+    fn smoke_rounds(&self, to: Option<Addressee>) -> u32 {
+        let Some(to) = to else { return 0 };
+        self.members_of(to)
+            .iter()
+            .filter_map(|m| self.picture().unit(*m))
+            .flat_map(|u| u.rounds.iter())
+            .filter(|(l, _)| l == AmmoKind::Smoke.label())
+            .map(|(_, n)| *n)
+            .sum()
+    }
+
+    fn members_of(&self, to: Addressee) -> Vec<EntityId> {
+        match to {
+            Addressee::Unit(u) => vec![u],
+            Addressee::Platoon(p) => self.picture().platoon(p).map_or(Vec::new(), |v| v.members.clone()),
+        }
+    }
+
+    /// Ammunition selection shown for the selection (its first vehicle): the chosen type or None
+    /// for AUTO, plus the selectable types it carries (smoke is fired by mission, never selected).
+    fn ammo_choice(&self, to: Addressee) -> Option<(Option<AmmoKind>, Vec<AmmoKind>)> {
+        let pic = self.picture();
+        let u = self.members_of(to).into_iter().find_map(|m| pic.unit(m))?;
+        let by_label = |l: &str| AmmoKind::ALL.into_iter().find(|k| k.label() == l);
+        let kinds: Vec<AmmoKind> = u
+            .rounds
+            .iter()
+            .filter(|(_, n)| *n > 0)
+            .filter_map(|(l, _)| by_label(l))
+            .filter(|k| *k != AmmoKind::Smoke)
+            .collect();
+        let chosen = u.ammo_selected.as_deref().and_then(by_label);
+        Some((chosen, kinds))
+    }
+
+    fn cycle_ammo(&mut self) {
+        let Some(to) = self.addressee() else {
+            self.radio("NO UNIT SELECTED.".into());
+            return;
+        };
+        let Some((chosen, kinds)) = self.ammo_choice(to) else { return };
+        let next = match chosen.and_then(|c| kinds.iter().position(|k| *k == c)) {
+            None => kinds.first().copied(),
+            Some(i) => kinds.get(i + 1).copied(),
+        };
+        let cs = self.addressee_cs(to);
+        self.order(Command::SelectAmmo { to, kind: next });
+        self.radio(format!("TO {cs}: AMMUNITION {}.", next.map_or("AUTO", |k| k.label())));
+    }
+
+    fn fire_smoke_round(&mut self, at: [f64; 2]) {
+        if let Some(to) = self.addressee() {
+            let cs = self.addressee_cs(to);
+            self.order(Command::FireSmoke { to, at, rounds: 1 });
+            self.radio(format!("TO {cs}: SMOKE, GRID {}.", format::grid(at)));
+        }
+    }
+
     fn smoke_salvos(&self, to: Addressee) -> u32 {
         let pic = self.picture();
         match to {
@@ -1264,6 +1335,10 @@ impl Game {
                 }
                 f.circle_lines(mouse, 6.0, style::ROUTE_DRAFT);
             }
+            Tool::SmokeRound => {
+                f.circle_lines(mouse, 12.0, style::TEXT);
+                f.circle_lines(mouse, 4.0, style::TEXT);
+            }
             Tool::Engage => {
                 f.circle_lines(mouse, 10.0, style::HOSTILE);
                 f.line([mouse[0] - 14.0, mouse[1]], [mouse[0] + 14.0, mouse[1]], 1.0, style::HOSTILE);
@@ -1345,6 +1420,7 @@ impl Game {
             Tool::Move => "MOVE: CLICK DESTINATION   (RIGHT CLICK / ESC CANCEL)".into(),
             Tool::Route => format!("ROUTE: CLICK CHECKPOINTS ({n}), RIGHT CLICK DESTINATION   BKSP UNDO   ESC CANCEL"),
             Tool::Engage => "ENGAGE: CLICK A CONTACT   (RIGHT CLICK / ESC CANCEL)".into(),
+            Tool::SmokeRound => "SMOKE ROUND: CLICK THE AIM POINT   (RIGHT CLICK / ESC CANCEL)".into(),
             Tool::BattlePosition { centre: None } => "BATTLE POSITION: CLICK CENTRE   [ ] RADIUS".into(),
             Tool::BattlePosition { .. } => "BATTLE POSITION: CLICK THREAT DIRECTION".into(),
             Tool::Viewshed => "VIEWSHED: CLICK OBSERVER POINT   (V / ESC CLOSE)".into(),
@@ -1603,37 +1679,37 @@ impl Game {
                     .tip("MARCH SPEED: ORDERS THE SELECTION AND SETS THE NEXT MOVE (MAX / DOCTRINE SPEEDS)"),
             ),
             (
-                10,
+                14,
                 b("PHASE LINE", Cmd::PhaseLine)
                     .key("G")
                     .active(gfx(DrawKind::PhaseLine))
                     .tip("DRAW A PHASE LINE (CONTROL MEASURE AND TRIGGER REFERENCE)"),
             ),
-            (11, b("OBJECTIVE", Cmd::Objective).key("G").active(gfx(DrawKind::Objective)).tip("DRAW AN OBJECTIVE")),
-            (12, b("TRP", Cmd::Trp).key("G").active(gfx(DrawKind::Trp)).tip("PLACE TARGET REFERENCE POINTS")),
+            (15, b("OBJECTIVE", Cmd::Objective).key("G").active(gfx(DrawKind::Objective)).tip("DRAW AN OBJECTIVE")),
+            (16, b("TRP", Cmd::Trp).key("G").active(gfx(DrawKind::Trp)).tip("PLACE TARGET REFERENCE POINTS")),
             (
-                13,
+                17,
                 b("VIEWSHED", Cmd::Viewshed)
                     .key("V")
                     .active(self.tool == Tool::Viewshed)
                     .tip("SHOW WHAT CAN BE SEEN FROM A POINT"),
             ),
             (
-                14,
+                18,
                 b("LOS", Cmd::Los)
                     .key("L")
                     .active(is(&Tool::Los { a: None, b: None, result: None }))
                     .tip("LINE OF SIGHT BETWEEN TWO POINTS"),
             ),
             (
-                15,
+                10,
                 b("SMOKE", Cmd::Smoke)
                     .key("Z")
                     .value(self.addressee().map_or(String::new(), |to| format!("{} SALVOS", self.smoke_salvos(to))))
                     .enabled(self.addressee().is_some_and(|to| self.smoke_salvos(to) > 0))
                     .tip("FIRE SMOKE GRENADES TOWARDS THE NEAREST KNOWN THREAT (CREWS ALSO SCREEN WHEN FIRED UPON)"),
             ),
-            (16, {
+            (11, {
                 let state = self.addressee().and_then(|to| self.engine_smoke(to));
                 b("ENG SMOKE", Cmd::EngineSmoke)
                     .key("E")
@@ -1647,7 +1723,28 @@ impl Game {
                     .tip("EXHAUST SMOKE BEHIND MOVING VEHICLES (TOGGLE)")
             }),
             (
-                17,
+                12,
+                b("AMMO", Cmd::Ammo)
+                    .key("Q")
+                    .value(
+                        self.addressee()
+                            .and_then(|to| self.ammo_choice(to))
+                            .map_or(String::new(), |(c, _)| c.map_or("AUTO", |k| k.label()).to_owned()),
+                    )
+                    .enabled(sel)
+                    .tip("AMMUNITION TYPE: AUTO (BY TARGET CLASS) OR HELD ON ONE TYPE (CYCLES)"),
+            ),
+            (
+                13,
+                b("SMOKE RND", Cmd::SmokeRound)
+                    .key("N")
+                    .value(format!("{} RDS", self.smoke_rounds(self.addressee())))
+                    .enabled(self.smoke_rounds(self.addressee()) > 0)
+                    .active(is(&Tool::SmokeRound))
+                    .tip("FIRE TANK-GUN SMOKE ROUNDS AT A POINT (BLINDS OBSERVERS ON A DISTANT POSITION)"),
+            ),
+            (
+                19,
                 b("BREAK CONT", Cmd::BreakContact)
                     .key("X")
                     .enabled(plt)
@@ -1828,12 +1925,20 @@ impl Game {
             (_, GunActivity::Lasing) => "LASING",
             (_, GunActivity::Reloading) => "RELOADING",
         };
-        let rounds = def
-            .and_then(|d| d.armament.load.first())
-            .and_then(|l| ds.ammo(&l.ammo))
-            .map_or(String::new(), |a| format!(" {}", a.name));
         let ammo_c = if load > 0 && u.ammo * 4 < load { style::AMBER } else { style::TEXT };
-        out.push((row("MAIN GUN", format!("{}/{load}{rounds}   {gun}", u.ammo)), ammo_c));
+        let held = u.ammo_selected.as_deref().map_or("AUTO".to_owned(), |k| format!("HOLD {k}"));
+        out.push((row("MAIN GUN", format!("{}/{load} RDS   {gun}", u.ammo)), ammo_c));
+        if !u.rounds.is_empty() {
+            let list: Vec<String> = u.rounds.iter().map(|(l, n)| format!("{l} {n}")).collect();
+            out.push((row("ROUNDS", list.join(" · ")), style::TEXT));
+            out.push((row("AMMO SEL", held), style::TEXT));
+        }
+        if def.is_some_and(|d| d.armour.era.is_some()) {
+            out.push((
+                row("ERA", format!("{} TILES", u.era_left)),
+                if u.era_left == 0 { style::AMBER } else { style::TEXT },
+            ));
+        }
         out.push((
             row("TURRET", format!("{}   WEAPONS {}", format::mils(u.turret), weapons_str(u.weapons))),
             style::TEXT,

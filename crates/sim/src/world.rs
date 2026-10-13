@@ -121,6 +121,8 @@ pub struct World {
     /// Tick of the last main-gun shot (detection cue).
     pub last_fired: Vec<Option<u64>>,
     pub smoke: Vec<SmokeState>,
+    /// Reactive armour tiles left.
+    pub era: Vec<u32>,
 }
 
 impl World {
@@ -156,7 +158,7 @@ impl World {
         z: f64,
         heading: f64,
         year: i32,
-        ammo: u32,
+        stock: Vec<u32>,
     ) -> EntityId {
         self.next_id += 1;
         let id = EntityId(self.next_id);
@@ -180,11 +182,12 @@ impl World {
             .map(|s| (s.kind, s.cycles_per_mrad.get(), s.max_range_m.as_ref().map_or(f64::INFINITY, |r| r.get())))
             .collect();
         self.sensors.push(Some(SensorState { sensors, tracks: Vec::new(), degraded: false }));
-        self.gun.push(Some(crate::gunnery::GunState::new(heading, ammo)));
+        self.gun.push(Some(crate::gunnery::GunState::new(heading, stock)));
         self.condition.push(Condition::Operational);
         self.weapons.push(WeaponsStatus::Free);
         self.platoon.push(None);
         self.last_fired.push(None);
+        self.era.push(def.armour.era.as_ref().filter(|e| e.in_service.contains(year)).map_or(0, |e| e.tiles));
         self.smoke.push(SmokeState {
             salvos: def.smoke_launcher.as_ref().map_or(0, |l| l.salvos),
             engine_on: false,
@@ -278,6 +281,7 @@ impl World {
             }
             let sm = &self.smoke[k];
             h.u32(sm.salvos);
+            h.u32(self.era[k]);
             h.u8(sm.engine_on as u8);
             h.u64(sm.last_launch.unwrap_or(u64::MAX));
             if let Some(ai) = &self.ai[k] {

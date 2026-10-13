@@ -5,6 +5,7 @@
     name: "BULWARK A1",
     mirrors: "M1A1 Abrams",
     in_service: (from: 1985),
+    class: mbt,
     dimensions: (
         hull_length_m: (value: 7.92, source: "Hunnicutt, Abrams (1990), M1A1 characteristics", confidence: high),
         width_m: (value: 3.66, source: "Hunnicutt, Abrams (1990)", confidence: high),
@@ -66,13 +67,14 @@
     ),
     armament: (
         gun: "120 MM SMOOTHBORE",
-        load: [(ammo: "apfsds_120a", count: 40)],
+        load: [(ammo: "apfsds_120a", count: 24), (ammo: "heat_120a", count: 12), (ammo: "smoke_120", count: 4)],
         autoloader: false,
         reload_s: (value: 6.0, source: "estimate", confidence: estimate, notes: "Trained human loader from the ready rack."),
         turret_traverse_rad_s: (value: 0.7, source: "Hunnicutt, Abrams (1990): 360 deg in ~9 s", confidence: medium),
         max_engagement_range_m: (value: 3500.0, source: "estimate", confidence: estimate),
     ),
     armour: (
+        ce_factor: (value: 1.6, source: "open-source estimates: composite armour yields roughly 1.5-2x RHA against shaped charges relative to KE", confidence: estimate),
         turret_front: (value: 550.0, source: "open-source estimates (range ~470-650 mm)", confidence: estimate,
             notes: "Composite armour; public estimates vary widely. Chosen mid-range for a late-1980s A1."),
         turret_side: (value: 120.0, source: "estimate", confidence: estimate),

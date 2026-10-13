@@ -107,6 +107,20 @@ impl DataSet {
             smoke: load_ron(&root.join("combat/smoke.ron"))?,
             terrain,
         };
+        for a in &ds.ammo {
+            let bad = |what: &str| DataError { path: root.join("ammo"), message: format!("{}: {what}", a.id) };
+            match a.kind {
+                AmmoKind::Apfsds if a.rod().is_none() => return Err(bad("APFSDS needs rod_length/diameter/density")),
+                AmmoKind::Apds | AmmoKind::Heat | AmmoKind::HeFrag if a.flat_penetration_mm.is_none() => {
+                    return Err(bad("needs flat_penetration_mm"));
+                }
+                AmmoKind::Smoke => match &a.smoke {
+                    Some(s) if ds.smoke.kind(&s.kind).is_some() => {}
+                    _ => return Err(bad("smoke round needs a known smoke kind")),
+                },
+                _ => {}
+            }
+        }
         for v in &ds.vehicles {
             for l in &v.armament.load {
                 if ds.ammo(&l.ammo).is_none() {

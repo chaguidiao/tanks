@@ -1,0 +1,15 @@
+// Fictional wire/radio-guided anti-tank missile mirroring the 9M113 Konkurs class.
+(
+    id: "atgm_sk5",
+    name: "ATGM SK-5",
+    mirrors: "9M113 Konkurs",
+    kind: heat,
+    in_service: (from: 1975),
+    muzzle_velocity_mps: (value: 200.0, source: "open-source estimates: cruise speed ~200 m/s", confidence: low),
+    velocity_loss_mps_per_km: (value: 0.0, source: "a sustained rocket motor holds cruise speed", confidence: low),
+    flat_penetration_mm: (value: 650.0, source: "open-source estimates (~600-750 mm RHA)", confidence: low),
+    dispersion_mrad: (value: 0.2, source: "estimate", confidence: estimate, notes: "Guided: the operator steers out most of the error."),
+    reload_s: (value: 12.0, source: "estimate", confidence: estimate, notes: "Load the next missile; the gunner must also keep the sight on target to the end of flight."),
+    max_range_m: (value: 4000.0, source: "open-source estimates", confidence: low),
+    preferred_vs: [mbt],
+)

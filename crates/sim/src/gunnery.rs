@@ -8,7 +8,7 @@
 
 use ai::picture::{Condition, ContactLevel, WeaponsStatus};
 use rand_chacha::ChaCha8Rng;
-use sim_data::{AmmoDef, DamageTables, Outcomes, PenetrationModel, VehicleDef};
+use sim_data::{AmmoDef, AmmoKind, DamageTables, Outcomes, PenetrationModel, SmokeModel, VehicleDef};
 use terrain::hash::StableHasher;
 
 use crate::command::KillKind;
@@ -31,7 +31,12 @@ pub enum Phase {
 pub struct GunState {
     /// Turret azimuth (compass rad).
     pub turret: f64,
-    pub ammo: u32,
+    /// Rounds left per entry of the vehicle's loadout (`armament.load` order).
+    pub stock: Vec<u32>,
+    /// Round type the commander ordered; None = the crew picks by target class.
+    pub selected: Option<AmmoKind>,
+    /// Smoke shells to fire at a point (a fire mission); takes precedence over targets.
+    pub mission: Option<SmokeMission>,
     /// World index of the current target (from the crew's own tracks).
     pub target: Option<usize>,
     /// Target given by the platoon fire plan or a micro-order.
@@ -45,11 +50,20 @@ pub struct GunState {
     pub crew_loss: u8,
 }
 
+/// A smoke fire mission (point target), FM 3-11.50.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SmokeMission {
+    pub at: [f64; 2],
+    pub rounds_left: u32,
+}
+
 impl GunState {
-    pub fn new(heading: f64, ammo: u32) -> Self {
+    pub fn new(heading: f64, stock: Vec<u32>) -> Self {
         Self {
             turret: heading,
-            ammo,
+            stock,
+            selected: None,
+            mission: None,
             target: None,
             assigned: None,
             phase: Phase::Ready,
@@ -59,9 +73,25 @@ impl GunState {
         }
     }
 
+    /// Rounds left, all types.
+    pub fn rounds(&self) -> u32 {
+        self.stock.iter().sum()
+    }
+
     pub(crate) fn hash_into(&self, h: &mut StableHasher) {
         h.f64(self.turret);
-        h.u32(self.ammo);
+        for &n in &self.stock {
+            h.u32(n);
+        }
+        h.u8(self.selected.map_or(255, |k| k as u8));
+        match self.mission {
+            Some(m) => {
+                h.f64(m.at[0]);
+                h.f64(m.at[1]);
+                h.u32(m.rounds_left);
+            }
+            None => h.u8(0),
+        }
         h.u64(self.target.map_or(u64::MAX, |t| t as u64));
         h.u32(self.rounds_at_target);
         h.f64(self.bias.0);
@@ -97,14 +127,31 @@ pub fn elevation_sensitivity_mrad_per_m(a: &AmmoDef, r: f64) -> f64 {
 }
 
 /// Lanz–Odermatt long-rod penetration into RHA at normal incidence (mm).
-pub fn penetration_mm(p: &PenetrationModel, a: &AmmoDef, v: f64) -> f64 {
-    let l = a.rod_length_mm.get();
-    let ld = l / a.rod_diameter_mm.get();
-    let rho = a.rod_density_g_cm3.get();
+pub fn long_rod_penetration_mm(p: &PenetrationModel, length_mm: f64, diameter_mm: f64, rho: f64, v: f64) -> f64 {
+    let ld = length_mm / diameter_mm;
     let coth = 1.0 / libm::tanh(p.b0.get() + p.b1.get() * ld);
     let bhn = p.target_bhn.get();
     let e = libm::exp(-p.c.get() * bhn * bhn / (rho * v * v));
-    l * p.a.get() * coth * libm::sqrt(rho / p.target_density_g_cm3.get()) * e
+    length_mm * p.a.get() * coth * libm::sqrt(rho / p.target_density_g_cm3.get()) * e
+}
+
+/// Penetration into RHA at normal incidence for a round arriving at speed `v` (mm): long-rod
+/// model for APFSDS, the muzzle figure scaled by (v / v0)² for autocannon sabot (kinetic
+/// energy), a constant for shaped charges and HE (their effect does not depend on speed).
+pub fn penetration_mm(p: &PenetrationModel, a: &AmmoDef, v: f64) -> f64 {
+    let flat = || a.flat_penetration_mm.as_ref().map_or(0.0, |x| x.get());
+    match a.kind {
+        AmmoKind::Apfsds => {
+            let (l, d, rho) = a.rod().expect("validated at load");
+            long_rod_penetration_mm(p, l, d, rho, v)
+        }
+        AmmoKind::Apds => {
+            let r = v / a.muzzle_velocity_mps.get();
+            flat() * r * r
+        }
+        AmmoKind::Heat | AmmoKind::HeFrag => flat(),
+        AmmoKind::Smoke => 0.0,
+    }
 }
 
 // --- hit resolution -----------------------------------------------------------------------
@@ -126,6 +173,8 @@ pub struct ShotOutcome {
     pub penetrated: bool,
     pub kill: Option<KillKind>,
     pub sights_damaged: bool,
+    /// An ERA tile fired (and is spent on impact).
+    pub era_fired: bool,
 }
 
 /// Inputs describing the shot geometry.
@@ -188,12 +237,43 @@ fn roll(o: &Outcomes, exposed_factor: f64, u: f64) -> Option<KillKind> {
     None
 }
 
+fn face_of(bearing_to_shooter: f64, target_heading: f64) -> (Face, f64) {
+    let a = crate::wrap(bearing_to_shooter - target_heading).abs();
+    if a < std::f64::consts::FRAC_PI_4 {
+        (Face::Front, a)
+    } else if a > 3.0 * std::f64::consts::FRAC_PI_4 {
+        (Face::Rear, std::f64::consts::PI - a)
+    } else {
+        (Face::Side, (std::f64::consts::FRAC_PI_2 - a).abs())
+    }
+}
+
+/// Line-of-sight armour (mm RHA equivalent) the round must defeat. `turret` None averages hull
+/// and turret (used when choosing a round before the hit location is known).
+fn line_of_sight_armour(target: &VehicleDef, face: Face, obliq: f64, chemical: bool, turret: Option<bool>) -> f64 {
+    let ar = &target.armour;
+    let (t, h) = match face {
+        Face::Front => (ar.turret_front.get(), ar.hull_front.get()),
+        Face::Side => (ar.turret_side.get(), ar.hull_side.get()),
+        Face::Rear => (ar.turret_rear.get(), ar.hull_rear.get()),
+    };
+    let base = match turret {
+        Some(true) => t,
+        Some(false) => h,
+        None => 0.5 * (t + h),
+    };
+    let ce = if chemical { ar.ce_factor.get() } else { 1.0 };
+    base * ce / libm::cos(obliq.min(70f64.to_radians()))
+}
+
 /// Resolve one round: error sample → hit test against the visible silhouette → face and
-/// obliquity → penetration vs. armour → damage roll.
+/// obliquity → penetration vs. armour (ERA, KE or CE) → damage roll. `era_left` is the number of
+/// reactive tiles the target still carries.
 #[allow(clippy::too_many_arguments)]
 pub fn resolve(
     shooter: &VehicleDef,
     target: &VehicleDef,
+    era_left: u32,
     ammo: &AmmoDef,
     pen: &PenetrationModel,
     dmg: &DamageTables,
@@ -211,27 +291,27 @@ pub fn resolve(
     let hit = eh.abs() <= width / 2.0 && ev.abs() <= vis_h / 2.0;
     let impact_h = top - vis_h / 2.0 + ev;
     let turret = impact_h > d.hull_height_m.get();
-    let a = crate::wrap(g.bearing_to_shooter - g.target_heading).abs();
-    let (face, obliq) = if a < std::f64::consts::FRAC_PI_4 {
-        (Face::Front, a)
-    } else if a > 3.0 * std::f64::consts::FRAC_PI_4 {
-        (Face::Rear, std::f64::consts::PI - a)
-    } else {
-        (Face::Side, (std::f64::consts::FRAC_PI_2 - a).abs())
-    };
-    let ar = &target.armour;
-    let base = match (turret, face) {
-        (true, Face::Front) => ar.turret_front.get(),
-        (true, Face::Side) => ar.turret_side.get(),
-        (true, Face::Rear) => ar.turret_rear.get(),
-        (false, Face::Front) => ar.hull_front.get(),
-        (false, Face::Side) => ar.hull_side.get(),
-        (false, Face::Rear) => ar.hull_rear.get(),
-    };
-    let armour = base / libm::cos(obliq.min(70f64.to_radians()));
-    let p = penetration_mm(pen, ammo, velocity_at(ammo, g.range));
+    let (face, obliq) = face_of(g.bearing_to_shooter, g.target_heading);
+    let chemical = ammo.kind.is_chemical();
+    let mut armour = line_of_sight_armour(target, face, obliq, chemical, Some(turret));
+    let mut p = penetration_mm(pen, ammo, velocity_at(ammo, g.range));
     let u_dmg = uniform(rng);
     let u_sight = uniform(rng);
+    let u_era = uniform(rng);
+    let mut era_fired = false;
+    if hit
+        && era_left > 0
+        && face != Face::Rear
+        && let Some(era) = &target.armour.era
+        && u_era < era.coverage.get()
+    {
+        era_fired = true;
+        if chemical {
+            p *= 1.0 - era.ce_defeat.get();
+        } else {
+            armour += era.ke_gain_mm.get() / libm::cos(obliq.min(70f64.to_radians()));
+        }
+    }
     if !hit {
         return ShotOutcome {
             hit,
@@ -242,6 +322,7 @@ pub fn resolve(
             penetrated: false,
             kill: None,
             sights_damaged: false,
+            era_fired: false,
         };
     }
     let penetrated = p > armour;
@@ -255,18 +336,78 @@ pub fn resolve(
     };
     let kill = roll(table, if penetrated { exposed } else { 1.0 }, u_dmg);
     let sights_damaged = !penetrated && u_sight < dmg.non_penetration_sights.get();
-    ShotOutcome { hit, turret, face, penetration_mm: p, armour_mm: armour, penetrated, kill, sights_damaged }
+    ShotOutcome { hit, turret, face, penetration_mm: p, armour_mm: armour, penetrated, kill, sights_damaged, era_fired }
 }
 
-/// A round in flight; its outcome was sampled at the trigger pull and is applied on impact.
+/// Which round of the loadout the crew fires at a target: the commander's choice if stocked and
+/// in range, else the first round meant for the target's class that defeats its armour, else the
+/// one with the best margin (FM 3-20.12 ammunition selection by target type).
+#[allow(clippy::too_many_arguments)]
+pub fn select_round(
+    g: &GunState,
+    loadout: &[usize],
+    ammo: &[AmmoDef],
+    pen: &PenetrationModel,
+    target: &VehicleDef,
+    era_left: u32,
+    geo: &ShotGeometry,
+) -> Option<usize> {
+    let (face, obliq) = face_of(geo.bearing_to_shooter, geo.target_heading);
+    let usable = |li: usize| {
+        let a = &ammo[loadout[li]];
+        g.stock[li] > 0 && a.kind != AmmoKind::Smoke && a.max_range_m.as_ref().is_none_or(|m| geo.range <= m.get())
+    };
+    let margin = |li: usize| {
+        let a = &ammo[loadout[li]];
+        let chem = a.kind.is_chemical();
+        let mut p = penetration_mm(pen, a, velocity_at(a, geo.range));
+        if chem
+            && era_left > 0
+            && face != Face::Rear
+            && let Some(era) = &target.armour.era
+        {
+            p *= 1.0 - era.coverage.get() * era.ce_defeat.get();
+        }
+        p / line_of_sight_armour(target, face, obliq, chem, None)
+    };
+    let all: Vec<usize> = (0..loadout.len()).filter(|&li| usable(li)).collect();
+    if let Some(kind) = g.selected
+        && let Some(&li) = all.iter().find(|&&li| ammo[loadout[li]].kind == kind)
+    {
+        return Some(li);
+    }
+    if let Some(&li) =
+        all.iter().find(|&&li| ammo[loadout[li]].preferred_vs.contains(&target.class) && margin(li) >= 1.0)
+    {
+        return Some(li);
+    }
+    let mut best: Option<(usize, f64)> = None;
+    for &li in &all {
+        let m = margin(li);
+        if best.is_none_or(|(_, bm)| m > bm) {
+            best = Some((li, m));
+        }
+    }
+    best.map(|(li, _)| li)
+}
+
+/// What a round does when it lands.
+#[derive(Debug, Clone)]
+pub enum Effect {
+    /// Shot at a vehicle; its outcome was sampled at the trigger pull.
+    Shot { target: usize, outcome: ShotOutcome },
+    /// Smoke shell: `clouds` clouds of smoke kind `kind` at the impact point.
+    Smoke { kind: usize, clouds: u32 },
+}
+
+/// A round in flight.
 #[derive(Debug, Clone)]
 pub struct Projectile {
     pub impact_tick: u64,
     pub shooter: usize,
-    pub target: usize,
     pub from: [f64; 2],
     pub to: [f64; 2],
-    pub outcome: ShotOutcome,
+    pub effect: Effect,
 }
 
 /// Apply a damage result to the target. Returns the resulting kill kind for reporting.
@@ -357,10 +498,11 @@ pub struct FireEvent {
 pub fn step(
     world: &mut World,
     vehicles: &[VehicleDef],
-    ammo_of: &[usize],
+    loadouts: &[Vec<usize>],
     ammo: &[AmmoDef],
     pen: &PenetrationModel,
     dmg: &DamageTables,
+    smoke: &SmokeModel,
     engage_range: &[f64],
     tick: u64,
     rng: &mut ChaCha8Rng,
@@ -372,7 +514,12 @@ pub fn step(
         }
         let Some(vi) = world.vehicle[k] else { continue };
         let def = &vehicles[vi];
-        let a = &ammo[ammo_of[vi]];
+        if world.gun[k].as_ref().is_some_and(|g| g.mission.is_some()) {
+            if let Some(f) = smoke_mission(world, k, def, &loadouts[vi], ammo, smoke, tick, rng) {
+                fired.push(f);
+            }
+            continue;
+        }
         let max_range = def.armament.max_engagement_range_m.get().min(engage_range[world.side[k].0 as usize]);
         let target = if tick.is_multiple_of(crate::VEHICLE_AI_EVERY)
             || world.gun[k].as_ref().is_some_and(|g| g.target.is_none())
@@ -424,7 +571,7 @@ pub fn step(
             Phase::Reloading { .. } => Phase::Laying { left: 1.0 * slow }, // re-lay / adjust
             Phase::Lasing { .. } | Phase::Ready => Phase::Ready,
         };
-        if g.phase != Phase::Ready || g.ammo == 0 {
+        if g.phase != Phase::Ready || g.rounds() == 0 {
             continue;
         }
         // Fire.
@@ -444,7 +591,10 @@ pub fn step(
             crossing_speed: (tspeed * libm::sin(rel)).abs(),
             shooter_moving: speed > 1.0,
         };
+        let era_left = world.era[t];
         let g = world.gun[k].as_mut().expect("checked");
+        let Some(li) = select_round(g, &loadouts[vi], ammo, pen, tdef, era_left, &geo) else { continue };
+        let a = &ammo[loadouts[vi][li]];
         if g.rounds_at_target == 0 {
             let bs = bias_sigma_mrad(def, a, r);
             g.bias = (gauss(rng) * bs, gauss(rng) * bs * 0.5);
@@ -454,9 +604,10 @@ pub fn step(
         }
         let bias = g.bias;
         g.rounds_at_target += 1;
-        g.ammo -= 1;
-        g.phase = Phase::Reloading { left: def.armament.reload_s.get() * slow };
-        let outcome = resolve(def, tdef, a, pen, dmg, &geo, bias, rng);
+        g.stock[li] -= 1;
+        let reload = a.reload_s.as_ref().map_or(def.armament.reload_s.get(), |x| x.get());
+        g.phase = Phase::Reloading { left: reload * slow };
+        let outcome = resolve(def, tdef, era_left, a, pen, dmg, &geo, bias, rng);
         let tof = time_of_flight(a, r);
         let miss_offset = if outcome.hit { [0.0, 0.0] } else { [gauss(rng) * 6.0, gauss(rng) * 6.0 + 8.0] };
         world.last_fired[k] = Some(tick);
@@ -465,14 +616,67 @@ pub fn step(
             projectile: Projectile {
                 impact_tick: tick + (tof / DT).ceil() as u64,
                 shooter: k,
-                target: t,
                 from: pos,
                 to: [tp[0] + miss_offset[0], tp[1] + miss_offset[1]],
-                outcome,
+                effect: Effect::Shot { target: t, outcome },
             },
         });
     }
     fired
+}
+
+/// Fire mission with smoke shells: slew onto the aiming point, fire when the gun is ready.
+#[allow(clippy::too_many_arguments)]
+fn smoke_mission(
+    world: &mut World,
+    k: usize,
+    def: &VehicleDef,
+    loadout: &[usize],
+    ammo: &[AmmoDef],
+    smoke: &SmokeModel,
+    tick: u64,
+    rng: &mut ChaCha8Rng,
+) -> Option<FireEvent> {
+    let pos = world.transform[k].pos;
+    let traverse = def.armament.turret_traverse_rad_s.get();
+    let slow = 1.0 + 0.5 * world.gun[k].as_ref().map_or(0, |g| g.crew_loss) as f64;
+    let g = world.gun[k].as_mut().expect("checked");
+    let m = g.mission.expect("checked");
+    let Some(li) = (0..loadout.len()).find(|&li| g.stock[li] > 0 && ammo[loadout[li]].kind == AmmoKind::Smoke) else {
+        g.mission = None;
+        return None;
+    };
+    g.target = None;
+    g.rounds_at_target = 0;
+    let br = libm::atan2(m.at[0] - pos[0], m.at[1] - pos[1]);
+    let d = crate::wrap(br - g.turret);
+    g.turret = crate::wrap(g.turret + d.clamp(-traverse * DT, traverse * DT));
+    g.phase = match g.phase {
+        Phase::Reloading { left } if left > DT => Phase::Reloading { left: left - DT },
+        _ => Phase::Ready,
+    };
+    if g.phase != Phase::Ready || d.abs() > 0.02 {
+        return None;
+    }
+    let a = &ammo[loadout[li]];
+    let kind = a.smoke.as_ref().and_then(|s| smoke.kind(&s.kind).map(|i| (i, s.clouds)))?;
+    let r = dist(pos, m.at);
+    let scatter = a.dispersion_mrad.get() * r / 1000.0;
+    g.stock[li] -= 1;
+    g.phase = Phase::Reloading { left: a.reload_s.as_ref().map_or(def.armament.reload_s.get(), |x| x.get()) * slow };
+    g.mission = (m.rounds_left > 1).then_some(SmokeMission { at: m.at, rounds_left: m.rounds_left - 1 });
+    let to = [m.at[0] + gauss(rng) * scatter, m.at[1] + gauss(rng) * scatter];
+    world.last_fired[k] = Some(tick);
+    Some(FireEvent {
+        shooter: k,
+        projectile: Projectile {
+            impact_tick: tick + (time_of_flight(a, r) / DT).ceil() as u64,
+            shooter: k,
+            from: pos,
+            to,
+            effect: Effect::Smoke { kind: kind.0, clouds: kind.1 },
+        },
+    })
 }
 
 #[cfg(test)]
@@ -513,7 +717,7 @@ mod tests {
         let p2 = penetration_mm(&ds.penetration, &a, 1600.0);
         assert!(p2 > p1);
         let mut longer = a.clone();
-        longer.rod_length_mm.value *= 1.2;
+        longer.rod_length_mm.as_mut().unwrap().value *= 1.2;
         assert!(penetration_mm(&ds.penetration, &longer, 1500.0) > penetration_mm(&ds.penetration, &a, 1500.0));
     }
 
@@ -539,7 +743,7 @@ mod tests {
                 .filter(|_| {
                     let bs = bias_sigma_mrad(s, a, r);
                     let bias = (gauss(&mut rng) * bs, gauss(&mut rng) * bs * 0.5);
-                    resolve(s, t, a, &ds.penetration, &ds.damage, &geo, bias, &mut rng).hit
+                    resolve(s, t, 0, a, &ds.penetration, &ds.damage, &geo, bias, &mut rng).hit
                 })
                 .count();
             hits as f64 / n as f64

@@ -15,8 +15,8 @@ pub const STATUS_H: f32 = 24.0;
 /// Height of the bottom band (minimap, radio log, command card).
 pub const BAND_H: f32 = 190.0;
 
-/// Command card: 6 columns × 3 rows of cells.
-pub const CARD_COLS: usize = 6;
+/// Command card: 7 columns × 3 rows of cells.
+pub const CARD_COLS: usize = 7;
 pub const CELL_W: f32 = 76.0;
 pub const CELL_H: f32 = 52.0;
 pub const CELL_GAP: f32 = 4.0;

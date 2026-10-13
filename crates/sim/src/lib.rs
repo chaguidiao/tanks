@@ -82,8 +82,9 @@ pub struct Sim {
     map: Arc<BakedMap>,
     data: Arc<DataSet>,
     vehicles: Vec<VehicleDef>,
-    /// Per vehicle definition: index into `ammo` of its main round.
-    ammo_of: Vec<usize>,
+    /// Per vehicle definition: index into `ammo` for each entry of its loadout.
+    loadouts: Vec<Vec<usize>>,
+    round_labels: Vec<Vec<&'static str>>,
     ammo: Vec<AmmoDef>,
     world: World,
     incoming: Vec<TimedCommand>,
@@ -118,7 +119,7 @@ impl Sim {
         let mut world = World::default();
         let mut vehicles: Vec<VehicleDef> = Vec::new();
         let mut ammo: Vec<AmmoDef> = Vec::new();
-        let mut ammo_of = Vec::new();
+        let mut loadouts: Vec<Vec<usize>> = Vec::new();
         let mut platoons: Vec<platoon::Platoon> = Vec::new();
         let mut sides = Vec::new();
         let g = Ground::new(&map, &data.terrain);
@@ -142,27 +143,26 @@ impl Sim {
                     Some(i) => i,
                     None => {
                         vehicles.push(def.clone());
-                        // Main round: the first load entry in service at the scenario date.
-                        let round = def
-                            .armament
-                            .load
-                            .iter()
-                            .filter_map(|l| data.ammo(&l.ammo))
-                            .find(|a| a.in_service.contains(year))
-                            .or_else(|| def.armament.load.first().and_then(|l| data.ammo(&l.ammo)))
-                            .ok_or_else(|| format!("{}: no ammunition", def.id))?;
-                        let ai_ = match ammo.iter().position(|a| a.id == round.id) {
-                            Some(i) => i,
-                            None => {
-                                ammo.push(round.clone());
-                                ammo.len() - 1
-                            }
-                        };
-                        ammo_of.push(ai_);
+                        let mut lo = Vec::new();
+                        for l in &def.armament.load {
+                            let round = data.ammo(&l.ammo).ok_or_else(|| format!("{}: no ammunition", def.id))?;
+                            lo.push(match ammo.iter().position(|a| a.id == round.id) {
+                                Some(i) => i,
+                                None => {
+                                    ammo.push(round.clone());
+                                    ammo.len() - 1
+                                }
+                            });
+                        }
+                        loadouts.push(lo);
                         vehicles.len() - 1
                     }
                 };
-                let rounds: u32 = def.armament.load.iter().map(|l| l.count).sum();
+                // Rounds not yet in service at the side's date are not carried (unless none are).
+                let in_service = |id: &str| data.ammo(id).is_some_and(|a| a.in_service.contains(year));
+                let any = def.armament.load.iter().any(|l| in_service(&l.ammo));
+                let stock: Vec<u32> =
+                    def.armament.load.iter().map(|l| if !any || in_service(&l.ammo) { l.count } else { 0 }).collect();
                 let z = g.height(u.position[0], u.position[1]);
                 world.spawn_vehicle(
                     SideId(si as u8),
@@ -173,7 +173,7 @@ impl Sim {
                     z,
                     u.heading_deg.to_radians(),
                     year,
-                    rounds,
+                    stock,
                 );
                 let k = world.len() - 1;
                 if let Some(pc) = &u.platoon {
@@ -246,7 +246,8 @@ impl Sim {
             map,
             data,
             vehicles,
-            ammo_of,
+            round_labels: loadouts.iter().map(|lo| lo.iter().map(|&i| ammo[i].kind.label()).collect()).collect(),
+            loadouts,
             ammo,
             world,
             incoming: Vec::new(),
@@ -535,10 +536,11 @@ impl Sim {
         let fired = gunnery::step(
             &mut self.world,
             &self.vehicles,
-            &self.ammo_of,
+            &self.loadouts,
             &self.ammo,
             &self.data.penetration,
             &self.data.damage,
+            &self.data.smoke,
             &engage,
             tick,
             &mut self.rngs.gunnery,
@@ -546,26 +548,15 @@ impl Sim {
         for f in fired {
             let p = &f.projectile;
             let r = dist(p.from, p.to);
-            events.push(Event::Fired {
-                unit: self.world.id[f.shooter],
-                range_m: r,
-                from: p.from,
-                to: p.to,
-                hit: p.outcome.hit,
-            });
+            let hit = matches!(&p.effect, gunnery::Effect::Shot { outcome, .. } if outcome.hit);
+            events.push(Event::Fired { unit: self.world.id[f.shooter], range_m: r, from: p.from, to: p.to, hit });
             let shooter_side = self.world.side[f.shooter];
             for side in self.sides.iter_mut() {
                 let own = side.picture.side == shooter_side;
                 // The other side sees the shot if it already has the shooter as a contact.
                 let known = own || side.picture.contacts.iter().any(|c| !c.destroyed && dist(c.pos, p.from) < 300.0);
                 if known {
-                    side.add_shot(ShotView {
-                        from: p.from,
-                        to: p.to,
-                        time_s: tick as f64 * DT,
-                        hit: p.outcome.hit,
-                        own,
-                    });
+                    side.add_shot(ShotView { from: p.from, to: p.to, time_s: tick as f64 * DT, hit, own });
                 }
             }
             self.projectiles.push(f.projectile);
@@ -576,23 +567,36 @@ impl Sim {
             std::mem::take(&mut self.projectiles).into_iter().partition(|p| p.impact_tick <= tick);
         self.projectiles = flying;
         for p in hits {
-            let o = &p.outcome;
-            if self.world.alive(p.target) {
-                let bearing = ai::drive::bearing(self.world.transform[p.target].pos, p.from);
-                self.world.smoke[p.target].last_targeted = Some((tick, bearing));
+            let (target, o) = match &p.effect {
+                gunnery::Effect::Smoke { kind, clouds } => {
+                    for i in 0..*clouds {
+                        let a = i as f64 * 2.4;
+                        let off = if *clouds > 1 { 8.0 } else { 0.0 };
+                        self.smoke.add(*kind, [p.to[0] + libm::sin(a) * off, p.to[1] + libm::cos(a) * off]);
+                    }
+                    continue;
+                }
+                gunnery::Effect::Shot { target, outcome } => (*target, outcome),
+            };
+            if self.world.alive(target) {
+                let bearing = ai::drive::bearing(self.world.transform[target].pos, p.from);
+                self.world.smoke[target].last_targeted = Some((tick, bearing));
             }
-            let kill = if o.hit && self.world.alive(p.target) {
-                gunnery::apply_damage(&mut self.world, p.target, o.kill, o.sights_damaged)
+            let kill = if o.hit && self.world.alive(target) {
+                if o.era_fired {
+                    self.world.era[target] = self.world.era[target].saturating_sub(1);
+                }
+                gunnery::apply_damage(&mut self.world, target, o.kill, o.sights_damaged)
             } else {
                 None
             };
             events.push(Event::ShotResult { unit: self.world.id[p.shooter], hit: o.hit, kill });
             if o.hit {
-                events.push(Event::Hit { unit: self.world.id[p.target], penetrated: o.penetrated, kill });
+                events.push(Event::Hit { unit: self.world.id[target], penetrated: o.penetrated, kill });
             }
-            if kill.is_some() && self.world.condition[p.target] == Condition::Destroyed {
+            if kill.is_some() && self.world.condition[target] == Condition::Destroyed {
                 let s = self.world.side[p.shooter].0 as usize;
-                self.sides[s].mark_destroyed(self.world.transform[p.target].pos);
+                self.sides[s].mark_destroyed(self.world.transform[target].pos);
             }
         }
 
@@ -864,6 +868,33 @@ impl Sim {
                 events.push(Event::OrderReceived { side: c.side, to: *to });
             }
             Command::BreakContact { platoon } => self.break_contact(c.side, *platoon, events),
+            Command::SelectAmmo { to, kind } => {
+                for k in self.members(c.side, *to) {
+                    if let Some(g) = self.world.gun[k].as_mut() {
+                        g.selected = *kind;
+                    }
+                }
+                events.push(Event::OrderReceived { side: c.side, to: *to });
+            }
+            Command::FireSmoke { to, at, rounds } => {
+                let members: Vec<usize> = self
+                    .members(c.side, *to)
+                    .into_iter()
+                    .filter(|&k| self.world.alive(k) && self.world.condition[k] != Condition::FirepowerKill)
+                    .collect();
+                let n = members.len() as f64;
+                let from = members.first().map_or(*at, |&k| self.world.transform[k].pos);
+                let b = ai::drive::bearing(from, *at);
+                for (i, &k) in members.iter().enumerate() {
+                    // Spread the platoon's rounds across a screen, 40 m apart, square to the line of fire.
+                    let off = (i as f64 - (n - 1.0) / 2.0) * 40.0;
+                    let aim = [at[0] + libm::cos(b) * off, at[1] - libm::sin(b) * off];
+                    if let Some(g) = self.world.gun[k].as_mut() {
+                        g.mission = Some(gunnery::SmokeMission { at: aim, rounds_left: (*rounds).max(1) });
+                    }
+                }
+                events.push(Event::OrderReceived { side: c.side, to: *to });
+            }
             Command::AddGraphic { graphic } => {
                 let s = &mut self.sides[c.side.0 as usize];
                 s.next_graphic += 1;
@@ -910,7 +941,7 @@ impl Sim {
         for side in self.sides.iter_mut() {
             let views: Vec<_> =
                 self.platoons.iter().filter(|p| p.side == side.picture.side).map(|p| p.view(&self.world)).collect();
-            side.rebuild_own(&self.world, &self.vehicles, &views, self.tick);
+            side.rebuild_own(&self.world, &self.vehicles, &self.round_labels, &views, self.tick);
         }
         for (dst, src) in self.pictures.iter_mut().zip(&self.sides) {
             dst.clone_from(&src.picture);

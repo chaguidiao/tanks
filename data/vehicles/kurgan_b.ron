@@ -5,6 +5,7 @@
     name: "KURGAN-B",
     mirrors: "T-72B",
     in_service: (from: 1985),
+    class: mbt,
     dimensions: (
         hull_length_m: (value: 6.95, source: "Zaloga, T-72 Main Battle Tank 1974-93 (Osprey, 1993)", confidence: medium),
         width_m: (value: 3.59, source: "Zaloga, T-72 (Osprey, 1993)", confidence: medium),
@@ -67,13 +68,21 @@
     ),
     armament: (
         gun: "125 MM SMOOTHBORE",
-        load: [(ammo: "apfsds_125b", count: 44)],
+        load: [(ammo: "apfsds_125b", count: 22), (ammo: "hefrag_125", count: 14), (ammo: "heat_125", count: 8)],
         autoloader: true,
         reload_s: (value: 7.1, source: "Zaloga, T-72 (Osprey, 1993): autoloader cycle", confidence: medium),
         turret_traverse_rad_s: (value: 0.42, source: "estimate", confidence: estimate),
         max_engagement_range_m: (value: 3000.0, source: "estimate", confidence: estimate),
     ),
     armour: (
+        ce_factor: (value: 1.3, source: "open-source estimates: special-armour insert and glacis laminate give a modest edge against shaped charges", confidence: estimate),
+        era: (
+            in_service: (from: 1988),
+            tiles: 90,
+            coverage: (value: 0.7, source: "estimate: tiles cover the glacis, turret front and side skirts but not every spot", confidence: estimate),
+            ce_defeat: (value: 0.6, source: "open-source estimates: first-generation ERA (Kontakt-1 class) cuts HEAT penetration by roughly half to two thirds", confidence: low),
+            ke_gain_mm: (value: 15.0, source: "open-source estimates: first-generation ERA adds little against long-rod penetrators", confidence: low),
+        ),
         turret_front: (value: 520.0, source: "open-source estimates (range ~450-550 mm vs KE)", confidence: estimate,
             notes: "Cast turret with special armour insert; ERA does not help against KE in this era."),
         turret_side: (value: 110.0, source: "estimate", confidence: estimate),

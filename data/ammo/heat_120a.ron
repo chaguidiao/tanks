@@ -1,0 +1,14 @@
+// Fictional 120 mm multipurpose HEAT mirroring the M830 class (mid-1980s).
+(
+    id: "heat_120a",
+    name: "HEAT-MP 120-A",
+    mirrors: "M830",
+    kind: heat,
+    in_service: (from: 1985),
+    muzzle_velocity_mps: (value: 1140.0, source: "Jane's Ammunition Handbook (open editions)", confidence: low),
+    velocity_loss_mps_per_km: (value: 50.0, source: "estimate", confidence: estimate, notes: "Fin-stabilised HEAT sheds speed faster than a sabot; the jet does not depend on it."),
+    flat_penetration_mm: (value: 480.0, source: "open-source estimates for HEAT-MP (range ~430-500 mm RHA)", confidence: low,
+        notes: "Shaped-charge penetration is nearly independent of range."),
+    dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate, notes: "Larger than a sabot: lower velocity, fin-stabilised."),
+    preferred_vs: [ifv, recon],
+)

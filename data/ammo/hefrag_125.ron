@@ -1,0 +1,14 @@
+// Fictional 125 mm HE-FRAG mirroring the 3OF19 class.
+(
+    id: "hefrag_125",
+    name: "HE-FRAG 125",
+    mirrors: "3OF19",
+    kind: he_frag,
+    in_service: (from: 1972),
+    muzzle_velocity_mps: (value: 850.0, source: "open-source estimates", confidence: low),
+    velocity_loss_mps_per_km: (value: 60.0, source: "estimate", confidence: estimate),
+    flat_penetration_mm: (value: 120.0, source: "estimate", confidence: estimate,
+        notes: "Not penetration in the KE sense: the blast and fragments defeat thin armour (light vehicles) and not tank armour, which a hit then only shakes and may blind."),
+    dispersion_mrad: (value: 0.7, source: "estimate", confidence: estimate),
+    preferred_vs: [ifv, recon],
+)

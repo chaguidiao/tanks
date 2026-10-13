@@ -64,6 +64,12 @@ pub struct OwnUnit {
     pub speed: f64,
     pub fuel_fraction: f64,
     pub ammo: u32,
+    /// Rounds left per type: (type label, count), in loadout order.
+    pub rounds: Vec<(String, u32)>,
+    /// Round type the commander ordered; None = crew's choice.
+    pub ammo_selected: Option<String>,
+    /// Reactive armour tiles left.
+    pub era_left: u32,
     pub condition: Condition,
     pub weapons: WeaponsStatus,
     pub task: Task,

@@ -315,6 +315,8 @@ fn vehicle_sheet(ds: &DataSet, v: &VehicleDef) -> Sheet {
     }
     l.extend([
         section("ARMOUR (RHA EQUIVALENT VS KE, NORMAL ATTACK)"),
+        fact("CLASS", v.class.label()),
+        stat("CE FACTOR (SHAPED-CHARGE PROTECTION)", &v.armour.ce_factor, |x| format!("× {x:.2}")),
         stat("TURRET FRONT", &v.armour.turret_front, mm),
         stat("TURRET SIDE", &v.armour.turret_side, mm),
         stat("TURRET REAR", &v.armour.turret_rear, mm),
@@ -322,11 +324,18 @@ fn vehicle_sheet(ds: &DataSet, v: &VehicleDef) -> Sheet {
         stat("HULL SIDE", &v.armour.hull_side, mm),
         stat("HULL REAR", &v.armour.hull_rear, mm),
     ]);
-    let threats: Vec<&AmmoDef> = ds.ammo.iter().collect();
+    if let Some(e) = &v.armour.era {
+        l.push(section("EXPLOSIVE REACTIVE ARMOUR (FRONT AND SIDES)"));
+        l.push(fact("TILES", format!("{} · IN SERVICE {}", e.tiles, years(&e.in_service))));
+        l.push(stat("COVERAGE", &e.coverage, |x| format!("{:.0} % OF HITS", x * 100.0)));
+        l.push(stat("VS SHAPED CHARGE", &e.ce_defeat, |x| format!("{:.0} % PENETRATION REMOVED", x * 100.0)));
+        l.push(stat("VS KINETIC", &e.ke_gain_mm, |x| format!("+{x:.0} MM RHA")));
+    }
+    let threats: Vec<&AmmoDef> = ds.ammo.iter().filter(|a| a.kind != sim_data::AmmoKind::Smoke).collect();
     if !threats.is_empty() {
         l.push(section("FRONTAL ARMOUR DEFEATED BY"));
         for t in threats {
-            l.push(calc(&t.name, defeat_text(ds, t, v), "LANZ–ODERMATT PENETRATION AT REMAINING VELOCITY ≥ ARMOUR"));
+            l.push(calc(&t.name, defeat_text(ds, t, v), DEFEAT_FORMULA));
         }
     }
     Sheet {
@@ -352,25 +361,44 @@ fn range_text(r: Option<f64>) -> String {
     }
 }
 
+/// Armour as seen by `a`: chemical rounds meet the CE-equivalent thickness (ERA not counted).
+fn armour_vs(a: &AmmoDef, v: &VehicleDef, mm: f64) -> f64 {
+    if a.kind.is_chemical() { mm * v.armour.ce_factor.get() } else { mm }
+}
+
 fn defeat_text(ds: &DataSet, a: &AmmoDef, v: &VehicleDef) -> String {
     format!(
         "TURRET FRONT {}  ·  HULL FRONT {}",
-        range_text(defeat_range(ds, a, v.armour.turret_front.get())),
-        range_text(defeat_range(ds, a, v.armour.hull_front.get()))
+        range_text(defeat_range(ds, a, armour_vs(a, v, v.armour.turret_front.get()))),
+        range_text(defeat_range(ds, a, armour_vs(a, v, v.armour.hull_front.get())))
     )
 }
+
+const DEFEAT_FORMULA: &str =
+    "PENETRATION AT REMAINING VELOCITY ≥ ARMOUR (CHEMICAL ROUNDS: × CE FACTOR; ERA NOT COUNTED)";
 
 fn ammo_sheet(ds: &DataSet, a: &AmmoDef) -> Sheet {
     let mut l = vec![
         section("PROJECTILE"),
         stat("MUZZLE VELOCITY", &a.muzzle_velocity_mps, |x| format!("{x:.0} M/S")),
         stat("VELOCITY LOSS", &a.velocity_loss_mps_per_km, |x| format!("{x:.0} M/S PER KM")),
-        stat("ROD LENGTH", &a.rod_length_mm, mm),
-        stat("ROD DIAMETER", &a.rod_diameter_mm, mm),
-        calc("LENGTH / DIAMETER", format!("{:.0}", a.rod_length_mm.get() / a.rod_diameter_mm.get()), "L / D"),
-        stat("ROD DENSITY", &a.rod_density_g_cm3, |x| format!("{x:.1} G/CM³")),
         stat("DISPERSION", &a.dispersion_mrad, mrad),
     ];
+    if let (Some(len), Some(dia), Some(rho)) = (&a.rod_length_mm, &a.rod_diameter_mm, &a.rod_density_g_cm3) {
+        l.push(stat("ROD LENGTH", len, mm));
+        l.push(stat("ROD DIAMETER", dia, mm));
+        l.push(calc("LENGTH / DIAMETER", format!("{:.0}", len.get() / dia.get()), "L / D"));
+        l.push(stat("ROD DENSITY", rho, |x| format!("{x:.1} G/CM³")));
+    }
+    if let Some(p) = &a.flat_penetration_mm {
+        l.push(stat("PENETRATION (RHA, NORMAL)", p, mm));
+    }
+    if let Some(r) = &a.reload_s {
+        l.push(stat("CYCLE TIME", r, |x| format!("{x:.1} S")));
+    }
+    if let Some(r) = &a.max_range_m {
+        l.push(stat("MAXIMUM RANGE", r, |x| format!("{x:.0} M")));
+    }
     if let Some(p) = &a.reference_penetration_2km_mm {
         l.push(stat("PUBLISHED PENETRATION, 2 KM", p, |x| format!("{x:.0} MM RHA (VALIDATION ONLY)")));
     }
@@ -385,21 +413,19 @@ fn ammo_sheet(ds: &DataSet, a: &AmmoDef) -> Sheet {
                 gunnery::drop_at(a, r),
                 gunnery::penetration_mm(&ds.penetration, a, v)
             ),
-            "VELOCITY: LINEAR LOSS; DROP: G·T²/2; PENETRATION: LANZ–ODERMATT (COMBAT MODELS)",
+            "VELOCITY: LINEAR LOSS; DROP: G·T²/2; PENETRATION: LANZ–ODERMATT (APFSDS), FLAT (OTHERS)",
         ));
     }
     l.push(section("DEFEATS FRONTAL ARMOUR OF"));
-    for v in &ds.vehicles {
-        l.push(calc(&v.name, defeat_text(ds, a, v), "LANZ–ODERMATT PENETRATION AT REMAINING VELOCITY ≥ ARMOUR"));
+    for v in ds.vehicles.iter().filter(|_| a.kind != sim_data::AmmoKind::Smoke) {
+        l.push(calc(&v.name, defeat_text(ds, a, v), DEFEAT_FORMULA));
     }
     l.push(section("CARRIED BY"));
     for v in ds.vehicles.iter().filter(|v| v.armament.load.iter().any(|x| x.ammo == a.id)) {
         let n: u32 = v.armament.load.iter().filter(|x| x.ammo == a.id).map(|x| x.count).sum();
         l.push(fact(&v.name, format!("{n} ROUNDS · {}", v.armament.gun)));
     }
-    let kind = match a.kind {
-        sim_data::AmmoKind::Apfsds => "APFSDS",
-    };
+    let kind = a.kind.label();
     Sheet {
         title: a.name.clone(),
         sub: format!("MIRRORS {} · {kind} · IN SERVICE {}", a.mirrors.to_uppercase(), years(&a.in_service)),
@@ -873,7 +899,7 @@ mod tests {
     #[test]
     fn defeat_range_is_monotonic_in_armour() {
         let ds = ds();
-        let a = &ds.ammo[0];
+        let a = ds.ammo.iter().find(|a| a.kind == sim_data::AmmoKind::Apfsds).unwrap();
         let thin = defeat_range(&ds, a, 50.0);
         assert_eq!(thin, Some(5000.0), "50 mm is defeated at any range");
         assert_eq!(defeat_range(&ds, a, 5000.0), None);

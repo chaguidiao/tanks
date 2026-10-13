@@ -1,0 +1,14 @@
+// Fictional 30 mm HE-T autocannon round, fired in bursts.
+(
+    id: "he_30",
+    name: "HE-T 30",
+    mirrors: "30 mm HE-T",
+    kind: he_frag,
+    in_service: (from: 1975),
+    muzzle_velocity_mps: (value: 960.0, source: "open-source estimates", confidence: low),
+    velocity_loss_mps_per_km: (value: 120.0, source: "estimate", confidence: estimate),
+    flat_penetration_mm: (value: 20.0, source: "estimate", confidence: estimate, notes: "Defeats only the thinnest armour (light reconnaissance vehicles, rear and roof of IFVs)."),
+    dispersion_mrad: (value: 1.0, source: "estimate", confidence: estimate),
+    max_range_m: (value: 2000.0, source: "estimate", confidence: estimate),
+    preferred_vs: [ifv, recon],
+)

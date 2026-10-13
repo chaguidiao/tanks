@@ -10,6 +10,8 @@ pub struct VehicleDef {
     /// The real design it mirrors (documentation only).
     pub mirrors: String,
     pub in_service: ServiceDates,
+    /// Role class: ammunition selection and target priority use it.
+    pub class: VehicleClass,
     pub dimensions: Dimensions,
     pub mobility: MobilityDef,
     pub gun: GunLimits,
@@ -25,6 +27,28 @@ pub struct VehicleDef {
     /// Engine exhaust smoke.
     #[serde(default)]
     pub engine_smoke: Option<crate::EngineSmokeDef>,
+}
+
+/// What a vehicle is, as a crew would call it when recognising it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VehicleClass {
+    /// Main battle tank.
+    Mbt,
+    /// Infantry fighting vehicle (autocannon, often an ATGM).
+    Ifv,
+    /// Light reconnaissance vehicle.
+    Recon,
+}
+
+impl VehicleClass {
+    pub fn label(self) -> &'static str {
+        match self {
+            VehicleClass::Mbt => "TANK",
+            VehicleClass::Ifv => "IFV",
+            VehicleClass::Recon => "RECON",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,12 +116,33 @@ pub struct ArmamentDef {
 /// Line-of-sight RHA equivalence against KE at normal attack on each face (mm).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArmourDef {
+    /// Multiplier from the KE values below to RHA equivalence against shaped charges
+    /// (composite and special armour defeat jets better than rods).
+    pub ce_factor: Stat<f64>,
+    /// Explosive reactive armour fitted to the front and sides.
+    #[serde(default)]
+    pub era: Option<EraDef>,
     pub turret_front: Stat<f64>,
     pub turret_side: Stat<f64>,
     pub turret_rear: Stat<f64>,
     pub hull_front: Stat<f64>,
     pub hull_side: Stat<f64>,
     pub hull_rear: Stat<f64>,
+}
+
+/// Explosive reactive armour: a finite number of tiles on the front and sides. A hit on a
+/// covered spot fires the tile, which disrupts a jet (and slightly a rod) and is then spent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EraDef {
+    pub in_service: ServiceDates,
+    /// Tiles carried; each spent by one hit.
+    pub tiles: u32,
+    /// Probability that a hit on the front or a side strikes a tile (rear is not covered).
+    pub coverage: Stat<f64>,
+    /// Fraction of shaped-charge penetration removed when a tile fires.
+    pub ce_defeat: Stat<f64>,
+    /// RHA equivalence added against kinetic rounds when a tile fires (mm).
+    pub ke_gain_mm: Stat<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,7 +157,45 @@ pub enum AmmoStowage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AmmoKind {
+    /// Long-rod sabot (Lanz–Odermatt penetration).
     Apfsds,
+    /// Armour-piercing discarding sabot from an autocannon: flat penetration scaled by v².
+    Apds,
+    /// Shaped charge (HEAT, also guided missiles): flat penetration, fights CE armour and ERA.
+    Heat,
+    /// High-explosive fragmentation: defeats only light armour, otherwise a non-penetrating hit.
+    HeFrag,
+    /// Smoke shell: no effect on target, makes clouds.
+    Smoke,
+}
+
+impl AmmoKind {
+    pub const ALL: [AmmoKind; 5] =
+        [AmmoKind::Apfsds, AmmoKind::Apds, AmmoKind::Heat, AmmoKind::HeFrag, AmmoKind::Smoke];
+
+    /// Shaped-charge rounds meet the chemical-energy armour values.
+    pub fn is_chemical(self) -> bool {
+        matches!(self, AmmoKind::Heat | AmmoKind::HeFrag)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AmmoKind::Apfsds => "APFSDS",
+            AmmoKind::Apds => "APDS",
+            AmmoKind::Heat => "HEAT",
+            AmmoKind::HeFrag => "HE-FRAG",
+            AmmoKind::Smoke => "SMOKE",
+        }
+    }
+}
+
+/// What a smoke shell makes where it lands.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AmmoSmoke {
+    /// Id in `data/combat/smoke.ron`.
+    pub kind: String,
+    /// Clouds per round (a shell makes one; a base-ejection round a few).
+    pub clouds: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,14 +208,44 @@ pub struct AmmoDef {
     pub muzzle_velocity_mps: Stat<f64>,
     /// Velocity lost per km of flight (m/s per km); APFSDS loses tens of m/s per km.
     pub velocity_loss_mps_per_km: Stat<f64>,
-    pub rod_length_mm: Stat<f64>,
-    pub rod_diameter_mm: Stat<f64>,
-    pub rod_density_g_cm3: Stat<f64>,
+    /// Long-rod geometry (APFSDS only).
+    #[serde(default)]
+    pub rod_length_mm: Option<Stat<f64>>,
+    #[serde(default)]
+    pub rod_diameter_mm: Option<Stat<f64>>,
+    #[serde(default)]
+    pub rod_density_g_cm3: Option<Stat<f64>>,
+    /// RHA penetration at the muzzle for APDS / HEAT / HE-FRAG (mm).
+    #[serde(default)]
+    pub flat_penetration_mm: Option<Stat<f64>>,
+    /// Time to ready the next round after firing this one, where it differs from the
+    /// weapon's reload (guided missiles, heavy rounds) (s).
+    #[serde(default)]
+    pub reload_s: Option<Stat<f64>>,
+    /// Longest range this round is fired at (m); None = the weapon's limit.
+    #[serde(default)]
+    pub max_range_m: Option<Stat<f64>>,
+    /// Target classes the crew picks this round for, in the AI's first choice.
+    #[serde(default)]
+    pub preferred_vs: Vec<VehicleClass>,
+    #[serde(default)]
+    pub smoke: Option<AmmoSmoke>,
     /// Round-to-round dispersion, 1σ (mrad).
     pub dispersion_mrad: Stat<f64>,
     /// Published/estimated penetration at 2 km into RHA at normal (mm), for validation only.
     #[serde(default)]
     pub reference_penetration_2km_mm: Option<Stat<f64>>,
+}
+
+impl AmmoDef {
+    /// Rod length, diameter and density for long-rod rounds.
+    pub fn rod(&self) -> Option<(f64, f64, f64)> {
+        Some((
+            self.rod_length_mm.as_ref()?.get(),
+            self.rod_diameter_mm.as_ref()?.get(),
+            self.rod_density_g_cm3.as_ref()?.get(),
+        ))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

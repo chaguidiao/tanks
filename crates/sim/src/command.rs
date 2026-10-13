@@ -90,6 +90,18 @@ pub enum Command {
         to: Addressee,
         mode: SmokeMode,
     },
+    /// Choose the round type the crews fire (None = crews pick by target class).
+    SelectAmmo {
+        to: Addressee,
+        kind: Option<sim_data::AmmoKind>,
+    },
+    /// Fire smoke shells at a point (tank main gun): `rounds` per vehicle, screening a line square
+    /// to the line of fire when several vehicles fire.
+    FireSmoke {
+        to: Addressee,
+        at: Vec2,
+        rounds: u32,
+    },
     /// Battle drill "break contact" (ATP 3-20.15 App. F): screen with smoke and withdraw from the
     /// threat, bypassing the react-to-contact halt.
     BreakContact {

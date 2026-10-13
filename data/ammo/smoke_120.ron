@@ -1,0 +1,12 @@
+// Fictional 120 mm white-phosphorus smoke shell (FM 3-11.50: tank gun smoke for screening).
+(
+    id: "smoke_120",
+    name: "SMOKE WP 120",
+    mirrors: "120 mm WP smoke",
+    kind: smoke,
+    in_service: (from: 1975),
+    muzzle_velocity_mps: (value: 1000.0, source: "estimate", confidence: estimate),
+    velocity_loss_mps_per_km: (value: 70.0, source: "estimate", confidence: estimate),
+    dispersion_mrad: (value: 0.8, source: "estimate", confidence: estimate, notes: "Area target: a few tens of metres at 2 km is of no consequence."),
+    smoke: (kind: "shell", clouds: 1),
+)
