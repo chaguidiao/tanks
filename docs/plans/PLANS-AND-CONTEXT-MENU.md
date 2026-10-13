@@ -1,6 +1,6 @@
 # Execution plan: checkpoint plans and the map context menu
 
-Status: **proposed** (2026-10-13). Hand-off document for the implementing agent.
+Status: **approved, scheduled before M7e** (2026-10-13). Hand-off document for the implementing agent.
 Read `CLAUDE.md`, `docs/DESIGN.md` §8 and §10 and decisions #14 and #16 (§14) first.
 
 ## 1. Goal
@@ -70,6 +70,9 @@ pub struct PlanStep {
     pub actions: Vec<StepAction>,
     /// Hold at this CP until met. None = continue at once (pass-through if no actions).
     pub wait: Option<ConditionSet>,
+    /// Done when the wait is met, before departing (the "on HAMMER: smoke, fire, go" part of a
+    /// synchronised action). Same action set as `actions`.
+    pub on_release: Vec<StepAction>,
     /// While on the leg to this CP or waiting at it: if met, jump to step `goto`.
     pub branch: Option<Branch>,
 }
@@ -161,7 +164,8 @@ Per platoon, each 1 Hz tick, in platoon order (determinism):
    runner must not treat that as arrival or as a new order.
 5. Acting: run `actions` in order; `OccupyBp` completes when the BP order reports set
    (`reported: true`). Then Waiting if `wait` is Some, else next step.
-6. Waiting: when `wait` is met, advance. Last step done → plan finished, report.
+6. Waiting: report `AtCheckpoint { waiting: true }` once, then when `wait` is met run
+   `on_release` (same rules as `actions`) and advance. Last step done → plan finished, report.
 
 Contact reaction: `contact_drill` reads `p.contact_reaction` (default `Drill` = today's
 behaviour, so existing tests and the golden hash do not change). `Continue` skips the halt;
@@ -224,7 +228,8 @@ Menus by target (first item is the default):
   VIEWSHED HERE · NEXT ORDER ▸ NOW / ON ENEMY CROSSING / IN 5 MIN (the existing contingency).
 - **Plan CP**: LEG TO CP ▸ SPEED / FORMATION / TECHNIQUE / WEAPONS / ON CONTACT · AT CP ▸
   FACE… / OCCUPY BP… / SMOKE SCREEN / FIRE SMOKE AT… / CALL FOR FIRE AT… / REPORT · WAIT ▸
-  CODE WORD / TIME / FOR N MIN / ENEMY CROSSES PL… / PLT REACHES CP… / NONE · IF ON LEG ▸
+  CODE WORD / TIME / FOR N MIN / ENEMY CROSSES PL… / PLT REACHES CP… / NONE · ON RELEASE ▸
+  (same actions as AT CP) · IF ON LEG ▸
   CONTACT / UNDER FIRE / STRENGTH ≤ N → GO TO CP… · INSERT CP BEFORE · DELETE CP ·
   START HERE (skip) · CLEAR PLAN. Items ending in `…` enter a targeting tool (click a point or
   bearing on the map; right-click cancels), reusing the existing `Tool` variants.
@@ -252,9 +257,15 @@ Menus by target (first item is the default):
   button PLAN (hotkey P) starts a draft from the platoon's current route (or empty) and CPs are
   added with left clicks, then edited with the menu.
 
-### 4.4 Code words
+### 4.4 Code words (synchronised execution)
+A code word is the synchronisation tool: several platoons move to their CPs, each waits on the
+same word, and one press releases all of them at once, each running its own `on_release` actions
+(smoke, call for fire, move) and next leg. Readiness comes from the platoons' own reports, not
+truth: a platoon counts as READY once it has reported `AtCheckpoint { waiting: true }` (and its
+BP, if any, is set).
 - A code-word strip on the command card (or top bar) lists the words used by sent plans, with
-  hotkeys Ctrl+1…9 and the platoons waiting on each (`HAMMER: 1 PLT, 3 PLT`). Pressing one sends
+  hotkeys Ctrl+1…9 and the platoons waiting on each and their readiness (`HAMMER  1 PLT SET · 3 PLT MOVING`, `HAMMER  ALL SET`); an
+  optional auto-pause option "all set on a code word" stops the clock when the last one reports. Pressing one sends
   `CodeWord`; the radio shows a terse broadcast (follow the existing brevity style in
   `radio_text`).
 
@@ -285,7 +296,9 @@ arrival, `Face`/`Report` actions, `wait` with `AtTime`/`Elapsed`, plan view, rep
 (and `control::met`, `reference_sign`, `describe`), `ConditionSet`, branches, all
 `StepAction`s, `SetContactReaction`, `CodeWord`, doctrine `code_words`, `OwnUnit.last_hit_s`
 (or equivalent) for `UnderFire`. Doc-comment each behaviour with its doctrine source. Tests:
-1. Wait for code word: holds 300 s, moves within 2 s of `CodeWord`.
+1. Wait for code word: holds 300 s, moves within 2 s of `CodeWord`. Two platoons waiting on the
+   same word both depart within the same 1 Hz tick, and `on_release` (`SmokeScreen`,
+   `CallForFire`) runs before the departure.
 2. `Continue` under contact: never enters `Contact`; `Drill` (default) does.
 3. Branch on contact during leg 2 → reaches the branch CP; smoke launched when the action list
    has `SmokeScreen`.
@@ -307,16 +320,28 @@ of a simple plan (RON or `1:x,y,x,y` plus `--keys`) for screenshots and AAR chec
 (menus + accelerators), runs to completion on the demo map, and the replay verifies with
 `tanks-headless replay`.
 
-**P5 — Code words, radio, docs.** Code-word strip, radio text, AAR shows code words on the
+**P5 — Code words, radio, docs.** Code-word strip with readiness, radio text, AAR shows code words on the
 timeline (if cheap), DESIGN.md §8.3 (plans, contact reaction, code words), §10.3
-(right-click/menu/plan editing), §13.1 status + deferred list, §14 #22–#24, CLAUDE.md codebase
+(right-click/menu/plan editing), §13 roadmap row for this work (before M7e) and
+§13.1 status + deferred list, the status line in CLAUDE.md, §14 #22–#24, CLAUDE.md codebase
 map (`plan.rs`, tests file, CLI flags), REFERENCES.md (TacOps, FM 6-0, Steel Beasts route
 conditions).
 
 Order of work: P0 → P1 → P2 can run before or in parallel with P3 (P3 only needs existing
 orders) → P4 → P5. Do not start P4 before P1 lands (the client edits `ai::picture::Plan`).
 
-## 6. Risks and checks
+## 6. Realism notes (keep these honest in DESIGN.md)
+- Execution on a code word, checkpoints, phase lines and event triggers are real control
+  measures (FM 6-0 "on order" / execution matrix, ADP 3-90). Real orders are mostly given as
+  intent plus a few such measures, and subordinates use initiative (mission command); a long
+  rigid script is less realistic than a short plan with contingencies. Keep defaults that let
+  the platoon AI act on its own (contact drill on unless the player chose otherwise).
+- Simplifications in v1: a code word reaches every platoon instantly and is never missed (no
+  acknowledgement, no jamming); readiness is reported perfectly. Tier 2 communications effects
+  (DESIGN.md §13.2) can later add a short delay and missed transmissions through the same
+  `CodeWord` path.
+
+## 7. Risks and checks
 - **Golden hash drift**: defaults must reproduce today's behaviour (`ContactReaction::Drill`,
   no plan). Update the hash only for an intended change and say why in the commit.
 - **Runner fighting the contact drill / BP order**: the arrival and resume rules in §3.3 are the
