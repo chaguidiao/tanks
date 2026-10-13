@@ -83,4 +83,12 @@
         hull_rear: (value: 40.0, source: "estimate", confidence: estimate),
     ),
     ammo_stowage: exposed,
+    smoke_launcher: (
+        kinds: ["grenade"],
+        salvos: 1,
+        clouds_per_salvo: 4,
+        range_m: (value: 50.0, source: "Zaloga, T-72 (Osprey, 1993): 902B launcher, eight 81 mm tubes on the turret front", confidence: low),
+        arc_deg: (value: 70.0, source: "estimate", confidence: estimate, notes: "Tubes fixed in a fan on the turret front; fires one salvo per reload."),
+    ),
+    engine_smoke: (kinds: ["engine"]),
 )

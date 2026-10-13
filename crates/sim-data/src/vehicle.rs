@@ -19,6 +19,12 @@ pub struct VehicleDef {
     pub armament: ArmamentDef,
     pub armour: ArmourDef,
     pub ammo_stowage: AmmoStowage,
+    /// Self-screening smoke grenade launchers.
+    #[serde(default)]
+    pub smoke_launcher: Option<crate::SmokeLauncherDef>,
+    /// Engine exhaust smoke.
+    #[serde(default)]
+    pub engine_smoke: Option<crate::EngineSmokeDef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

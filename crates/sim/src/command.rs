@@ -12,6 +12,14 @@ pub enum Addressee {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SmokeMode {
+    /// Fire a grenade salvo now, towards the nearest known threat (or ahead).
+    Screen,
+    EngineOn,
+    EngineOff,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PositionKind {
     HullDown,
     TurretDown,
@@ -76,6 +84,16 @@ pub enum Command {
     Engage {
         unit: EntityId,
         contact: ContactId,
+    },
+    /// Employ smoke: screen now, or switch engine smoke on or off.
+    Smoke {
+        to: Addressee,
+        mode: SmokeMode,
+    },
+    /// Battle drill "break contact" (ATP 3-20.15 App. F): screen with smoke and withdraw from the
+    /// threat, bypassing the react-to-contact halt.
+    BreakContact {
+        platoon: PlatoonId,
     },
     /// Draw a control measure (not a radio order: no delay).
     AddGraphic {
@@ -172,6 +190,11 @@ pub enum Event {
         penetrated: bool,
         kill: Option<KillKind>,
     },
+    /// A vehicle fired a smoke grenade salvo (`auto` = self-screening on its own initiative).
+    SmokeLaunched {
+        unit: EntityId,
+        auto: bool,
+    },
     PlatoonReport {
         side: SideId,
         platoon: PlatoonId,
@@ -202,6 +225,10 @@ pub enum PlatoonReport {
         toward: Vec2,
     },
     ContinuingMission,
+    /// Break-contact drill: screening and withdrawing away from `threat`.
+    BreakingContact {
+        threat: Vec2,
+    },
     Bounding {
         section: u8,
     },

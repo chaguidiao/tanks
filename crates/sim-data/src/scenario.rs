@@ -19,6 +19,25 @@ pub struct ScenarioDef {
     /// Situation and mission text for the scenario select screen (plain, terse).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub briefing: Option<String>,
+    #[serde(default, skip_serializing_if = "WeatherDef::is_default")]
+    pub weather: WeatherDef,
+}
+
+/// Weather at the scenario (DESIGN.md decision 20). Wind moves smoke; presets for visibility and
+/// precipitation come with M7c.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct WeatherDef {
+    /// Direction the wind blows from (deg, compass).
+    #[serde(default)]
+    pub wind_from_deg: f64,
+    #[serde(default)]
+    pub wind_speed_mps: f64,
+}
+
+impl WeatherDef {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// A named terrain objective (circle).

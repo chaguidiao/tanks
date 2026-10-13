@@ -6,6 +6,7 @@
 pub mod combat;
 pub mod doctrine;
 pub mod scenario;
+pub mod smoke;
 pub mod stat;
 pub mod terrain;
 pub mod vehicle;
@@ -15,6 +16,7 @@ use std::path::{Path, PathBuf};
 pub use combat::*;
 pub use doctrine::*;
 pub use scenario::*;
+pub use smoke::*;
 pub use stat::*;
 pub use terrain::*;
 pub use vehicle::*;
@@ -53,6 +55,7 @@ pub struct DataSet {
     pub detection: DetectionModel,
     pub damage: DamageTables,
     pub penetration: PenetrationModel,
+    pub smoke: SmokeModel,
     pub terrain: TerrainData,
 }
 
@@ -101,6 +104,7 @@ impl DataSet {
             detection: load_ron(&root.join("combat/detection.ron"))?,
             damage: load_ron(&root.join("combat/damage.ron"))?,
             penetration: load_ron(&root.join("combat/penetration.ron"))?,
+            smoke: load_ron(&root.join("combat/smoke.ron"))?,
             terrain,
         };
         for v in &ds.vehicles {
@@ -109,6 +113,16 @@ impl DataSet {
                     return Err(DataError {
                         path: root.join("vehicles"),
                         message: format!("{}: unknown ammo '{}'", v.id, l.ammo),
+                    });
+                }
+            }
+            let kinds =
+                v.smoke_launcher.iter().flat_map(|l| &l.kinds).chain(v.engine_smoke.iter().flat_map(|e| &e.kinds));
+            for k in kinds {
+                if ds.smoke.kind(k).is_none() {
+                    return Err(DataError {
+                        path: root.join("vehicles"),
+                        message: format!("{}: unknown smoke kind '{k}'", v.id),
                     });
                 }
             }

@@ -82,6 +82,9 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
         }
         p.last_strength = strength;
         let doctrine = ctx.doctrines[p.side.0 as usize].clone();
+        if !matches!(p.order, PlatoonOrder::Move { .. }) {
+            p.withdraw = false;
+        }
         fire_distribution(p, ctx, &doctrine);
         contact_drill(p, ctx, &doctrine);
         match p.order.clone() {
@@ -149,7 +152,7 @@ fn fire_distribution(p: &Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
 }
 
 fn contact_drill(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
-    if !d.halt_on_contact || !matches!(p.order, PlatoonOrder::Move { .. }) {
+    if !d.halt_on_contact || p.withdraw || !matches!(p.order, PlatoonOrder::Move { .. }) {
         return;
     }
     let pic = &ctx.pictures[p.side.0 as usize];

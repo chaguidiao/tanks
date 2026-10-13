@@ -61,6 +61,8 @@ pub struct Platoon {
     pub held: Option<PlatoonOrder>,
     pub quiet_since: u64,
     pub last_strength: u8,
+    /// Breaking contact: the react-to-contact halt is suppressed until the move ends.
+    pub withdraw: bool,
 }
 
 impl PlatoonOrder {
@@ -131,6 +133,7 @@ impl Platoon {
             self.held = held;
         }
         self.order = PlatoonOrder::None;
+        self.withdraw = false;
     }
 
     pub fn alive_members(&self, w: &World) -> Vec<usize> {

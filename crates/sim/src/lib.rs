@@ -19,6 +19,7 @@ pub mod picture;
 pub mod platoon;
 pub mod platoon_ai;
 pub mod sensors;
+pub mod smoke;
 pub mod vehicle;
 pub mod victory;
 pub mod world;
@@ -35,7 +36,9 @@ use terrain::hash::StableHasher;
 use terrain::path::Pathfinder;
 
 pub use ai::picture::{self as view, PerceivedWorld};
-pub use command::{Addressee, Command, EndReason, Event, KillKind, PlatoonReport, PositionKind, TimedCommand};
+pub use command::{
+    Addressee, Command, EndReason, Event, KillKind, PlatoonReport, PositionKind, SmokeMode, TimedCommand,
+};
 pub use world::{EntityId, SideId, World};
 
 pub type Vec2 = [f64; 2];
@@ -100,10 +103,15 @@ pub struct Sim {
     commanders: Vec<Option<ai::commander::Commander>>,
     ai_enabled: Vec<bool>,
     victory: victory::VictoryState,
+    smoke: smoke::SmokeField,
+    /// Per side: the equipment year (scenario date or the side's tech year).
+    years: Vec<i32>,
 }
 
 /// Commander AI decision interval: 0.2 Hz (DESIGN.md §4.1).
 pub const COMMANDER_EVERY: u64 = 100;
+/// Smoke clouds are in a side's picture when within this distance of one of its vehicles (m).
+const SMOKE_VIEW_M: f64 = 3000.0;
 
 impl Sim {
     pub fn new(scenario: &ScenarioDef, data: Arc<DataSet>, map: Arc<BakedMap>) -> Result<Self, String> {
@@ -190,6 +198,7 @@ impl Sim {
                                 speed_limit: None,
                                 quiet_since: 0,
                                 last_strength: 0,
+                                withdraw: false,
                             });
                             platoons.last_mut().expect("pushed")
                         }
@@ -229,6 +238,9 @@ impl Sim {
             })
             .collect();
         let ai_enabled = commanders.iter().map(|c| c.is_some()).collect();
+        let smoke =
+            smoke::SmokeField::new(&data.smoke, scenario.weather.wind_from_deg, scenario.weather.wind_speed_mps);
+        let years = scenario.sides.iter().map(|s| s.tech_year.unwrap_or(scenario.date.0)).collect();
         let mut sim = Self {
             tick: 0,
             map,
@@ -254,6 +266,8 @@ impl Sim {
             commanders,
             ai_enabled,
             victory: victory::VictoryState::default(),
+            smoke,
+            years,
         };
         sim.update_pictures();
         Ok(sim)
@@ -488,6 +502,7 @@ impl Sim {
                 tick,
                 &mut self.rngs.sensors,
                 &mut self.los_cache,
+                &self.smoke,
             );
             for s in sightings {
                 let side = self.world.side[s.observer].0 as usize;
@@ -562,6 +577,10 @@ impl Sim {
         self.projectiles = flying;
         for p in hits {
             let o = &p.outcome;
+            if self.world.alive(p.target) {
+                let bearing = ai::drive::bearing(self.world.transform[p.target].pos, p.from);
+                self.world.smoke[p.target].last_targeted = Some((tick, bearing));
+            }
             let kill = if o.hit && self.world.alive(p.target) {
                 gunnery::apply_damage(&mut self.world, p.target, o.kill, o.sights_damaged)
             } else {
@@ -576,6 +595,11 @@ impl Sim {
                 self.sides[s].mark_destroyed(self.world.transform[p.target].pos);
             }
         }
+
+        // 7b. Smoke: self-screening, engine smoke, then the clouds themselves.
+        let doctrines: Vec<&sim_data::DoctrinePack> = self.sides.iter().map(|s| &s.doctrine).collect();
+        smoke::units(&mut self.smoke, &mut self.world, &self.vehicles, &doctrines, &self.years, tick, &mut events);
+        self.smoke.step(DT);
 
         // 8. Mobility.
         mobility::step(&mut self.world, &self.vehicles, &self.map, &self.data.terrain, &mut events);
@@ -597,6 +621,87 @@ impl Sim {
 
     fn platoon_mut(&mut self, side: SideId, id: PlatoonId) -> Option<&mut platoon::Platoon> {
         self.platoons.iter_mut().find(|p| p.id == id && p.side == side)
+    }
+
+    /// Compass bearing from vehicle `k` to the nearest live contact of its side's picture, or its
+    /// turret heading when none is known.
+    fn nearest_threat_bearing(&self, side: SideId, k: usize) -> f64 {
+        let pos = self.world.transform[k].pos;
+        self.pictures[side.0 as usize]
+            .live_contacts()
+            .min_by(|a, b| dist(a.pos, pos).total_cmp(&dist(b.pos, pos)))
+            .map(|c| ai::drive::bearing(pos, c.pos))
+            .unwrap_or_else(|| self.world.gun[k].as_ref().map_or(self.world.transform[k].heading, |g| g.turret))
+    }
+
+    /// Break contact (ATP 3-20.15 App. F): screen with smoke and withdraw directly away from the
+    /// nearest known threat by the doctrine distance, in column.
+    fn break_contact(&mut self, side: SideId, id: PlatoonId, events: &mut Vec<Event>) {
+        let Some(pi) = self.platoons.iter().position(|p| p.id == id && p.side == side) else { return };
+        let alive = self.platoons[pi].alive_members(&self.world);
+        let Some(&lead) = alive.first() else { return };
+        let n = alive.len() as f64;
+        let centre = [
+            alive.iter().map(|&k| self.world.transform[k].pos[0]).sum::<f64>() / n,
+            alive.iter().map(|&k| self.world.transform[k].pos[1]).sum::<f64>() / n,
+        ];
+        let pic = &self.pictures[side.0 as usize];
+        let threat = pic
+            .live_contacts()
+            .min_by(|a, b| dist(a.pos, centre).total_cmp(&dist(b.pos, centre)))
+            .map(|c| c.pos)
+            .unwrap_or_else(|| {
+                let h = self.platoons[pi].heading;
+                [centre[0] + libm::sin(h) * 1000.0, centre[1] + libm::cos(h) * 1000.0]
+            });
+        let away = ai::drive::bearing(threat, centre);
+        let distance = self.sides[side.0 as usize].doctrine.break_contact_distance_m.get();
+        let Some(vi) = self.world.vehicle[lead] else { return };
+        let Some(layer) = self.map.mobility(&self.vehicles[vi].id) else { return };
+        let cell = self.map.manifest.cell_size_m;
+        let (w, h) = (self.map.manifest.width_m(), self.map.manifest.height_m());
+        // Straight away if a route exists, else fan out to either side.
+        let mut dest = None;
+        for step in 0..9 {
+            let off = (step as f64 / 2.0).ceil() * 20f64.to_radians() * if step % 2 == 0 { 1.0 } else { -1.0 };
+            let b = away + off;
+            let d = [centre[0] + libm::sin(b) * distance, centre[1] + libm::cos(b) * distance];
+            let d = [d[0].clamp(cell, w - cell), d[1].clamp(cell, h - cell)];
+            if dist(d, centre) > distance * 0.5 && self.pathfinder.find(&layer.speed, cell, centre, d).is_some() {
+                dest = Some(d);
+                break;
+            }
+        }
+        let year = self.years[side.0 as usize];
+        for &k in &alive {
+            if smoke::launch(
+                &mut self.smoke,
+                &mut self.world,
+                &self.vehicles,
+                k,
+                away + std::f64::consts::PI,
+                year,
+                self.tick,
+            ) {
+                events.push(Event::SmokeLaunched { unit: self.world.id[k], auto: false });
+            }
+        }
+        let Some(dest) = dest else {
+            events.push(Event::PlatoonReport { side, platoon: id, report: PlatoonReport::NoRoute });
+            return;
+        };
+        let p = &mut self.platoons[pi];
+        p.formation = sim_data::Formation::Column;
+        p.technique = sim_data::Technique::Traveling;
+        p.speed_limit = None;
+        p.order = platoon::PlatoonOrder::new_move(dest, Vec::new());
+        p.held = None;
+        p.resume = None;
+        p.replanned = 0;
+        p.contact_reported = false;
+        p.withdraw = true;
+        events.push(Event::OrderReceived { side, to: Addressee::Platoon(id) });
+        events.push(Event::PlatoonReport { side, platoon: id, report: PlatoonReport::BreakingContact { threat } });
     }
 
     fn members(&self, side: SideId, to: Addressee) -> Vec<usize> {
@@ -717,6 +822,7 @@ impl Sim {
                     p.speed_limit = *speed_limit_mps;
                     p.order = platoon::PlatoonOrder::new_move(dest, via.clone());
                     p.held = None;
+                    p.withdraw = false;
                     p.replanned = 0;
                     p.contact_reported = false;
                     events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
@@ -729,6 +835,35 @@ impl Sim {
                     p.replanned = 0;
                 }
             }
+            Command::Smoke { to, mode } => {
+                for k in self.members(c.side, *to) {
+                    let year = self.years[c.side.0 as usize];
+                    match mode {
+                        SmokeMode::Screen => {
+                            let bearing = self.nearest_threat_bearing(c.side, k);
+                            if smoke::launch(
+                                &mut self.smoke,
+                                &mut self.world,
+                                &self.vehicles,
+                                k,
+                                bearing,
+                                year,
+                                self.tick,
+                            ) {
+                                events.push(Event::SmokeLaunched { unit: self.world.id[k], auto: false });
+                            }
+                        }
+                        SmokeMode::EngineOn | SmokeMode::EngineOff => {
+                            let has = self.world.vehicle[k].is_some_and(|vi| self.vehicles[vi].engine_smoke.is_some());
+                            if has {
+                                self.world.smoke[k].engine_on = *mode == SmokeMode::EngineOn;
+                            }
+                        }
+                    }
+                }
+                events.push(Event::OrderReceived { side: c.side, to: *to });
+            }
+            Command::BreakContact { platoon } => self.break_contact(c.side, *platoon, events),
             Command::AddGraphic { graphic } => {
                 let s = &mut self.sides[c.side.0 as usize];
                 s.next_graphic += 1;
@@ -764,6 +899,7 @@ impl Sim {
                 if let Some(p) = self.platoon_mut(c.side, *platoon) {
                     p.order = o;
                     p.held = None;
+                    p.withdraw = false;
                     events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
                 }
             }
@@ -778,6 +914,12 @@ impl Sim {
         }
         for (dst, src) in self.pictures.iter_mut().zip(&self.sides) {
             dst.clone_from(&src.picture);
+            if !self.smoke.is_empty() {
+                let near = |p: Vec2| {
+                    dst.own.iter().any(|u| u.condition != Condition::Destroyed && dist(u.pos, p) < SMOKE_VIEW_M)
+                };
+                dst.smoke = self.smoke.views().into_iter().filter(|v| near(v.pos)).collect();
+            }
         }
     }
 
@@ -797,6 +939,7 @@ impl Sim {
         for s in &self.sides {
             h.u64(s.triggers.iter().filter(|t| t.fired).count() as u64);
         }
+        self.smoke.hash_into(&mut h);
         for r in [&self.rngs.mobility, &self.rngs.sensors, &self.rngs.gunnery, &self.rngs.ai, &self.rngs.comms] {
             h.u64(r.get_word_pos() as u64);
         }

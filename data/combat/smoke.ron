@@ -1,0 +1,34 @@
+// Smoke kinds (DESIGN.md §6.1, decision 18). Optical depth τ is across the cloud diameter at
+// full strength; transmittance along a path is exp(-τ · chord / diameter · strength).
+// Public sources give effects qualitatively (screens last about a minute in light wind;
+// conventional HC/white-phosphorus smoke blocks visible and near-IR but largely passes the
+// thermal band; multispectral screens add IR-opaque particles), so values are estimates.
+(
+    blind_below: (value: 0.05, source: "estimate", confidence: estimate, notes: "Below 5 % transmittance the target's contrast is gone for practical purposes."),
+    kinds: [
+        (id: "grenade_ms", name: "MULTISPECTRAL GRENADE",
+            in_service: (from: 1998),
+            radius_m: (value: 14.0, source: "FM 3-11.50 / ATP 3-11.50: vehicle-launched screens form a wall tens of metres wide", confidence: low),
+            rise_s: (value: 2.0, source: "estimate", confidence: estimate, notes: "Grenades burst ~30 m out and bloom in a couple of seconds."),
+            life_s: (value: 60.0, source: "estimate", confidence: estimate, notes: "About a minute in light wind."),
+            tau_visible: (value: 7.0, source: "estimate", confidence: estimate),
+            tau_thermal: (value: 4.0, source: "estimate", confidence: estimate, notes: "Metal-flake or red-phosphorus fills make the screen opaque in the thermal band."),
+            drift: (value: 1.0, source: "physics: a cloud moves with the wind", confidence: medium)),
+        (id: "grenade", name: "SMOKE GRENADE",
+            in_service: (from: 1960),
+            radius_m: (value: 12.0, source: "FM 3-11.50 / ATP 3-11.50", confidence: low),
+            rise_s: (value: 2.5, source: "estimate", confidence: estimate),
+            life_s: (value: 55.0, source: "estimate", confidence: estimate),
+            tau_visible: (value: 6.0, source: "estimate", confidence: estimate),
+            tau_thermal: (value: 0.6, source: "estimate", confidence: estimate, notes: "HC / white-phosphorus clouds pass most of the 8-12 µm band."),
+            drift: (value: 1.0, source: "physics: a cloud moves with the wind", confidence: medium)),
+        (id: "engine", name: "ENGINE SMOKE",
+            in_service: (from: 1960),
+            radius_m: (value: 7.0, source: "estimate", confidence: estimate, notes: "A thin oily trail behind the vehicle."),
+            rise_s: (value: 2.0, source: "estimate", confidence: estimate),
+            life_s: (value: 30.0, source: "estimate", confidence: estimate),
+            tau_visible: (value: 2.5, source: "estimate", confidence: estimate, notes: "Fuel vaporised in the hot exhaust condenses to a white-grey screen; thinner than a grenade."),
+            tau_thermal: (value: 0.3, source: "estimate", confidence: estimate),
+            drift: (value: 1.0, source: "physics: a cloud moves with the wind", confidence: medium)),
+    ],
+)

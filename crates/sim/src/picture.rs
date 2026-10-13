@@ -312,6 +312,10 @@ impl SideState {
                 sights_degraded,
                 gun,
                 target,
+                smoke_salvos: w.smoke[k].salvos,
+                engine_smoke: w.vehicle[k]
+                    .filter(|&vi| vehicles[vi].engine_smoke.is_some())
+                    .map(|_| w.smoke[k].engine_on),
             });
         }
     }

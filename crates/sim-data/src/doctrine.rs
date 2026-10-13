@@ -83,6 +83,10 @@ pub struct DoctrinePack {
     /// limit) is always offered as well.
     #[serde(default)]
     pub speed_limits_mps: Vec<Stat<f64>>,
+    /// Crews employ self-screening smoke when fired upon (ATP 3-20.15 App. F, break contact).
+    pub smoke_when_engaged: bool,
+    /// Distance a platoon withdraws from the threat in the break-contact drill (m).
+    pub break_contact_distance_m: Stat<f64>,
 }
 
 impl DoctrinePack {

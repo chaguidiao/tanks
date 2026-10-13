@@ -82,4 +82,11 @@
         hull_rear: (value: 40.0, source: "estimate", confidence: estimate),
     ),
     ammo_stowage: isolated,
+    smoke_launcher: (
+        kinds: ["grenade_ms", "grenade"],
+        salvos: 2,
+        clouds_per_salvo: 3,
+        range_m: (value: 30.0, source: "Hunnicutt, Abrams (1990): turret-mounted grenade launchers (two banks of six), burst 30-40 m out", confidence: low),
+        arc_deg: (value: 60.0, source: "estimate", confidence: estimate, notes: "Two banks fan across the turret's forward arc."),
+    ),
 )

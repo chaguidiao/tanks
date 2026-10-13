@@ -91,6 +91,17 @@ impl SensorState {
     }
 }
 
+/// Per-vehicle smoke equipment and the last time it was shot at.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SmokeState {
+    /// Grenade salvos left.
+    pub salvos: u32,
+    pub engine_on: bool,
+    pub last_launch: Option<u64>,
+    /// Tick a round last struck at or near the vehicle, and the bearing (compass rad) to the shooter.
+    pub last_targeted: Option<(u64, f64)>,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct World {
     next_id: u32,
@@ -109,6 +120,7 @@ pub struct World {
     pub platoon: Vec<Option<PlatoonId>>,
     /// Tick of the last main-gun shot (detection cue).
     pub last_fired: Vec<Option<u64>>,
+    pub smoke: Vec<SmokeState>,
 }
 
 impl World {
@@ -173,6 +185,12 @@ impl World {
         self.weapons.push(WeaponsStatus::Free);
         self.platoon.push(None);
         self.last_fired.push(None);
+        self.smoke.push(SmokeState {
+            salvos: def.smoke_launcher.as_ref().map_or(0, |l| l.salvos),
+            engine_on: false,
+            last_launch: None,
+            last_targeted: None,
+        });
         id
     }
 
@@ -258,6 +276,10 @@ impl World {
             if let Some(g) = &self.gun[k] {
                 g.hash_into(h);
             }
+            let sm = &self.smoke[k];
+            h.u32(sm.salvos);
+            h.u8(sm.engine_on as u8);
+            h.u64(sm.last_launch.unwrap_or(u64::MAX));
             if let Some(ai) = &self.ai[k] {
                 match &ai.order {
                     Order::Idle => h.u8(0),

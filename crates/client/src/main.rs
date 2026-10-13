@@ -881,6 +881,9 @@ fn script(g: &mut Game, o: &Opts) -> Result<(), String> {
                 "T" => g.press(Cmd::Technique),
                 "H" => g.press(Cmd::Halt),
                 "S" => g.press(Cmd::Speed),
+                "Z" => g.press(Cmd::Smoke),
+                "E" => g.press(Cmd::EngineSmoke),
+                "X" => g.press(Cmd::BreakContact),
                 _ => {}
             }
         }

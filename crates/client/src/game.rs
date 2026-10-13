@@ -10,7 +10,9 @@ use sim::view::{
     Condition, ContactLevel, Graphic, GraphicKind as SimGraphic, GunActivity, OwnUnit, PerceivedWorld, PlatoonId, Task,
     TriggerCondition, WeaponsStatus,
 };
-use sim::{Addressee, Command, EndReason, EntityId, Event, KillKind, PlatoonReport, PositionKind, SideId, Sim};
+use sim::{
+    Addressee, Command, EndReason, EntityId, Event, KillKind, PlatoonReport, PositionKind, SideId, Sim, SmokeMode,
+};
 use sim_data::{DataSet, Formation, ScenarioDef, Technique};
 use terrain::BakedMap;
 use terrain::ground::Ground;
@@ -85,6 +87,9 @@ pub enum Cmd {
     Technique,
     Speed,
     Weapons,
+    Smoke,
+    EngineSmoke,
+    BreakContact,
     Contingency,
     NextPlatoon,
     PhaseLine,
@@ -455,6 +460,9 @@ impl Game {
             (Key::Char('s'), C::Speed),
             (Key::Char('f'), C::Formation),
             (Key::Char('w'), C::Weapons),
+            (Key::Char('z'), C::Smoke),
+            (Key::Char('e'), C::EngineSmoke),
+            (Key::Char('x'), C::BreakContact),
             (Key::Char('h'), C::Halt),
             (Key::Char('m'), C::Move),
             (Key::Char('a'), C::Engage),
@@ -751,6 +759,30 @@ impl Game {
                     self.radio(format!("WEAPONS {}.", weapons_str(next)));
                 }
             }
+            Cmd::Smoke => {
+                if let Some(to) = self.addressee() {
+                    let cs = self.addressee_cs(to);
+                    self.order(Command::Smoke { to, mode: SmokeMode::Screen });
+                    self.radio(format!("TO {cs}: SMOKE."));
+                }
+            }
+            Cmd::EngineSmoke => {
+                if let Some(to) = self.addressee()
+                    && let Some(on) = self.engine_smoke(to)
+                {
+                    let cs = self.addressee_cs(to);
+                    let mode = if on { SmokeMode::EngineOff } else { SmokeMode::EngineOn };
+                    self.order(Command::Smoke { to, mode });
+                    self.radio(format!("TO {cs}: ENGINE SMOKE {}.", if on { "OFF" } else { "ON" }));
+                }
+            }
+            Cmd::BreakContact => {
+                if let Some(p) = self.sel_platoon {
+                    let cs = self.platoon_cs(p);
+                    self.order(Command::BreakContact { platoon: p });
+                    self.radio(format!("TO {cs}: BREAK CONTACT."));
+                }
+            }
             Cmd::Contingency => {
                 self.order_mode = match self.order_mode {
                     OrderMode::Now => OrderMode::OnEnemyCrossing,
@@ -899,6 +931,28 @@ impl Game {
         match to {
             Addressee::Unit(u) => pic.unit(u).map(|u| u.weapons),
             Addressee::Platoon(p) => pic.platoon(p)?.members.first().and_then(|u| pic.unit(*u)).map(|u| u.weapons),
+        }
+    }
+
+    /// Grenade salvos left across the selection.
+    fn smoke_salvos(&self, to: Addressee) -> u32 {
+        let pic = self.picture();
+        match to {
+            Addressee::Unit(u) => pic.unit(u).map_or(0, |u| u.smoke_salvos),
+            Addressee::Platoon(p) => pic
+                .platoon(p)
+                .map_or(0, |v| v.members.iter().filter_map(|m| pic.unit(*m)).map(|u| u.smoke_salvos).sum()),
+        }
+    }
+
+    /// Engine smoke state of the selection (its first vehicle that has it): None = no vehicle has it.
+    fn engine_smoke(&self, to: Addressee) -> Option<bool> {
+        let pic = self.picture();
+        match to {
+            Addressee::Unit(u) => pic.unit(u)?.engine_smoke,
+            Addressee::Platoon(p) => {
+                pic.platoon(p)?.members.iter().filter_map(|m| pic.unit(*m)).find_map(|u| u.engine_smoke)
+            }
         }
     }
 
@@ -1095,6 +1149,15 @@ impl Game {
             }
             route_line(f, cam, &pts, style::ROUTE_DRAFT, true);
             checkpoints(f, cam, &self.draft, style::ROUTE_DRAFT);
+        }
+        // Smoke: a translucent disc with an outline and a label once large enough to read.
+        for c in &pic.smoke {
+            let (p, r) = (cam.to_screen(c.pos), (c.radius / cam.mpp) as f32);
+            f.circle(p, r.max(2.0), Rgba(150, 150, 150, (20.0 + 90.0 * c.strength) as u8));
+            f.circle_lines(p, r.max(2.0), Rgba(190, 190, 190, (40.0 + 120.0 * c.strength) as u8));
+            if r > 12.0 {
+                f.text("SMOKE", p[0] - 16.0, p[1] - 5.0, style::FONT, Rgba(205, 205, 205, 190));
+            }
         }
         // Shots this side knows about.
         for s in &pic.shots {
@@ -1562,6 +1625,34 @@ impl Game {
                     .active(is(&Tool::Los { a: None, b: None, result: None }))
                     .tip("LINE OF SIGHT BETWEEN TWO POINTS"),
             ),
+            (
+                15,
+                b("SMOKE", Cmd::Smoke)
+                    .key("Z")
+                    .value(self.addressee().map_or(String::new(), |to| format!("{} SALVOS", self.smoke_salvos(to))))
+                    .enabled(self.addressee().is_some_and(|to| self.smoke_salvos(to) > 0))
+                    .tip("FIRE SMOKE GRENADES TOWARDS THE NEAREST KNOWN THREAT (CREWS ALSO SCREEN WHEN FIRED UPON)"),
+            ),
+            (16, {
+                let state = self.addressee().and_then(|to| self.engine_smoke(to));
+                b("ENG SMOKE", Cmd::EngineSmoke)
+                    .key("E")
+                    .value(match state {
+                        Some(true) => "ON",
+                        Some(false) => "OFF",
+                        None => "",
+                    })
+                    .enabled(state.is_some())
+                    .active(state == Some(true))
+                    .tip("EXHAUST SMOKE BEHIND MOVING VEHICLES (TOGGLE)")
+            }),
+            (
+                17,
+                b("BREAK CONT", Cmd::BreakContact)
+                    .key("X")
+                    .enabled(plt)
+                    .tip("SMOKE AND WITHDRAW THE PLATOON AWAY FROM THE NEAREST KNOWN THREAT"),
+            ),
         ]
     }
 
@@ -1747,6 +1838,15 @@ impl Game {
             row("TURRET", format!("{}   WEAPONS {}", format::mils(u.turret), weapons_str(u.weapons))),
             style::TEXT,
         ));
+        let has_smoke = def.is_some_and(|d| d.smoke_launcher.is_some() || d.engine_smoke.is_some());
+        if has_smoke {
+            let engine = match u.engine_smoke {
+                Some(true) => "   ENGINE SMOKE ON",
+                Some(false) => "   ENGINE SMOKE OFF",
+                None => "",
+            };
+            out.push((row("SMOKE", format!("{} SALVOS{engine}", u.smoke_salvos)), style::TEXT));
+        }
         let target = u.target.and_then(|c| pic.contact(c)).map_or("NONE".to_owned(), |c| {
             let what = match (&c.type_name, c.level) {
                 (Some(t), _) => t.clone(),
@@ -2052,6 +2152,10 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
             }
             format!("{}: HALTED AT GRID {}.", u.callsign, format::grid(u.pos))
         }
+        Event::SmokeLaunched { unit: u, auto } => {
+            let u = unit(*u)?;
+            format!("{}: {}SMOKE LAUNCHED.", u.callsign, if *auto { "CONTACT, " } else { "" })
+        }
         Event::Stuck { unit: u } => {
             let u = unit(*u)?;
             format!("{}: IMMOBILE AT GRID {}.", u.callsign, format::grid(u.pos))
@@ -2117,6 +2221,9 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                     format::mils(ai::drive::bearing(*at, *toward)),
                     format::distance(((toward[0] - at[0]).powi(2) + (toward[1] - at[1]).powi(2)).sqrt())
                 ),
+                PlatoonReport::BreakingContact { threat } => {
+                    format!("{cs}: BREAKING CONTACT, THREAT GRID {}. SMOKE, WITHDRAWING.", format::grid(*threat))
+                }
                 PlatoonReport::ContinuingMission => format!("{cs}: CONTACT LOST. CONTINUING MISSION."),
                 PlatoonReport::Bounding { section } => format!("{cs}: SECTION {section} BOUNDING."),
                 PlatoonReport::Strength { remaining, of } => format!("{cs}: {remaining} OF {of} VEHICLES OPERATIONAL."),

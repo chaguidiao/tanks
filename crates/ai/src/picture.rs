@@ -82,6 +82,10 @@ pub struct OwnUnit {
     pub gun: GunActivity,
     /// The contact the gun is engaging (the crew's own track, as reported).
     pub target: Option<ContactId>,
+    /// Smoke grenade salvos left.
+    pub smoke_salvos: u32,
+    /// Engine smoke: None = the vehicle has none, Some(on).
+    pub engine_smoke: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -175,6 +179,15 @@ pub struct TriggerView {
     pub fired: bool,
 }
 
+/// A smoke cloud in view (clouds carry no owner; anyone can see one).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SmokeView {
+    pub pos: Vec2,
+    pub radius: f64,
+    /// 0..1: opacity relative to a fully developed cloud.
+    pub strength: f64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PerceivedWorld {
     pub side: SideId,
@@ -186,6 +199,7 @@ pub struct PerceivedWorld {
     pub shots: Vec<ShotView>,
     pub graphics: Vec<Graphic>,
     pub triggers: Vec<TriggerView>,
+    pub smoke: Vec<SmokeView>,
 }
 
 impl PerceivedWorld {
@@ -200,6 +214,7 @@ impl PerceivedWorld {
             shots: Vec::new(),
             graphics: Vec::new(),
             triggers: Vec::new(),
+            smoke: Vec::new(),
         }
     }
 

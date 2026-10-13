@@ -22,6 +22,7 @@ use sim_data::{DetectionModel, SensorKind, VehicleDef};
 use terrain::ground::Ground;
 use terrain::los::{Sight, sight};
 
+use crate::smoke::Band;
 use crate::world::{LocalTrack, World};
 
 /// Sensor checks every 5th tick = 4 Hz (DESIGN.md §4.1).
@@ -117,6 +118,7 @@ pub fn step(
     tick: u64,
     rng: &mut ChaCha8Rng,
     cache: &mut LosCache,
+    smoke: &crate::smoke::SmokeField,
 ) -> Vec<Sighting> {
     let light = light_factor(clock_s, m);
     let max_r = m.max_range_m.get();
@@ -162,18 +164,35 @@ pub fn step(
             let dc = libm::sqrt(w * vis_h);
             let sens = world.sensors[o].as_ref().expect("checked");
             let degrade = if sens.degraded { 0.5 } else { 1.0 };
+            // Smoke on the path: per spectral band, a sensor below the blind threshold sees nothing.
+            let (t_vis, t_th) = if smoke.is_empty() {
+                (1.0, 1.0)
+            } else {
+                (smoke.transmittance(opos, tp.pos, Band::Visible), smoke.transmittance(opos, tp.pos, Band::Thermal))
+            };
+            let (mut in_range, mut blinded) = (0, 0);
             let cycles = sens
                 .sensors
                 .iter()
                 .filter(|&&(_, _, max)| r <= max)
-                .map(|&(kind, cpm, _)| {
-                    let eff = match kind {
-                        SensorKind::Optical => cpm * light,
-                        SensorKind::NightChannel | SensorKind::Thermal => cpm,
+                .filter_map(|&(kind, cpm, _)| {
+                    let (eff, band_t) = match kind {
+                        SensorKind::Optical => (cpm * light, t_vis),
+                        SensorKind::NightChannel => (cpm, t_vis),
+                        SensorKind::Thermal => (cpm, t_th),
                     };
-                    dc / r * 1000.0 * eff * degrade
+                    in_range += 1;
+                    if band_t < smoke.blind_below {
+                        blinded += 1;
+                        return None;
+                    }
+                    Some(dc / r * 1000.0 * eff * band_t * degrade)
                 })
                 .fold(0.0, f64::max);
+            // Every sensor that could reach is screened: the pair is not seen, so tracks go stale.
+            if in_range > 0 && blinded == in_range {
+                continue;
+            }
             let moving = world.mobility[t].as_ref().is_some_and(|mv| mv.speed > 1.0);
             let fired = world.last_fired[t].is_some_and(|ft| tick.saturating_sub(ft) < (3.0 / crate::DT) as u64);
             let mut cue = 1.0;

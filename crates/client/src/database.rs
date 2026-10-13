@@ -293,6 +293,26 @@ fn vehicle_sheet(ds: &DataSet, v: &VehicleDef) -> Sheet {
             format!("{kind} · {x:.1} CYCLES/MRAD · {}{reach}", years(&s.in_service))
         }));
     }
+    if v.smoke_launcher.is_some() || v.engine_smoke.is_some() {
+        l.push(section("SMOKE"));
+        if let Some(sl) = &v.smoke_launcher {
+            l.push(fact("GRENADE LAUNCHERS", format!("{} SALVOS · {} CLOUDS EACH", sl.salvos, sl.clouds_per_salvo)));
+            l.push(stat("SCREEN RANGE", &sl.range_m, |x| format!("{x:.0} M")));
+            l.push(stat("SCREEN ARC", &sl.arc_deg, |x| format!("{x:.0} DEG")));
+        }
+        let ids = v.smoke_launcher.iter().flat_map(|s| &s.kinds).chain(v.engine_smoke.iter().flat_map(|e| &e.kinds));
+        for k in ids.filter_map(|id| ds.smoke.kinds.iter().find(|k| &k.id == id)) {
+            l.push(stat(&k.name, &k.tau_visible, |x| {
+                format!(
+                    "OD VISUAL {x:.1} · THERMAL {:.1} · R {:.0} M · {:.0} S · {}",
+                    k.tau_thermal.value,
+                    k.radius_m.value,
+                    k.life_s.value,
+                    years(&k.in_service)
+                )
+            }));
+        }
+    }
     l.extend([
         section("ARMOUR (RHA EQUIVALENT VS KE, NORMAL ATTACK)"),
         stat("TURRET FRONT", &v.armour.turret_front, mm),
