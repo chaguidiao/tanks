@@ -56,6 +56,7 @@ fn scenario(year: i32, pos: [f64; 2], heading_deg: f64) -> ScenarioDef {
                 platoon: None,
             }],
             ai: None,
+            fire_support: vec![],
         }],
         objectives: vec![],
         victory: None,
@@ -237,6 +238,6 @@ fn same_commands_give_the_same_state_hash() {
     assert_eq!(h1, h2);
     assert_eq!(e1, e2);
     // Golden value: update deliberately (and say why in the commit) when behaviour changes.
-    const GOLDEN: u64 = 0xbaaa_80dd_ab76_b46f;
+    const GOLDEN: u64 = 0xc28b_a005_d31b_98ef;
     assert_eq!(h1, GOLDEN, "state hash changed: {h1:#018x}");
 }

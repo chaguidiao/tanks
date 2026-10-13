@@ -50,6 +50,7 @@ impl ScenarioEditor {
                 tech_year: None,
                 units: Vec::new(),
                 ai: None,
+                fire_support: vec![],
             });
         }
         let vehicle =

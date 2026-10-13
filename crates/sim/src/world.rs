@@ -123,6 +123,8 @@ pub struct World {
     pub smoke: Vec<SmokeState>,
     /// Reactive armour tiles left.
     pub era: Vec<u32>,
+    /// Crew suppression, 0..1: rises under fire, decays (fires.ron).
+    pub suppression: Vec<f64>,
 }
 
 impl World {
@@ -188,6 +190,7 @@ impl World {
         self.platoon.push(None);
         self.last_fired.push(None);
         self.era.push(def.armour.era.as_ref().filter(|e| e.in_service.contains(year)).map_or(0, |e| e.tiles));
+        self.suppression.push(0.0);
         self.smoke.push(SmokeState {
             salvos: def.smoke_launcher.as_ref().map_or(0, |l| l.salvos),
             engine_on: false,
@@ -282,6 +285,7 @@ impl World {
             let sm = &self.smoke[k];
             h.u32(sm.salvos);
             h.u32(self.era[k]);
+            h.f64(self.suppression[k]);
             h.u8(sm.engine_on as u8);
             h.u64(sm.last_launch.unwrap_or(u64::MAX));
             if let Some(ai) = &self.ai[k] {

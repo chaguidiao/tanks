@@ -61,6 +61,8 @@ pub struct Platoon {
     pub held: Option<PlatoonOrder>,
     pub quiet_since: u64,
     pub last_strength: u8,
+    /// Tick of the last "react to indirect fire" report.
+    pub last_indirect: Option<u64>,
     /// Breaking contact: the react-to-contact halt is suppressed until the move ends.
     pub withdraw: bool,
 }

@@ -48,6 +48,8 @@ pub struct Ctx<'a> {
     pub pathfinder: &'a mut Pathfinder,
     pub tick: u64,
     pub events: &'a mut Vec<Event>,
+    pub impacts: &'a [crate::fires::Impact],
+    pub fires: &'a sim_data::SuppressionModel,
 }
 
 impl Ctx<'_> {
@@ -86,6 +88,7 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
             p.withdraw = false;
         }
         fire_distribution(p, ctx, &doctrine);
+        indirect_fire_drill(p, &alive, ctx);
         contact_drill(p, ctx, &doctrine);
         match p.order.clone() {
             PlatoonOrder::Move { .. } => move_step(p, ctx, &doctrine),
@@ -94,6 +97,29 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
             PlatoonOrder::None => {}
         }
     }
+}
+
+/// ATP 3-20.15 App. F: react to indirect fire. A platoon under a burst on or near it clears the
+/// impact area: a moving platoon drops its march-speed limit and keeps going; a static one stays
+/// buttoned up (suppression) and holds its position.
+fn indirect_fire_drill(p: &mut Platoon, alive: &[usize], ctx: &mut Ctx) {
+    let m = ctx.fires;
+    let (radius, window) = (m.react_radius_m.get(), m.react_window_s.get());
+    if p.last_indirect.is_some_and(|t| (ctx.tick - t) as f64 * DT < m.react_cooldown_s.get()) {
+        return;
+    }
+    let hit = ctx
+        .impacts
+        .iter()
+        .filter(|i| !i.smoke && (ctx.tick - i.tick) as f64 * DT <= window)
+        .find(|i| alive.iter().any(|&k| dist(ctx.world.transform[k].pos, i.pos) <= radius));
+    let Some(i) = hit else { return };
+    p.last_indirect = Some(ctx.tick);
+    let clearing = matches!(p.order, PlatoonOrder::Move { .. });
+    if clearing {
+        p.speed_limit = None;
+    }
+    ctx.report(p, PlatoonReport::IndirectFire { at: i.pos, clearing });
 }
 
 fn fresh_contacts(pic: &PerceivedWorld) -> Vec<Vec2> {

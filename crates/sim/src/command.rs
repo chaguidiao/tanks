@@ -25,6 +25,13 @@ pub enum PositionKind {
     TurretDown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FireKind {
+    /// High explosive, fire for effect.
+    He,
+    Smoke,
+}
+
 /// Orders into the simulation. Intent-level: platoon and vehicle AI decide how to execute them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Command {
@@ -106,6 +113,18 @@ pub enum Command {
     /// threat, bypassing the react-to-contact halt.
     BreakContact {
         platoon: PlatoonId,
+    },
+    /// Call for fire (ATP 3-09.42): `battery` fires `volleys` fire-for-effect volleys at `at`
+    /// after the FDC delay.
+    CallForFire {
+        battery: u32,
+        at: Vec2,
+        kind: FireKind,
+        volleys: u32,
+    },
+    /// Cease fire: the battery stops firing; rounds already in the air still land.
+    CeaseFire {
+        battery: u32,
     },
     /// Draw a control measure (not a radio order: no delay).
     AddGraphic {
@@ -212,10 +231,41 @@ pub enum Event {
         platoon: PlatoonId,
         report: PlatoonReport,
     },
+    /// Fire-support net traffic from battery `battery` (index into the side's battery list).
+    FireSupport {
+        side: SideId,
+        battery: u32,
+        at: Vec2,
+        report: FireReport,
+    },
     ScenarioEnd {
         winner: Option<SideId>,
         reason: EndReason,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DenyReason {
+    OutOfRange,
+    TooClose,
+    NoAmmo,
+    Busy,
+}
+
+/// Fire-support radio traffic (ATP 3-09.42 call-for-fire sequence).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FireReport {
+    /// Message to observer: mission accepted, first rounds in about `eta_s` seconds.
+    Accepted {
+        eta_s: f64,
+    },
+    Denied(DenyReason),
+    /// Rounds have left the guns.
+    Shot,
+    /// Rounds impact in five seconds.
+    Splash,
+    RoundsComplete,
+    Ceased,
 }
 
 /// Structured platoon reports; the client renders them as radio text.
@@ -243,6 +293,12 @@ pub enum PlatoonReport {
     },
     Bounding {
         section: u8,
+    },
+    /// Battle drill "react to indirect fire": `clearing` = moving out of the impact area, else
+    /// buttoned up and holding.
+    IndirectFire {
+        at: Vec2,
+        clearing: bool,
     },
     /// Losses: members remaining.
     Strength {

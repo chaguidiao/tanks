@@ -194,6 +194,42 @@ pub struct SmokeView {
     pub strength: f64,
 }
 
+/// What a battery is doing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BatteryStatus {
+    Ready,
+    /// A mission is under way: aiming at `at`, with `volleys_left` still to fire (0 = last rounds in flight).
+    Mission {
+        at: Vec2,
+        smoke: bool,
+        volleys_left: u32,
+        impact_in_s: Option<f64>,
+    },
+}
+
+/// A battery available to the side (called fire support).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BatteryView {
+    pub id: u32,
+    pub callsign: String,
+    pub name: String,
+    pub pos: Vec2,
+    pub tubes: u32,
+    pub he_rounds: u32,
+    pub smoke_rounds: u32,
+    pub min_range_m: f64,
+    pub max_range_m: f64,
+    pub status: BatteryStatus,
+}
+
+/// A shell burst seen or heard by the side.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ImpactView {
+    pub pos: Vec2,
+    pub time_s: f64,
+    pub smoke: bool,
+}
+
 /// Sky, visibility and wind as the side's crews would judge them.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WeatherView {
@@ -220,6 +256,8 @@ pub struct PerceivedWorld {
     pub triggers: Vec<TriggerView>,
     pub smoke: Vec<SmokeView>,
     pub weather: WeatherView,
+    pub fire_support: Vec<BatteryView>,
+    pub impacts: Vec<ImpactView>,
 }
 
 impl PerceivedWorld {
@@ -236,6 +274,8 @@ impl PerceivedWorld {
             triggers: Vec::new(),
             smoke: Vec::new(),
             weather: WeatherView::default(),
+            fire_support: Vec::new(),
+            impacts: Vec::new(),
         }
     }
 

@@ -5,6 +5,7 @@
 
 pub mod combat;
 pub mod doctrine;
+pub mod fires;
 pub mod scenario;
 pub mod smoke;
 pub mod stat;
@@ -15,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 pub use combat::*;
 pub use doctrine::*;
+pub use fires::*;
 pub use scenario::*;
 pub use smoke::*;
 pub use stat::*;
@@ -57,6 +59,7 @@ pub struct DataSet {
     pub penetration: PenetrationModel,
     pub smoke: SmokeModel,
     pub weather: WeatherTable,
+    pub fires: FireSupportModel,
     pub terrain: TerrainData,
 }
 
@@ -107,6 +110,7 @@ impl DataSet {
             penetration: load_ron(&root.join("combat/penetration.ron"))?,
             smoke: load_ron(&root.join("combat/smoke.ron"))?,
             weather: load_ron(&root.join("combat/weather.ron"))?,
+            fires: load_ron(&root.join("combat/fires.ron"))?,
             terrain,
         };
         for a in &ds.ammo {

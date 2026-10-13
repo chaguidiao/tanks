@@ -216,7 +216,7 @@ pub fn bias_sigma_mrad(def: &VehicleDef, ammo: &AmmoDef, range: f64) -> f64 {
     libm::sqrt(ranging * ranging + b * b)
 }
 
-fn roll(o: &Outcomes, exposed_factor: f64, u: f64) -> Option<KillKind> {
+pub(crate) fn roll(o: &Outcomes, exposed_factor: f64, u: f64) -> Option<KillKind> {
     let cat = (o.catastrophic.get() * exposed_factor).min(1.0);
     let mut acc = cat;
     if u < acc {
@@ -504,6 +504,7 @@ pub fn step(
     dmg: &DamageTables,
     smoke: &SmokeModel,
     engage_range: &[f64],
+    slow_gain: f64,
     tick: u64,
     rng: &mut ChaCha8Rng,
 ) -> Vec<FireEvent> {
@@ -531,7 +532,8 @@ pub fn step(
         let pos = world.transform[k].pos;
         let heading = world.transform[k].heading;
         let speed = world.mobility[k].as_ref().map_or(0.0, |m| m.speed);
-        let slow = 1.0 + 0.5 * world.gun[k].as_ref().map_or(0, |g| g.crew_loss) as f64;
+        let slow = (1.0 + 0.5 * world.gun[k].as_ref().map_or(0, |g| g.crew_loss) as f64)
+            * (1.0 + slow_gain * world.suppression[k]);
         let traverse = def.armament.turret_traverse_rad_s.get();
         let fc = &def.fire_control;
         let target_info = target.map(|t| {

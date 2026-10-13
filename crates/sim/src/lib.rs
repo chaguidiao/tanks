@@ -13,6 +13,7 @@
 
 pub mod command;
 pub mod control;
+pub mod fires;
 pub mod gunnery;
 pub mod mobility;
 pub mod picture;
@@ -38,7 +39,8 @@ use terrain::path::Pathfinder;
 
 pub use ai::picture::{self as view, PerceivedWorld};
 pub use command::{
-    Addressee, Command, EndReason, Event, KillKind, PlatoonReport, PositionKind, SmokeMode, TimedCommand,
+    Addressee, Command, DenyReason, EndReason, Event, FireKind, FireReport, KillKind, PlatoonReport, PositionKind,
+    SmokeMode, TimedCommand,
 };
 pub use world::{EntityId, SideId, World};
 
@@ -60,13 +62,14 @@ pub struct Rngs {
     pub gunnery: ChaCha8Rng,
     pub ai: ChaCha8Rng,
     pub comms: ChaCha8Rng,
+    pub fires: ChaCha8Rng,
 }
 
 impl Rngs {
     fn new(seed: u64) -> Self {
         let s =
             |k: u64| ChaCha8Rng::seed_from_u64(terrain::noise::hash_u64(seed ^ k.wrapping_mul(0x9e37_79b9_7f4a_7c15)));
-        Self { mobility: s(1), sensors: s(2), gunnery: s(3), ai: s(4), comms: s(5) }
+        Self { mobility: s(1), sensors: s(2), gunnery: s(3), ai: s(4), comms: s(5), fires: s(6) }
     }
 }
 
@@ -107,6 +110,9 @@ pub struct Sim {
     victory: victory::VictoryState,
     smoke: smoke::SmokeField,
     weather: weather::Weather,
+    batteries: Vec<fires::Battery>,
+    /// Recent shell bursts (pruned after `IMPACT_KEEP_S`).
+    impacts: Vec<fires::Impact>,
     /// Per side: the equipment year (scenario date or the side's tech year).
     years: Vec<i32>,
 }
@@ -115,6 +121,10 @@ pub struct Sim {
 pub const COMMANDER_EVERY: u64 = 100;
 /// Smoke clouds are in a side's picture when within this distance of one of its vehicles (m).
 const SMOKE_VIEW_M: f64 = 3000.0;
+/// Shell bursts stay in the pictures and the react-to-indirect-fire drill this long (s).
+const IMPACT_KEEP_S: f64 = 30.0;
+/// Bursts in a side's picture when within this distance of one of its vehicles (m).
+const IMPACT_VIEW_M: f64 = 1500.0;
 
 impl Sim {
     pub fn new(scenario: &ScenarioDef, data: Arc<DataSet>, map: Arc<BakedMap>) -> Result<Self, String> {
@@ -200,6 +210,7 @@ impl Sim {
                                 speed_limit: None,
                                 quiet_since: 0,
                                 last_strength: 0,
+                                last_indirect: None,
                                 withdraw: false,
                             });
                             platoons.last_mut().expect("pushed")
@@ -243,7 +254,34 @@ impl Sim {
         let smoke =
             smoke::SmokeField::new(&data.smoke, scenario.weather.wind_from_deg, scenario.weather.wind_speed_mps);
         let weather = weather::Weather::new(scenario, &data.weather)?;
-        let years = scenario.sides.iter().map(|s| s.tech_year.unwrap_or(scenario.date.0)).collect();
+        let years: Vec<i32> = scenario.sides.iter().map(|s| s.tech_year.unwrap_or(scenario.date.0)).collect();
+        let mut batteries = Vec::new();
+        for (si, side) in scenario.sides.iter().enumerate() {
+            for a in &side.fire_support {
+                let di = data
+                    .fires
+                    .batteries
+                    .iter()
+                    .position(|b| b.id == a.battery)
+                    .ok_or_else(|| format!("{}: unknown battery '{}'", a.callsign, a.battery))?;
+                let d = &data.fires.batteries[di];
+                if !d.in_service.contains(years[si]) {
+                    return Err(format!("{}: {} is not in service in {}", a.callsign, d.name, years[si]));
+                }
+                let sk = data
+                    .smoke
+                    .kind(&d.smoke_kind)
+                    .ok_or_else(|| format!("{}: unknown smoke kind '{}'", d.id, d.smoke_kind))?;
+                let mut b = fires::Battery::new(SideId(si as u8), a.callsign.clone(), di, d, a.position, sk);
+                if let Some(n) = a.he_rounds {
+                    b.he = n;
+                }
+                if let Some(n) = a.smoke_rounds {
+                    b.smoke = n;
+                }
+                batteries.push(b);
+            }
+        }
         let mut sim = Self {
             tick: 0,
             map,
@@ -272,6 +310,8 @@ impl Sim {
             victory: victory::VictoryState::default(),
             smoke,
             weather,
+            batteries,
+            impacts: Vec::new(),
             years,
         };
         sim.update_pictures();
@@ -486,6 +526,8 @@ impl Sim {
                 pathfinder: &mut self.pathfinder,
                 tick,
                 events: &mut events,
+                impacts: &self.impacts,
+                fires: &self.data.fires.suppression,
             };
             platoon_ai::step(&mut self.platoons, &mut ctx);
         }
@@ -504,6 +546,7 @@ impl Sim {
                 &g,
                 &self.data.detection,
                 &self.weather.at(self.start_time_s as f64 + tick as f64 * DT, &self.data.detection),
+                self.data.fires.suppression.sensor_penalty.get(),
                 tick,
                 &mut self.rngs.sensors,
                 &mut self.los_cache,
@@ -546,6 +589,7 @@ impl Sim {
             &self.data.damage,
             &self.data.smoke,
             &engage,
+            self.data.fires.suppression.slow_gain.get(),
             tick,
             &mut self.rngs.gunnery,
         );
@@ -583,6 +627,16 @@ impl Sim {
                 gunnery::Effect::Shot { target, outcome } => (*target, outcome),
             };
             if self.world.alive(target) {
+                let sup = &self.data.fires.suppression;
+                let add = if !o.hit {
+                    sup.near_miss.get()
+                } else if !o.penetrated {
+                    sup.glancing_hit.get()
+                } else {
+                    0.0
+                };
+                let s = &mut self.world.suppression[target];
+                *s = (*s + add).min(1.0);
                 let bearing = ai::drive::bearing(self.world.transform[target].pos, p.from);
                 self.world.smoke[target].last_targeted = Some((tick, bearing));
             }
@@ -602,6 +656,28 @@ impl Sim {
                 let s = self.world.side[p.shooter].0 as usize;
                 self.sides[s].mark_destroyed(self.world.transform[target].pos);
             }
+        }
+
+        // 7a. Fire support: volleys, rounds in flight, bursts; suppression decays.
+        {
+            let mut fctx = fires::Ctx {
+                model: &self.data.fires,
+                world: &mut self.world,
+                vehicles: &self.vehicles,
+                smoke: &mut self.smoke,
+                tick,
+                rng: &mut self.rngs.fires,
+                events: &mut events,
+                impacts: &mut self.impacts,
+            };
+            for (side, pos) in fires::step(&mut self.batteries, &mut fctx) {
+                self.sides[side.0 as usize].mark_destroyed(pos);
+            }
+            let decay = self.data.fires.suppression.decay_per_s.get() * DT;
+            for s in self.world.suppression.iter_mut() {
+                *s = (*s - decay).max(0.0);
+            }
+            self.impacts.retain(|i| (tick - i.tick) as f64 * DT <= IMPACT_KEEP_S);
         }
 
         // 7b. Smoke: self-screening, engine smoke, then the clouds themselves.
@@ -899,6 +975,22 @@ impl Sim {
                 }
                 events.push(Event::OrderReceived { side: c.side, to: *to });
             }
+            Command::CallForFire { battery, at, kind, volleys } => {
+                let Some(b) = self.batteries.get_mut(*battery as usize).filter(|b| b.side == c.side) else { return };
+                let d = &self.data.fires.batteries[b.def];
+                let report = match b.call(d, *at, *kind, *volleys, self.tick) {
+                    Ok(eta_s) => FireReport::Accepted { eta_s },
+                    Err(why) => FireReport::Denied(why),
+                };
+                events.push(Event::FireSupport { side: c.side, battery: *battery, at: *at, report });
+            }
+            Command::CeaseFire { battery } => {
+                let Some(b) = self.batteries.get_mut(*battery as usize).filter(|b| b.side == c.side) else { return };
+                let at = b.mission.as_ref().map_or(b.pos, |m| m.at);
+                if fires::cease(b) {
+                    events.push(Event::FireSupport { side: c.side, battery: *battery, at, report: FireReport::Ceased });
+                }
+            }
             Command::AddGraphic { graphic } => {
                 let s = &mut self.sides[c.side.0 as usize];
                 s.next_graphic += 1;
@@ -951,6 +1043,16 @@ impl Sim {
         for (dst, src) in self.pictures.iter_mut().zip(&self.sides) {
             dst.clone_from(&src.picture);
             dst.weather = weather.clone();
+            let own =
+                |p: Vec2| dst.own.iter().any(|u| u.condition != Condition::Destroyed && dist(u.pos, p) < IMPACT_VIEW_M);
+            dst.impacts = fires::impact_views(&self.impacts, own, self.tick, IMPACT_KEEP_S);
+            dst.fire_support = self
+                .batteries
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| b.side == dst.side)
+                .map(|(i, b)| b.view(i as u32, &self.data.fires.batteries[b.def], self.tick))
+                .collect();
             if !self.smoke.is_empty() {
                 let near = |p: Vec2| {
                     dst.own.iter().any(|u| u.condition != Condition::Destroyed && dist(u.pos, p) < SMOKE_VIEW_M)
@@ -977,7 +1079,17 @@ impl Sim {
             h.u64(s.triggers.iter().filter(|t| t.fired).count() as u64);
         }
         self.smoke.hash_into(&mut h);
-        for r in [&self.rngs.mobility, &self.rngs.sensors, &self.rngs.gunnery, &self.rngs.ai, &self.rngs.comms] {
+        for b in &self.batteries {
+            b.hash_into(&mut h);
+        }
+        for r in [
+            &self.rngs.mobility,
+            &self.rngs.sensors,
+            &self.rngs.gunnery,
+            &self.rngs.ai,
+            &self.rngs.comms,
+            &self.rngs.fires,
+        ] {
             h.u64(r.get_word_pos() as u64);
         }
         h.finish()

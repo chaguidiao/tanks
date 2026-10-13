@@ -136,6 +136,24 @@ pub struct SideDef {
     /// Commander AI plan (used when the side is not player-controlled).
     #[serde(default)]
     pub ai: Option<AiPlan>,
+    /// Batteries available to call for fire (not on the map as vehicles).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fire_support: Vec<BatteryAssign>,
+}
+
+/// A battery placed for a side (`data/combat/fires.ron`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatteryAssign {
+    pub callsign: String,
+    /// Battery type id.
+    pub battery: String,
+    /// Where the guns are (local map metres); fixes the range to a target.
+    pub position: [f64; 2],
+    /// Override the type's stock of HE rounds.
+    #[serde(default)]
+    pub he_rounds: Option<u32>,
+    #[serde(default)]
+    pub smoke_rounds: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

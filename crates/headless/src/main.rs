@@ -339,6 +339,7 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                             platoon: None,
                         }],
                         ai: None,
+                        fire_support: vec![],
                     },
                     SideDef {
                         name: "B".into(),
@@ -352,6 +353,7 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                             platoon: None,
                         }],
                         ai: None,
+                        fire_support: vec![],
                     },
                 ],
                 objectives: vec![],

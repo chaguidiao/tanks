@@ -112,6 +112,7 @@ pub fn step(
     g: &Ground,
     m: &DetectionModel,
     atm: &Atmosphere,
+    sensor_penalty: f64,
     tick: u64,
     rng: &mut ChaCha8Rng,
     cache: &mut LosCache,
@@ -160,7 +161,7 @@ pub fn step(
             let vis_h = tdef.dimensions.height_m.get() * f;
             let dc = libm::sqrt(w * vis_h);
             let sens = world.sensors[o].as_ref().expect("checked");
-            let degrade = if sens.degraded { 0.5 } else { 1.0 };
+            let degrade = if sens.degraded { 0.5 } else { 1.0 } * (1.0 - sensor_penalty * world.suppression[o]);
             // Smoke on the path: per spectral band, a sensor below the blind threshold sees nothing.
             let (mut t_vis, mut t_th) = (libm::exp(-atm.beta_visible * r), libm::exp(-atm.beta_thermal * r));
             if !smoke.is_empty() {

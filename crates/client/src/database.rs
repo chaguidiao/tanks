@@ -186,9 +186,11 @@ pub fn entries(ds: &DataSet, tab: Tab) -> Vec<(String, String)> {
             .chain(ds.terrain.soils.iter().map(|s| (upper(&s.name), "SOIL".to_owned())))
             .collect(),
         Tab::Doctrine => ds.doctrine.iter().map(|d| (d.name.to_uppercase(), d.id.to_uppercase())).collect(),
-        Tab::Combat => {
-            ["DETECTION", "PENETRATION", "DAMAGE"].iter().map(|s| ((*s).to_owned(), String::new())).collect()
-        }
+        Tab::Combat => ["DETECTION", "PENETRATION", "DAMAGE", "HE EFFECTS", "SUPPRESSION"]
+            .iter()
+            .map(|s| ((*s).to_owned(), String::new()))
+            .chain(ds.fires.batteries.iter().map(|b| (b.name.clone(), years(&b.in_service))))
+            .collect(),
     }
 }
 
@@ -615,6 +617,82 @@ fn combat_sheet(ds: &DataSet, k: usize) -> Option<Sheet> {
                 stat("SIGHTS DAMAGED BY A NON-PENETRATION", &d.non_penetration_sights, pct),
             ]);
             Sheet { title: "DAMAGE".into(), sub: "HIT OUTCOMES BY WHERE THE ROUND STRUCK".into(), lines: l }
+        }
+        3 => {
+            let e = &ds.fires.effects;
+            let mut l = vec![
+                Line::Text("OUTCOME PROBABILITY PER HE SHELL BY VEHICLE CLASS. ESTIMATES, NOT TEST DATA.".into()),
+                stat("DIRECT ZONE RADIUS", &e.direct_radius_m, |x| format!("{x:.0} M")),
+                stat("NEAR ZONE RADIUS", &e.near_radius_m, |x| format!("{x:.0} M")),
+            ];
+            for c in &e.classes {
+                for (zone, o) in [("DIRECT", &c.direct), ("NEAR", &c.near)] {
+                    l.extend([
+                        section(&format!("{} — {zone}", upper(&format!("{:?}", c.class)))),
+                        stat("CATASTROPHIC KILL", &o.catastrophic, pct),
+                        stat("FIREPOWER KILL", &o.firepower, pct),
+                        stat("MOBILITY KILL", &o.mobility, pct),
+                        stat("CREW CASUALTIES", &o.crew, pct),
+                    ]);
+                }
+                l.push(stat("SIGHTS DAMAGED (NEAR)", &c.near_sights, pct));
+            }
+            Sheet { title: "HE EFFECTS".into(), sub: "ARTILLERY HE AGAINST VEHICLES".into(), lines: l }
+        }
+        4 => {
+            let s = &ds.fires.suppression;
+            Sheet {
+                title: "SUPPRESSION".into(),
+                sub: "CREW REACTION TO NEAR MISSES AND BURSTS (0 TO 100 %)".into(),
+                lines: vec![
+                    section("SOURCES"),
+                    stat("BURST RADIUS", &s.burst_radius_m, |x| format!("{x:.0} M")),
+                    stat("BURST AT CENTRE", &s.burst_peak, pct),
+                    stat("DIRECT-FIRE MISS", &s.near_miss, pct),
+                    stat("NON-PENETRATING HIT", &s.glancing_hit, pct),
+                    stat("DECAY", &s.decay_per_s, |x| format!("{:.1} % / S", x * 100.0)),
+                    section("EFFECTS AT FULL SUPPRESSION"),
+                    stat("DETECTION LOST", &s.sensor_penalty, pct),
+                    stat("GUNNERY SLOWED BY", &s.slow_gain, pct),
+                    section("PLATOON DRILL: REACT TO INDIRECT FIRE"),
+                    stat("BURST WITHIN", &s.react_radius_m, |x| format!("{x:.0} M")),
+                    stat("IN THE LAST", &s.react_window_s, secs),
+                    stat("REPORT COOLDOWN", &s.react_cooldown_s, secs),
+                ],
+            }
+        }
+        k if k >= 5 => {
+            let b = ds.fires.batteries.get(k - 5)?;
+            Sheet {
+                title: b.name.clone(),
+                sub: format!("MIRRORS {}", b.mirrors.to_uppercase()),
+                lines: vec![
+                    fact("IN SERVICE", years(&b.in_service)),
+                    fact("TUBES", b.tubes.to_string()),
+                    fact("HE / SMOKE ROUNDS", format!("{} / {}", b.he_rounds, b.smoke_rounds)),
+                    section("RANGE"),
+                    stat("MINIMUM", &b.min_range_m, |x| format!("{x:.0} M")),
+                    stat("MAXIMUM", &b.max_range_m, |x| format!("{x:.0} M")),
+                    section("TIMING"),
+                    stat("FDC DELAY (CALL TO SHOT)", &b.fdc_delay_s, secs),
+                    stat("VOLLEY INTERVAL", &b.volley_interval_s, secs),
+                    stat("TIME OF FLIGHT, BASE", &b.tof_base_s, secs),
+                    stat("TIME OF FLIGHT, PER KM", &b.tof_per_km_s, secs),
+                    section("ACCURACY (UNADJUSTED)"),
+                    stat("RANGE ERROR, 1 SD", &b.range_error_frac, |x| format!("{:.2} % OF RANGE", x * 100.0)),
+                    stat("DEFLECTION ERROR, 1 SD", &b.deflection_error_mrad, mrad),
+                    calc(
+                        "RANGE ERROR AT 10 KM",
+                        format!("{:.0} M", b.range_error_frac.value * 10_000.0),
+                        "range_error_frac × range",
+                    ),
+                    calc(
+                        "TIME OF FLIGHT AT 10 KM",
+                        format!("{:.0} S", b.tof_base_s.value + b.tof_per_km_s.value * 10.0),
+                        "tof_base + tof_per_km × range / 1000",
+                    ),
+                ],
+            }
         }
         _ => return None,
     })

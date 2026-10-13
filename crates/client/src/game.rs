@@ -11,7 +11,8 @@ use sim::view::{
     TriggerCondition, WeaponsStatus,
 };
 use sim::{
-    Addressee, Command, EndReason, EntityId, Event, KillKind, PlatoonReport, PositionKind, SideId, Sim, SmokeMode,
+    Addressee, Command, DenyReason, EndReason, EntityId, Event, FireKind, FireReport, KillKind, PlatoonReport,
+    PositionKind, SideId, Sim, SmokeMode,
 };
 use sim_data::{AmmoKind, DataSet, Formation, ScenarioDef, Technique};
 use terrain::BakedMap;
@@ -43,6 +44,8 @@ pub enum Tool {
     Engage,
     /// Smoke round: the next left click is the aim point.
     SmokeRound,
+    /// Call for fire: the next left click is the target point.
+    CallFire,
     /// Battle position: centre chosen, waiting for the threat direction click.
     BattlePosition {
         centre: Option<[f64; 2]>,
@@ -92,6 +95,7 @@ pub enum Cmd {
     Smoke,
     EngineSmoke,
     SmokeRound,
+    CallFire,
     Ammo,
     BreakContact,
     Contingency,
@@ -173,6 +177,8 @@ pub struct Game {
     pub move_speed: Option<f64>,
     pub tool: Tool,
     pub bp_radius: f64,
+    /// Ammunition for the next call for fire.
+    pub fire_kind: FireKind,
     pub graphics: Vec<OrderGraphic>,
     /// Route being drafted: checkpoints (and, once sent, the destination). Built with
     /// Shift+right click (sent when Shift is released) or with the ROUTE tool.
@@ -213,6 +219,7 @@ impl Game {
             move_speed: None,
             tool: Tool::None,
             bp_radius: 250.0,
+            fire_kind: FireKind::He,
             graphics: Vec::new(),
             draft: Vec::new(),
             acc: 0.0,
@@ -467,6 +474,7 @@ impl Game {
             (Key::Char('z'), C::Smoke),
             (Key::Char('e'), C::EngineSmoke),
             (Key::Char('n'), C::SmokeRound),
+            (Key::Char('y'), C::CallFire),
             (Key::Char('q'), C::Ammo),
             (Key::Char('x'), C::BreakContact),
             (Key::Char('h'), C::Halt),
@@ -546,6 +554,10 @@ impl Game {
                     self.fire_smoke_round(world);
                     self.tool = Tool::None;
                 }
+                Tool::CallFire => {
+                    self.call_for_fire(world);
+                    self.tool = Tool::None;
+                }
                 Tool::BattlePosition { centre: None } => self.tool = Tool::BattlePosition { centre: Some(world) },
                 Tool::BattlePosition { centre: Some(c) } => {
                     let facing = ai::drive::bearing(c, world);
@@ -590,7 +602,12 @@ impl Game {
                     self.send_route();
                 }
                 // Right click cancels a targeting mode (RTS convention).
-                Tool::Move | Tool::Engage | Tool::SmokeRound | Tool::BattlePosition { .. } | Tool::Graphic { .. } => {
+                Tool::Move
+                | Tool::Engage
+                | Tool::SmokeRound
+                | Tool::CallFire
+                | Tool::BattlePosition { .. }
+                | Tool::Graphic { .. } => {
                     self.tool = Tool::None;
                 }
                 _ if inp.ctrl => self.engage_at(cam, inp.mouse),
@@ -697,6 +714,15 @@ impl Game {
             }
             Cmd::Engage if self.sel_unit.is_some() => self.toggle_tool(Tool::Engage),
             Cmd::SmokeRound if self.smoke_rounds(self.addressee()) > 0 => self.toggle_tool(Tool::SmokeRound),
+            Cmd::CallFire => {
+                if self.picture().fire_support.is_empty() {
+                    self.radio("NO FIRE SUPPORT AVAILABLE.".into());
+                } else if self.tool == Tool::CallFire {
+                    self.fire_kind = if self.fire_kind == FireKind::He { FireKind::Smoke } else { FireKind::He };
+                } else {
+                    self.tool = Tool::CallFire;
+                }
+            }
             Cmd::Ammo => self.cycle_ammo(),
             Cmd::BattlePosition if self.sel_platoon.is_some() => {
                 self.toggle_tool(Tool::BattlePosition { centre: None });
@@ -1006,6 +1032,26 @@ impl Game {
         }
     }
 
+    /// The battery a call for fire goes to: the first idle one with rounds of the chosen kind.
+    fn fire_battery(&self) -> Option<&sim::view::BatteryView> {
+        let b = &self.picture().fire_support;
+        let has = |v: &&sim::view::BatteryView| match self.fire_kind {
+            FireKind::He => v.he_rounds > 0,
+            FireKind::Smoke => v.smoke_rounds > 0,
+        };
+        b.iter().filter(has).find(|v| v.status == sim::view::BatteryStatus::Ready).or_else(|| b.first())
+    }
+
+    fn call_for_fire(&mut self, at: [f64; 2]) {
+        let Some((id, cs)) = self.fire_battery().map(|b| (b.id, b.callsign.clone())) else { return };
+        let (kind, volleys, what) = match self.fire_kind {
+            FireKind::He => (FireKind::He, 3, "HE"),
+            FireKind::Smoke => (FireKind::Smoke, 1, "SMOKE"),
+        };
+        self.order(Command::CallForFire { battery: id, at, kind, volleys });
+        self.radio(format!("TO {cs}: FIRE MISSION, GRID {}, {what}, FIRE FOR EFFECT, OVER.", format::grid(at)));
+    }
+
     fn smoke_salvos(&self, to: Addressee) -> u32 {
         let pic = self.picture();
         match to {
@@ -1230,6 +1276,32 @@ impl Game {
                 f.text("SMOKE", p[0] - 16.0, p[1] - 5.0, style::FONT, Rgba(205, 205, 205, 190));
             }
         }
+        // Fire support: bursts fade over their 30 s life; a mission shows its aim point.
+        for i in &pic.impacts {
+            let age = (pic.time_s - i.time_s).clamp(0.0, 30.0);
+            let a = (200.0 * (1.0 - age / 30.0)) as u8;
+            let p = cam.to_screen(i.pos);
+            let r = ((if i.smoke { 20.0 } else { 12.0 }) / cam.mpp) as f32;
+            f.circle_lines(p, r.max(3.0), Rgba(250, 200, 120, a));
+            if age < 1.5 && !i.smoke {
+                f.circle(p, r.max(3.0), Rgba(250, 220, 160, a));
+            }
+        }
+        for b in &pic.fire_support {
+            if let sim::view::BatteryStatus::Mission { at, smoke, .. } = b.status {
+                let p = cam.to_screen(at);
+                f.circle_lines(p, 8.0, style::AMBER);
+                f.line([p[0] - 12.0, p[1]], [p[0] + 12.0, p[1]], 1.0, style::AMBER);
+                f.line([p[0], p[1] - 12.0], [p[0], p[1] + 12.0], 1.0, style::AMBER);
+                f.text(
+                    &format!("{} {}", b.callsign, if smoke { "SMK" } else { "HE" }),
+                    p[0] + 12.0,
+                    p[1] - 14.0,
+                    style::FONT_S,
+                    style::AMBER,
+                );
+            }
+        }
         // Shots this side knows about.
         for s in &pic.shots {
             let age = (pic.time_s - s.time_s).clamp(0.0, 4.0);
@@ -1339,6 +1411,11 @@ impl Game {
                 f.circle_lines(mouse, 12.0, style::TEXT);
                 f.circle_lines(mouse, 4.0, style::TEXT);
             }
+            Tool::CallFire => {
+                let r = (35.0 / cam.mpp) as f32;
+                f.circle_lines(mouse, r.max(8.0), style::AMBER);
+                f.circle_lines(mouse, 3.0, style::AMBER);
+            }
             Tool::Engage => {
                 f.circle_lines(mouse, 10.0, style::HOSTILE);
                 f.line([mouse[0] - 14.0, mouse[1]], [mouse[0] + 14.0, mouse[1]], 1.0, style::HOSTILE);
@@ -1420,6 +1497,10 @@ impl Game {
             Tool::Move => "MOVE: CLICK DESTINATION   (RIGHT CLICK / ESC CANCEL)".into(),
             Tool::Route => format!("ROUTE: CLICK CHECKPOINTS ({n}), RIGHT CLICK DESTINATION   BKSP UNDO   ESC CANCEL"),
             Tool::Engage => "ENGAGE: CLICK A CONTACT   (RIGHT CLICK / ESC CANCEL)".into(),
+            Tool::CallFire => format!(
+                "CALL FOR FIRE ({}): CLICK THE TARGET   Y HE/SMOKE   (RIGHT CLICK / ESC CANCEL)",
+                if self.fire_kind == FireKind::He { "HE" } else { "SMOKE" }
+            ),
             Tool::SmokeRound => "SMOKE ROUND: CLICK THE AIM POINT   (RIGHT CLICK / ESC CANCEL)".into(),
             Tool::BattlePosition { centre: None } => "BATTLE POSITION: CLICK CENTRE   [ ] RADIUS".into(),
             Tool::BattlePosition { .. } => "BATTLE POSITION: CLICK THREAT DIRECTION".into(),
@@ -1743,6 +1824,19 @@ impl Game {
                     .active(is(&Tool::SmokeRound))
                     .tip("FIRE TANK-GUN SMOKE ROUNDS AT A POINT (BLINDS OBSERVERS ON A DISTANT POSITION)"),
             ),
+            (20, {
+                let (label, n) = match (self.fire_kind, self.fire_battery()) {
+                    (FireKind::He, Some(b)) => ("HE", b.he_rounds),
+                    (FireKind::Smoke, Some(b)) => ("SMOKE", b.smoke_rounds),
+                    _ => ("", 0),
+                };
+                b("CALL FIRE", Cmd::CallFire)
+                    .key("Y")
+                    .value(if label.is_empty() { String::new() } else { format!("{label} {n}") })
+                    .enabled(self.fire_battery().is_some_and(|_| n > 0))
+                    .active(self.tool == Tool::CallFire)
+                    .tip("CALL FOR FIRE ON A POINT: ARTILLERY BATTERY, FDC DELAY, THEN SHOT / SPLASH / ROUNDS COMPLETE (Y AGAIN: HE / SMOKE)")
+            }),
             (
                 19,
                 b("BREAK CONT", Cmd::BreakContact)
@@ -1988,13 +2082,34 @@ impl Game {
             return Vec::new();
         }
         let n = self.roster().len() as f32;
-        vec![
-            self.info(screen).0,
-            Rect::new(4.0, TOP_H + 4.0, ROSTER_W + 4.0, 24.0 + n * 24.0),
-            hud::minimap_frame(screen),
-            hud::log_frame(screen),
-            hud::card_frame(screen),
-        ]
+        vec![self.info(screen).0, Rect::new(4.0, TOP_H + 4.0, ROSTER_W + 4.0, 24.0 + n * 24.0)]
+            .into_iter()
+            .chain(self.fire_panel(n))
+            .chain([hud::minimap_frame(screen), hud::log_frame(screen), hud::card_frame(screen)])
+            .collect()
+    }
+
+    /// Battery status lines, under the roster: (frame, lines).
+    fn fire_lines(&self) -> Vec<(String, Rgba)> {
+        use sim::view::BatteryStatus;
+        let mut out = Vec::new();
+        for b in &self.picture().fire_support {
+            out.push((format!("{}  {}", b.callsign, b.name), style::TEXT));
+            let status = match b.status {
+                BatteryStatus::Ready => "READY".to_owned(),
+                BatteryStatus::Mission { volleys_left, impact_in_s, smoke, .. } => {
+                    let eta = impact_in_s.map_or(String::new(), |s| format!(", IMPACT {:.0} S", s));
+                    format!("MISSION {} {volleys_left} TO FIRE{eta}", if smoke { "SMOKE" } else { "HE" })
+                }
+            };
+            out.push((format!("HE {}  SMK {}  {status}", b.he_rounds, b.smoke_rounds), style::TEXT_DIM));
+        }
+        out
+    }
+
+    fn fire_panel(&self, roster_rows: f32) -> Option<Rect> {
+        let n = self.fire_lines().len() as f32;
+        (n > 0.0).then(|| Rect::new(4.0, TOP_H + 8.0 + 24.0 + roster_rows * 24.0, ROSTER_W + 4.0, 26.0 + n * 16.0))
     }
 
     /// Top bar (game part), panels and the command card. Buttons are drawn by the caller.
@@ -2047,6 +2162,13 @@ impl Game {
         let n = self.roster().len() as f32;
         hud::panel(f, Rect::new(4.0, TOP_H + 4.0, ROSTER_W + 4.0, 24.0 + n * 24.0));
         f.text("ORDER OF BATTLE", 12.0, TOP_H + 10.0, style::FONT, style::TEXT_DIM);
+        if let Some(r) = self.fire_panel(n) {
+            hud::panel(f, r);
+            f.text("FIRE SUPPORT", r.x + 8.0, r.y + 6.0, style::FONT, style::TEXT_DIM);
+            for (k, (l, c)) in self.fire_lines().iter().enumerate() {
+                f.text(l, r.x + 8.0, r.y + 24.0 + k as f32 * 16.0, style::FONT_S, *c);
+            }
+        }
 
         // Selection panel.
         let (r, head, _, foot) = self.info(screen);
@@ -2342,8 +2464,36 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                     format!("{cs}: BREAKING CONTACT, THREAT GRID {}. SMOKE, WITHDRAWING.", format::grid(*threat))
                 }
                 PlatoonReport::ContinuingMission => format!("{cs}: CONTACT LOST. CONTINUING MISSION."),
+                PlatoonReport::IndirectFire { at, clearing } => format!(
+                    "{cs}: INDIRECT FIRE, GRID {}. {}.",
+                    format::grid(*at),
+                    if *clearing { "CLEARING IMPACT AREA" } else { "BUTTONED UP, HOLDING" }
+                ),
                 PlatoonReport::Bounding { section } => format!("{cs}: SECTION {section} BOUNDING."),
                 PlatoonReport::Strength { remaining, of } => format!("{cs}: {remaining} OF {of} VEHICLES OPERATIONAL."),
+            }
+        }
+        Event::FireSupport { side, battery, at, report } if *side == pic.side => {
+            let cs = pic.fire_support.iter().find(|b| b.id == *battery).map_or("ARTY", |b| b.callsign.as_str());
+            match report {
+                FireReport::Accepted { eta_s } => format!(
+                    "{cs}: FIRE MISSION, GRID {}. SHOT IN {:.0} SECONDS, OVER.",
+                    format::grid(*at),
+                    (eta_s / 5.0).round() * 5.0
+                ),
+                FireReport::Denied(why) => format!(
+                    "{cs}: UNABLE. {}.",
+                    match why {
+                        DenyReason::OutOfRange => "OUT OF RANGE",
+                        DenyReason::TooClose => "BELOW MINIMUM RANGE",
+                        DenyReason::NoAmmo => "NO AMMUNITION",
+                        DenyReason::Busy => "MISSION IN PROGRESS",
+                    }
+                ),
+                FireReport::Shot => format!("{cs}: SHOT, OVER."),
+                FireReport::Splash => format!("{cs}: SPLASH, OVER."),
+                FireReport::RoundsComplete => format!("{cs}: ROUNDS COMPLETE, END OF MISSION."),
+                FireReport::Ceased => format!("{cs}: CEASE FIRE, END OF MISSION."),
             }
         }
         Event::ScenarioEnd { winner, reason } => {
