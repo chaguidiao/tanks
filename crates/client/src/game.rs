@@ -1966,6 +1966,7 @@ impl Game {
                 TriggerCondition::AtTime { time_s } => {
                     format!("AT {}", format::clock(self.scenario.start_time_s as f64 + time_s))
                 }
+                TriggerCondition::Elapsed { s } => format!("AFTER {s:.0} S"),
             };
             foot.push((
                 format!("CW {}: {cond} -> {}{}", t.id, t.order, if t.fired { " (DONE)" } else { "" }),
@@ -2477,6 +2478,10 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                     format::grid(*at),
                     if *clearing { "CLEARING IMPACT AREA" } else { "BUTTONED UP, HOLDING" }
                 ),
+                PlatoonReport::AtCheckpoint { n, waiting: true } => format!("{cs}: CP {n}. WAITING."),
+                PlatoonReport::AtCheckpoint { n, waiting: false } => format!("{cs}: AT CP {n}."),
+                PlatoonReport::PlanBranch { to } => format!("{cs}: CONTACT, MOVING TO CP {to}."),
+                PlatoonReport::PlanComplete => format!("{cs}: PLAN COMPLETE."),
                 PlatoonReport::Bounding { section } => format!("{cs}: SECTION {section} BOUNDING."),
                 PlatoonReport::Strength { remaining, of } => format!("{cs}: {remaining} OF {of} VEHICLES OPERATIONAL."),
             }

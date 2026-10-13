@@ -1,4 +1,5 @@
-use ai::picture::{ContactId, ContactLevel, Graphic, PlatoonId, TriggerCondition, WeaponsStatus};
+use ai::picture::{ContactId, ContactLevel, Graphic, Plan, PlatoonId, TriggerCondition, WeaponsStatus};
+pub use ai::picture::{FireKind, PositionKind};
 use serde::{Deserialize, Serialize};
 use sim_data::{Formation, Technique};
 
@@ -17,19 +18,6 @@ pub enum SmokeMode {
     Screen,
     EngineOn,
     EngineOff,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PositionKind {
-    HullDown,
-    TurretDown,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum FireKind {
-    /// High explosive, fire for effect.
-    He,
-    Smoke,
 }
 
 /// Orders into the simulation. Intent-level: platoon and vehicle AI decide how to execute them.
@@ -125,6 +113,13 @@ pub enum Command {
     /// Cease fire: the battery stops firing; rounds already in the air still land.
     CeaseFire {
         battery: u32,
+    },
+    /// Give a platoon a checkpoint plan, starting at step id `start` (an empty plan clears it).
+    /// One radio order (DESIGN.md §14 #22).
+    SetPlan {
+        platoon: PlatoonId,
+        plan: Plan,
+        start: u16,
     },
     /// Draw a control measure (not a radio order: no delay).
     AddGraphic {
@@ -300,6 +295,16 @@ pub enum PlatoonReport {
         at: Vec2,
         clearing: bool,
     },
+    /// Plan: arrived at checkpoint `n` (1-based); `waiting` = holding for its condition.
+    AtCheckpoint {
+        n: u16,
+        waiting: bool,
+    },
+    /// Plan: branch taken, now moving to checkpoint `to`.
+    PlanBranch {
+        to: u16,
+    },
+    PlanComplete,
     /// Losses: members remaining.
     Strength {
         remaining: u8,

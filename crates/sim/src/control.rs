@@ -72,24 +72,31 @@ pub fn reference_sign(pic: &PerceivedWorld, c: &TriggerCondition) -> f64 {
         TriggerCondition::FriendlyCrosses { line, platoon } => line_points(&pic.graphics, *line)
             .and_then(|l| centroid(pic, Some(*platoon)).map(|p| side_of_line(l, p).0))
             .unwrap_or(1.0),
-        TriggerCondition::AtTime { .. } => 1.0,
+        TriggerCondition::AtTime { .. } | TriggerCondition::Elapsed { .. } => 1.0,
     }
 }
 
 /// Is the trigger's condition met in the side's picture?
 pub fn met(pic: &PerceivedWorld, t: &Trigger) -> bool {
-    match &t.condition {
+    condition_met(pic, &t.condition, t.reference_sign)
+}
+
+/// Does `c` hold in the side's picture? `sign` = reference side of the line for crossings.
+/// `Elapsed` is plan-only (the plan runner evaluates it); here it never holds.
+pub fn condition_met(pic: &PerceivedWorld, c: &TriggerCondition, sign: f64) -> bool {
+    match c {
         TriggerCondition::AtTime { time_s } => pic.time_s >= *time_s,
+        TriggerCondition::Elapsed { .. } => false,
         TriggerCondition::EnemyCrosses { line } => {
             let Some(l) = line_points(&pic.graphics, *line) else { return false };
             pic.live_contacts().filter(|c| pic.time_s - c.last_report_s < 30.0).any(|c| {
                 let (s, inside) = side_of_line(l, c.pos);
-                inside && s == t.reference_sign
+                inside && s == sign
             })
         }
         TriggerCondition::FriendlyCrosses { line, platoon } => {
             let Some(l) = line_points(&pic.graphics, *line) else { return false };
-            centroid(pic, Some(*platoon)).is_some_and(|p| side_of_line(l, p).0 != t.reference_sign)
+            centroid(pic, Some(*platoon)).is_some_and(|p| side_of_line(l, p).0 != sign)
         }
     }
 }

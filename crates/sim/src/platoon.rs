@@ -1,6 +1,6 @@
 //! Platoons: membership, order state and the platoon view. Behaviour is in `platoon_ai.rs`.
 
-use ai::picture::{PlatoonId, PlatoonView, SideId};
+use ai::picture::{ContactReaction, PlatoonId, PlatoonView, SideId};
 use ai::position::Candidate;
 use sim_data::{Formation, Technique};
 
@@ -65,6 +65,9 @@ pub struct Platoon {
     pub last_indirect: Option<u64>,
     /// Breaking contact: the react-to-contact halt is suppressed until the move ends.
     pub withdraw: bool,
+    /// Checkpoint plan being executed (DESIGN.md §8.3).
+    pub plan: Option<crate::plan::PlanState>,
+    pub contact_reaction: ContactReaction,
 }
 
 impl PlatoonOrder {
@@ -144,12 +147,19 @@ impl Platoon {
 
     pub fn view(&self, w: &World) -> PlatoonView {
         let task = match &self.order {
+            PlatoonOrder::None if matches!(&self.plan, Some(st) if matches!(st.phase, crate::plan::Phase::Waiting { .. })) =>
+            {
+                format!("WAITING AT CP {}", self.plan.as_ref().map_or(0, |st| st.cursor + 1))
+            }
             PlatoonOrder::None => match &self.held {
                 Some(PlatoonOrder::Move { .. }) => "HALTED, ROUTE HELD".to_owned(),
                 Some(_) => "HALTED, BP ORDER HELD".to_owned(),
                 None => "HALTED".to_owned(),
             },
-            PlatoonOrder::Move { .. } => "MOVING".to_owned(),
+            PlatoonOrder::Move { .. } => match &self.plan {
+                Some(st) => format!("PLAN CP {}/{}", st.cursor + 1, st.plan.steps.len()),
+                None => "MOVING".to_owned(),
+            },
             PlatoonOrder::Occupy { reported: true, .. } => "SET IN BATTLE POSITION".to_owned(),
             PlatoonOrder::Occupy { .. } => "OCCUPYING BATTLE POSITION".to_owned(),
             PlatoonOrder::Contact => "IN CONTACT".to_owned(),
@@ -174,6 +184,8 @@ impl Platoon {
             task,
             held: self.held.is_some(),
             speed_limit: self.speed_limit,
+            plan: self.plan.as_ref().map(|s| s.view()),
+            contact_reaction: self.contact_reaction,
         }
     }
 }

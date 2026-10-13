@@ -146,6 +146,8 @@ pub struct PlatoonView {
     pub held: bool,
     /// March speed limit (m/s), None = formation speed.
     pub speed_limit: Option<f64>,
+    pub plan: Option<PlanView>,
+    pub contact_reaction: ContactReaction,
 }
 
 /// Control measures (DESIGN.md §8.4; MIL-STD-2525D tactical graphics).
@@ -174,6 +176,150 @@ pub enum TriggerCondition {
     FriendlyCrosses { line: u32, platoon: PlatoonId },
     /// At a scenario time (s).
     AtTime { time_s: f64 },
+    /// Plan only: seconds since the step started waiting (a trigger never fires on it).
+    Elapsed { s: f64 },
+}
+
+/// Battle-position posture (ATP 3-20.15 ch. 5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PositionKind {
+    HullDown,
+    TurretDown,
+}
+
+/// Ammunition for a call for fire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FireKind {
+    /// High explosive, fire for effect.
+    He,
+    Smoke,
+}
+
+/// A checkpoint plan for a platoon (DESIGN.md §8.3): a route whose legs and checkpoints carry
+/// their own instructions (FM 1-02.2 checkpoints; FM 6-0 execution by code word).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Plan {
+    pub steps: Vec<PlanStep>,
+}
+
+impl Plan {
+    pub fn index_of(&self, id: u16) -> Option<usize> {
+        self.steps.iter().position(|s| s.id == id)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanStep {
+    /// Stable id, unique within the plan (survives edits; used by `start` and branches).
+    pub id: u16,
+    pub at: Vec2,
+    /// Settings for the leg that ends at this checkpoint.
+    #[serde(default)]
+    pub leg: LegSettings,
+    /// Done on arrival, in order.
+    #[serde(default)]
+    pub actions: Vec<StepAction>,
+    /// Hold here until met (None = continue at once).
+    #[serde(default)]
+    pub wait: Option<ConditionSet>,
+    /// Done when the wait is met, before departing.
+    #[serde(default)]
+    pub on_release: Vec<StepAction>,
+    /// On the leg to this checkpoint or waiting at it: if met, jump to step `goto`.
+    #[serde(default)]
+    pub branch: Option<Branch>,
+}
+
+impl PlanStep {
+    pub fn new(id: u16, at: Vec2) -> Self {
+        Self {
+            id,
+            at,
+            leg: LegSettings::default(),
+            actions: Vec::new(),
+            wait: None,
+            on_release: Vec::new(),
+            branch: None,
+        }
+    }
+
+    /// The platoon halts here (the formation does not simply flow through).
+    pub fn is_stop(&self) -> bool {
+        !self.actions.is_empty() || self.wait.is_some()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum SpeedSetting {
+    /// As fast as the formation allows.
+    Max,
+    Limit(f64),
+}
+
+/// None = keep what the platoon has.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct LegSettings {
+    #[serde(default)]
+    pub speed: Option<SpeedSetting>,
+    #[serde(default)]
+    pub formation: Option<sim_data::Formation>,
+    #[serde(default)]
+    pub technique: Option<sim_data::Technique>,
+    #[serde(default)]
+    pub weapons: Option<WeaponsStatus>,
+    #[serde(default)]
+    pub on_contact: Option<ContactReaction>,
+}
+
+/// What a platoon does when it meets the enemy (battle drills, ATP 3-20.15 App. F).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContactReaction {
+    /// Doctrine-pack drill: halt, orient, engage, continue when quiet.
+    #[default]
+    Drill,
+    /// Keep moving, return fire on the move (bypass).
+    Continue,
+    /// Find hasty hull-down positions near the current location facing the threat.
+    HastyPosition,
+    /// Battle drill break contact.
+    BreakContact,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum StepAction {
+    Face { bearing: f64 },
+    OccupyBp { radius_m: f64, facing: f64, kind: PositionKind },
+    SmokeScreen,
+    EngineSmoke(bool),
+    FireSmoke { at: Vec2, rounds: u32 },
+    CallForFire { battery: u32, at: Vec2, kind: FireKind, volleys: u32 },
+    Report,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConditionSet {
+    /// All conditions must hold (else any one).
+    pub all: bool,
+    pub conditions: Vec<TriggerCondition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Branch {
+    pub when: ConditionSet,
+    /// Step id to continue with.
+    pub goto: u16,
+}
+
+/// A platoon's plan as the side knows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlanView {
+    pub plan: Plan,
+    /// Id of the step being executed (heading to, or acting/waiting at).
+    pub cursor_id: u16,
+    /// Waiting at the cursor step for this.
+    pub waiting: Option<ConditionSet>,
+    /// Ids of the steps already passed.
+    pub passed: Vec<u16>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

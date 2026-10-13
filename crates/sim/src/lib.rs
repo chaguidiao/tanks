@@ -17,6 +17,7 @@ pub mod fires;
 pub mod gunnery;
 pub mod mobility;
 pub mod picture;
+pub mod plan;
 pub mod platoon;
 pub mod platoon_ai;
 pub mod sensors;
@@ -212,6 +213,8 @@ impl Sim {
                                 last_strength: 0,
                                 last_indirect: None,
                                 withdraw: false,
+                                plan: None,
+                                contact_reaction: Default::default(),
                             });
                             platoons.last_mut().expect("pushed")
                         }
@@ -813,6 +816,7 @@ impl Sim {
                     && let Some(p) = self.platoon_mut(c.side, pid)
                 {
                     p.order = platoon::PlatoonOrder::None;
+                    p.plan = None;
                 }
                 let layer = self.map.mobility(&self.vehicles[vi].id).expect("checked at spawn");
                 let pos = self.world.transform[k].pos;
@@ -835,19 +839,25 @@ impl Sim {
                     && let Some(p) = self.platoon_mut(c.side, *p)
                 {
                     p.halt();
+                    if let Some(st) = p.plan.as_mut() {
+                        st.paused = true;
+                    }
                     events.push(Event::OrderReceived { side: c.side, to: *to });
                 }
             }
             Command::Resume { to } => {
                 let resumed = match to {
-                    Addressee::Platoon(p) => self.platoon_mut(c.side, *p).is_some_and(|p| match p.held.take() {
-                        Some(o) => {
-                            p.order = o;
-                            p.replanned = 0;
-                            p.contact_reported = false;
-                            true
+                    Addressee::Platoon(p) => self.platoon_mut(c.side, *p).is_some_and(|p| {
+                        let was_paused = p.plan.as_mut().is_some_and(|st| std::mem::take(&mut st.paused));
+                        match p.held.take() {
+                            Some(o) => {
+                                p.order = o;
+                                p.replanned = 0;
+                                p.contact_reported = false;
+                                true
+                            }
+                            None => was_paused,
                         }
-                        None => false,
                     }),
                     Addressee::Unit(_) => self.members(c.side, *to).into_iter().any(|k| self.world.resume(k)),
                 };
@@ -905,6 +915,7 @@ impl Sim {
                     p.technique = t;
                     p.speed_limit = *speed_limit_mps;
                     p.order = platoon::PlatoonOrder::new_move(dest, via.clone());
+                    p.plan = None;
                     p.held = None;
                     p.withdraw = false;
                     p.replanned = 0;
@@ -947,7 +958,29 @@ impl Sim {
                 }
                 events.push(Event::OrderReceived { side: c.side, to: *to });
             }
-            Command::BreakContact { platoon } => self.break_contact(c.side, *platoon, events),
+            Command::BreakContact { platoon } => {
+                if let Some(p) = self.platoon_mut(c.side, *platoon) {
+                    p.plan = None;
+                }
+                self.break_contact(c.side, *platoon, events)
+            }
+            Command::SetPlan { platoon, plan, start } => {
+                let Some(p) = self.platoon_mut(c.side, *platoon) else { return };
+                if plan.steps.is_empty() {
+                    p.plan = None;
+                } else if let Some(idx) = plan.index_of(*start) {
+                    p.plan = Some(match p.plan.take() {
+                        Some(old) => old.edited(plan.clone(), idx),
+                        None => {
+                            p.held = None;
+                            plan::PlanState::new(plan.clone(), idx)
+                        }
+                    });
+                } else {
+                    return;
+                }
+                events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
+            }
             Command::SelectAmmo { to, kind } => {
                 for k in self.members(c.side, *to) {
                     if let Some(g) = self.world.gun[k].as_mut() {
@@ -1025,6 +1058,7 @@ impl Sim {
                 };
                 if let Some(p) = self.platoon_mut(c.side, *platoon) {
                     p.order = o;
+                    p.plan = None;
                     p.held = None;
                     p.withdraw = false;
                     events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
@@ -1079,6 +1113,15 @@ impl Sim {
             h.u64(s.triggers.iter().filter(|t| t.fired).count() as u64);
         }
         self.smoke.hash_into(&mut h);
+        for p in &self.platoons {
+            if let Some(st) = &p.plan {
+                st.hash_into(p.id, &mut h);
+            }
+            if p.contact_reaction != ai::picture::ContactReaction::Drill {
+                h.u32(p.id.0);
+                h.u8(p.contact_reaction as u8);
+            }
+        }
         for b in &self.batteries {
             b.hash_into(&mut h);
         }

@@ -13,7 +13,7 @@
 //!   the contact has been quiet for a while.
 
 use ai::formation::{along, length, slot_position};
-use ai::picture::{Condition, PerceivedWorld};
+use ai::picture::{Condition, ContactReaction, PerceivedWorld};
 use ai::position::{BpQuery, Candidate, assign, evaluate};
 use sim_data::{DoctrinePack, Technique, VehicleDef};
 use terrain::BakedMap;
@@ -53,7 +53,7 @@ pub struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    fn report(&mut self, p: &Platoon, r: PlatoonReport) {
+    pub(crate) fn report(&mut self, p: &Platoon, r: PlatoonReport) {
         self.events.push(Event::PlatoonReport { side: p.side, platoon: p.id, report: r });
     }
 
@@ -87,6 +87,7 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
         if !matches!(p.order, PlatoonOrder::Move { .. }) {
             p.withdraw = false;
         }
+        crate::plan::step(p, ctx);
         fire_distribution(p, ctx, &doctrine);
         indirect_fire_drill(p, &alive, ctx);
         contact_drill(p, ctx, &doctrine);
@@ -126,7 +127,7 @@ fn fresh_contacts(pic: &PerceivedWorld) -> Vec<Vec2> {
     pic.live_contacts().filter(|c| pic.time_s - c.last_report_s < CONTACT_FRESH_S).map(|c| c.pos).collect()
 }
 
-fn centroid(world: &World, members: &[usize]) -> Vec2 {
+pub(crate) fn centroid(world: &World, members: &[usize]) -> Vec2 {
     let n = members.len().max(1) as f64;
     [
         members.iter().map(|&k| world.transform[k].pos[0]).sum::<f64>() / n,
@@ -178,7 +179,11 @@ fn fire_distribution(p: &Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
 }
 
 fn contact_drill(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
-    if !d.halt_on_contact || p.withdraw || !matches!(p.order, PlatoonOrder::Move { .. }) {
+    if !d.halt_on_contact
+        || p.withdraw
+        || p.contact_reaction == ContactReaction::Continue
+        || !matches!(p.order, PlatoonOrder::Move { .. })
+    {
         return;
     }
     let pic = &ctx.pictures[p.side.0 as usize];
