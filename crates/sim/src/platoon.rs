@@ -67,6 +67,8 @@ pub struct Platoon {
     pub withdraw: bool,
     /// Checkpoint plan being executed (DESIGN.md §8.3).
     pub plan: Option<crate::plan::PlanState>,
+    /// Step ids passed by the plan that last ran to its end.
+    pub finished: Vec<u16>,
     pub contact_reaction: ContactReaction,
 }
 
@@ -147,7 +149,7 @@ impl Platoon {
 
     pub fn view(&self, w: &World) -> PlatoonView {
         let task = match &self.order {
-            PlatoonOrder::None if matches!(&self.plan, Some(st) if matches!(st.phase, crate::plan::Phase::Waiting { .. })) =>
+            PlatoonOrder::None | PlatoonOrder::Occupy { .. } if matches!(&self.plan, Some(st) if matches!(st.phase, crate::plan::Phase::Waiting { .. })) =>
             {
                 format!("WAITING AT CP {}", self.plan.as_ref().map_or(0, |st| st.cursor + 1))
             }
@@ -174,6 +176,7 @@ impl Platoon {
             _ => (Vec::new(), Vec::new()),
         };
         PlatoonView {
+            plan_done: self.finished.clone(),
             route,
             waypoints,
             id: self.id,

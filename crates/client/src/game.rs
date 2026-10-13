@@ -1967,6 +1967,14 @@ impl Game {
                     format!("AT {}", format::clock(self.scenario.start_time_s as f64 + time_s))
                 }
                 TriggerCondition::Elapsed { s } => format!("AFTER {s:.0} S"),
+                TriggerCondition::CodeWord { word } => format!("CODE WORD {}", self.code_word_name(*word)),
+                TriggerCondition::ContactWithin { range_m, .. } => format!("CONTACT < {:.0} M", range_m),
+                TriggerCondition::EnemyInArea { graphic } => {
+                    format!("ENEMY IN {}", pic.graphic(*graphic).map_or("AREA".into(), |g| g.label.clone()))
+                }
+                TriggerCondition::StrengthAtMost { remaining, .. } => format!("STRENGTH <= {remaining}"),
+                TriggerCondition::UnderFire { .. } => "UNDER FIRE".into(),
+                TriggerCondition::PlatoonAt { step, .. } => format!("PLT AT CP {}", step),
             };
             foot.push((
                 format!("CW {}: {cond} -> {}{}", t.id, t.order, if t.fired { " (DONE)" } else { "" }),
@@ -1983,6 +1991,14 @@ impl Game {
         ));
         let h = cy - y + 4.0 + foot.len() as f32 * LINE + 6.0;
         (Rect::new(x, y, W, h), head, rows, foot)
+    }
+
+    /// The side's name for code word `word` (its doctrine pack's list).
+    pub fn code_word_name(&self, word: u8) -> String {
+        self.sim
+            .doctrine(self.side)
+            .and_then(|d| d.code_words.get(word as usize).cloned())
+            .unwrap_or_else(|| format!("WORD {}", word + 1))
     }
 
     /// Status card of one own vehicle: what its crew reports (own units are reported exactly).
@@ -2454,6 +2470,9 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
         Event::TriggerFired { side, id } if *side == pic.side => {
             let t = pic.triggers.iter().find(|t| t.id == *id)?;
             format!("CODE WORD {}: EXECUTE {}.", id, t.order)
+        }
+        Event::CodeWordSent { side, word } if *side == pic.side => {
+            format!("ALL STATIONS, CODE WORD {}.", game.code_word_name(*word))
         }
         Event::PlatoonReport { side, platoon, report } if *side == pic.side => {
             let cs = game.platoon_cs(*platoon);

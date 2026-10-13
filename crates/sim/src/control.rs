@@ -50,6 +50,17 @@ pub fn line_points(graphics: &[Graphic], id: u32) -> Option<&[Vec2]> {
     })
 }
 
+/// Radius of the area a TRP stands for (m).
+const TRP_AREA_M: f64 = 150.0;
+/// Crew suppression at which a platoon counts as under fire.
+const UNDER_FIRE_SUPPRESSION: f64 = 0.15;
+/// Contacts reported this recently (s) count as current.
+const FRESH_S: f64 = 30.0;
+
+fn fresh_contacts(pic: &PerceivedWorld) -> impl Iterator<Item = &ai::picture::Contact> {
+    pic.live_contacts().filter(|c| pic.time_s - c.last_report_s < FRESH_S)
+}
+
 fn centroid(pic: &PerceivedWorld, platoon: Option<ai::picture::PlatoonId>) -> Option<Vec2> {
     let units: Vec<_> = pic
         .own
@@ -72,7 +83,7 @@ pub fn reference_sign(pic: &PerceivedWorld, c: &TriggerCondition) -> f64 {
         TriggerCondition::FriendlyCrosses { line, platoon } => line_points(&pic.graphics, *line)
             .and_then(|l| centroid(pic, Some(*platoon)).map(|p| side_of_line(l, p).0))
             .unwrap_or(1.0),
-        TriggerCondition::AtTime { .. } | TriggerCondition::Elapsed { .. } => 1.0,
+        _ => 1.0,
     }
 }
 
@@ -86,7 +97,33 @@ pub fn met(pic: &PerceivedWorld, t: &Trigger) -> bool {
 pub fn condition_met(pic: &PerceivedWorld, c: &TriggerCondition, sign: f64) -> bool {
     match c {
         TriggerCondition::AtTime { time_s } => pic.time_s >= *time_s,
-        TriggerCondition::Elapsed { .. } => false,
+        TriggerCondition::Elapsed { .. } | TriggerCondition::PlatoonAt { .. } => false,
+        TriggerCondition::CodeWord { word } => pic.code_words.iter().any(|c| c.word == *word),
+        TriggerCondition::ContactWithin { platoon, range_m } => centroid(pic, Some(*platoon))
+            .is_some_and(|p| fresh_contacts(pic).any(|c| libm::hypot(c.pos[0] - p[0], c.pos[1] - p[1]) <= *range_m)),
+        TriggerCondition::EnemyInArea { graphic } => {
+            let Some((centre, radius)) = pic.graphic(*graphic).and_then(|g| match &g.kind {
+                GraphicKind::Objective { centre, radius } | GraphicKind::BattlePosition { centre, radius, .. } => {
+                    Some((*centre, *radius))
+                }
+                GraphicKind::Trp { at } => Some((*at, TRP_AREA_M)),
+                GraphicKind::PhaseLine { .. } => None,
+            }) else {
+                return false;
+            };
+            fresh_contacts(pic).any(|c| libm::hypot(c.pos[0] - centre[0], c.pos[1] - centre[1]) <= radius)
+        }
+        TriggerCondition::StrengthAtMost { platoon, remaining } => {
+            let n = pic
+                .own
+                .iter()
+                .filter(|u| u.platoon == Some(*platoon) && u.condition != ai::picture::Condition::Destroyed)
+                .count();
+            n as u32 <= *remaining
+        }
+        TriggerCondition::UnderFire { platoon } => {
+            pic.own.iter().any(|u| u.platoon == Some(*platoon) && u.suppression >= UNDER_FIRE_SUPPRESSION)
+        }
         TriggerCondition::EnemyCrosses { line } => {
             let Some(l) = line_points(&pic.graphics, *line) else { return false };
             pic.live_contacts().filter(|c| pic.time_s - c.last_report_s < 30.0).any(|c| {

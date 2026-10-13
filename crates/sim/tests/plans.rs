@@ -3,7 +3,10 @@
 
 mod common;
 
-use ai::picture::{ConditionSet, LegSettings, Plan, PlanStep, PlatoonId, SpeedSetting, StepAction, TriggerCondition};
+use ai::picture::{
+    Branch, ConditionSet, ContactReaction, FireKind, Graphic, GraphicKind, LegSettings, Plan, PlanStep, PlatoonId,
+    PositionKind, SpeedSetting, StepAction, TriggerCondition,
+};
 use common::*;
 use sim::{Addressee, Command, Event, PlatoonReport, Replay, SideId, Sim};
 use sim_data::{Formation, Technique};
@@ -285,4 +288,267 @@ fn a_replay_with_a_plan_reproduces_the_state() {
     again.set_ai_enabled(SideId(1), false);
     back.play(&mut again, |_, _| {});
     assert_eq!(again.state_hash(), rec.final_hash, "replay diverged");
+}
+
+// ---- P2: conditions, actions, contact reaction, code words ----
+
+const P2: PlatoonId = PlatoonId(2);
+
+fn waits(c: TriggerCondition) -> Option<ConditionSet> {
+    Some(ConditionSet { all: true, conditions: vec![c] })
+}
+
+fn send_to(sim: &mut Sim, platoon: PlatoonId, plan: Plan) {
+    let start = plan.steps[0].id;
+    sim.submit_immediate(BLUE, Command::SetPlan { platoon, plan, start });
+}
+
+fn task_of(sim: &Sim, p: PlatoonId) -> String {
+    sim.perceived(BLUE).platoon(p).unwrap().task.clone()
+}
+
+/// Two 2-tank platoons and a battery.
+fn two_platoon_sim() -> Sim {
+    let ds = data();
+    let m = map(&ds, 400, 1400, "cropland", |_, _| 0.0);
+    let mut blue: Vec<_> = (0..2)
+        .map(|i| unit(&format!("1-{}", i + 1), "bulwark_a1", [500.0 + i as f64 * 60.0, 400.0], 0.0, Some("1")))
+        .collect();
+    blue.extend(
+        (0..2).map(|i| unit(&format!("2-{}", i + 1), "bulwark_a1", [1100.0 + i as f64 * 60.0, 400.0], 0.0, Some("2"))),
+    );
+    let red = vec![unit("211", "kurgan_b", [800.0, 5400.0], 180.0, Some("21"))];
+    let mut sc = scenario(10 * 3600, blue, red);
+    sc.sides[0].fire_support = vec![sim_data::BatteryAssign {
+        callsign: "ARTY 1".into(),
+        battery: "sph155_btry".into(),
+        position: [200.0, 100.0],
+        he_rounds: None,
+        smoke_rounds: None,
+    }];
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    sim.set_ai_enabled(SideId(1), false);
+    sim
+}
+
+fn platoon_speed(sim: &Sim, p: PlatoonId) -> f64 {
+    let w = sim.truth();
+    (0..w.len())
+        .filter(|&k| w.platoon[k] == Some(p))
+        .filter_map(|k| w.mobility[k].as_ref().map(|m| m.speed.abs()))
+        .fold(0.0, f64::max)
+}
+
+#[test]
+fn a_code_word_releases_every_waiting_platoon_in_the_same_tick() {
+    let mut sim = two_platoon_sim();
+    let cp = |x: f64| {
+        let mut a = step_at(1, [x, 900.0]);
+        a.wait = waits(TriggerCondition::CodeWord { word: 0 });
+        a.on_release = vec![
+            StepAction::SmokeScreen,
+            StepAction::CallForFire { battery: 0, at: [800.0, 3000.0], kind: FireKind::Smoke, volleys: 1 },
+        ];
+        Plan { steps: vec![a, step_at(2, [x, 1600.0])] }
+    };
+    send_to(&mut sim, P1, cp(550.0));
+    send_to(&mut sim, P2, cp(1150.0));
+    run(&mut sim, 300.0);
+    for p in [P1, P2] {
+        assert!(task_of(&sim, p).starts_with("WAITING"), "{p:?} holds: {}", task_of(&sim, p));
+        assert!(platoon_speed(&sim, p) < 0.2, "{p:?} stationary");
+    }
+    let word_tick = sim.tick();
+    sim.submit_immediate(BLUE, Command::CodeWord { word: 0 });
+    let mut left: [Option<u64>; 2] = [None, None];
+    let mut smoke_tick = None;
+    let mut fire_tick = None;
+    for _ in 0..(5 * sim::TICK_HZ) {
+        let t = sim.tick();
+        let ev = sim.step();
+        if smoke_tick.is_none() && ev.iter().any(|e| matches!(e, Event::SmokeLaunched { .. })) {
+            smoke_tick = Some(t);
+        }
+        if fire_tick.is_none()
+            && ev.iter().any(|e| matches!(e, Event::FireSupport { report: sim::FireReport::Accepted { .. }, .. }))
+        {
+            fire_tick = Some(t);
+        }
+        for (i, p) in [P1, P2].into_iter().enumerate() {
+            if left[i].is_none() && !task_of(&sim, p).starts_with("WAITING") {
+                left[i] = Some(t);
+            }
+        }
+    }
+    let (l1, l2) = (left[0].expect("P1 released"), left[1].expect("P2 released"));
+    assert_eq!(l1, l2, "both platoons depart in the same tick");
+    assert!((l1 - word_tick) as f64 / sim::TICK_HZ as f64 <= 2.0, "within 2 s of the word");
+    assert!(smoke_tick.expect("smoke launched") <= l1, "on_release runs before the departure");
+    assert!(fire_tick.expect("fire mission called") <= l1);
+    run(&mut sim, 15.0);
+    assert!(platoon_speed(&sim, P1) > 1.0 && platoon_speed(&sim, P2) > 1.0, "both under way");
+}
+
+#[test]
+fn the_wrong_word_or_one_sent_before_arrival_does_not_release() {
+    let mut sim = new_sim();
+    let mut a = step_at(1, [800.0, 1400.0]);
+    a.actions = vec![StepAction::OccupyBp { radius_m: 60.0, facing: 0.0, kind: PositionKind::HullDown }];
+    a.wait = waits(TriggerCondition::CodeWord { word: 1 });
+    send(&mut sim, Plan { steps: vec![a, step_at(2, [800.0, 2000.0])] }, 1);
+    sim.submit_immediate(BLUE, Command::CodeWord { word: 1 });
+    let mut set_in_bp = false;
+    let mut ev = Vec::new();
+    for _ in 0..(300 * sim::TICK_HZ) {
+        ev.extend(sim.step());
+    }
+    for r in reports(&ev) {
+        set_in_bp |= matches!(r, PlatoonReport::SetInPosition { .. });
+    }
+    assert!(set_in_bp, "the platoon reports set in its BP");
+    assert!(view_task(&sim).starts_with("WAITING"), "an earlier transmission does not count: {}", view_task(&sim));
+    sim.submit_immediate(BLUE, Command::CodeWord { word: 0 });
+    run(&mut sim, 20.0);
+    assert!(view_task(&sim).starts_with("WAITING"), "another word does not release");
+    sim.submit_immediate(BLUE, Command::CodeWord { word: 1 });
+    let ev = run(&mut sim, 400.0);
+    assert!(reports(&ev).contains(&PlatoonReport::PlanComplete), "released, continues to CP 2");
+    assert!(nearest_member(&sim, [800.0, 2000.0]) < 30.0);
+}
+
+#[test]
+fn continue_keeps_moving_under_contact_where_the_drill_halts() {
+    let contacts = |reaction: Option<ContactReaction>| {
+        let ds = data();
+        let m = map(&ds, 400, 1400, "cropland", |_, _| 0.0);
+        let blue: Vec<_> = (0..4)
+            .map(|i| unit(&format!("1-{}", i + 1), "bulwark_a1", [700.0 + i as f64 * 60.0, 400.0], 0.0, Some("1")))
+            .collect();
+        let red = vec![unit("211", "kurgan_b", [1300.0, 1500.0], 270.0, Some("21"))];
+        let mut sim = Sim::new(&scenario(10 * 3600, blue, red), ds, m).unwrap();
+        sim.set_ai_enabled(SideId(1), false);
+        if let Some(r) = reaction {
+            sim.submit_immediate(BLUE, Command::SetContactReaction { platoon: P1, reaction: r });
+        }
+        send(&mut sim, two_leg_plan(), 1);
+        let ev = run(&mut sim, 250.0);
+        reports(&ev).iter().filter(|r| matches!(r, PlatoonReport::Contact { .. })).count()
+    };
+    assert!(contacts(None) > 0, "the default drill reacts");
+    assert_eq!(contacts(Some(ContactReaction::Continue)), 0, "Continue never enters the drill");
+}
+
+#[test]
+fn a_contact_branch_diverts_the_platoon_and_runs_the_actions_there() {
+    let ds = data();
+    let m = map(&ds, 400, 1400, "cropland", |_, _| 0.0);
+    let blue: Vec<_> = (0..4)
+        .map(|i| unit(&format!("1-{}", i + 1), "bulwark_a1", [700.0 + i as f64 * 60.0, 400.0], 0.0, Some("1")))
+        .collect();
+    let red = vec![unit("211", "kurgan_b", [1300.0, 2600.0], 270.0, Some("21"))];
+    let mut sim = Sim::new(&scenario(10 * 3600, blue, red), ds, m).unwrap();
+    sim.set_ai_enabled(SideId(1), false);
+    let mut a = step_at(1, [800.0, 1400.0]);
+    a.leg.on_contact = Some(ContactReaction::Continue);
+    a.branch = Some(Branch {
+        when: ConditionSet {
+            all: false,
+            conditions: vec![TriggerCondition::ContactWithin { platoon: P1, range_m: 4000.0 }],
+        },
+        goto: 3,
+    });
+    let mut c = step_at(3, [300.0, 1100.0]);
+    c.actions = vec![StepAction::SmokeScreen];
+    send(&mut sim, Plan { steps: vec![a, step_at(2, [800.0, 2200.0]), c] }, 1);
+    let mut ev = Vec::new();
+    for _ in 0..(400 * sim::TICK_HZ) {
+        ev.extend(sim.step());
+    }
+    let rs = reports(&ev);
+    assert!(rs.contains(&PlatoonReport::PlanBranch { to: 3 }), "branch taken: {rs:?}");
+    assert!(ev.iter().any(|e| matches!(e, Event::SmokeLaunched { .. })), "smoke at the branch CP");
+    assert!(rs.contains(&PlatoonReport::PlanComplete), "branch CP is the end of the plan");
+    assert!(nearest_member(&sim, [300.0, 1100.0]) < 60.0);
+}
+
+#[test]
+fn a_platoon_can_wait_for_another_to_reach_its_checkpoint() {
+    let mut sim = two_platoon_sim();
+    send_to(&mut sim, P1, Plan { steps: vec![step_at(1, [550.0, 1400.0])] });
+    let mut a = step_at(1, [1150.0, 500.0]);
+    a.wait = waits(TriggerCondition::PlatoonAt { platoon: P1, step: 1 });
+    send_to(&mut sim, P2, Plan { steps: vec![a, step_at(2, [1150.0, 1400.0])] });
+    let near = |sim: &Sim, p: PlatoonId, at: [f64; 2]| {
+        let w = sim.truth();
+        (0..w.len())
+            .filter(|&k| w.platoon[k] == Some(p))
+            .map(|k| dist(w.transform[k].pos, at))
+            .fold(f64::INFINITY, f64::min)
+    };
+    let mut p2_left = None;
+    let mut p2_waited = false;
+    let mut p1_there = None;
+    for t in 0..(300 * sim::TICK_HZ) {
+        sim.step();
+        let secs = t as f64 / sim::TICK_HZ as f64;
+        if p1_there.is_none() && near(&sim, P1, [550.0, 1400.0]) < 60.0 {
+            p1_there = Some(secs);
+        }
+        p2_waited |= task_of(&sim, P2).starts_with("WAITING");
+        if p2_waited && p2_left.is_none() && !task_of(&sim, P2).starts_with("WAITING") {
+            p2_left = Some(secs);
+        }
+    }
+    let (arrived, left) = (p1_there.expect("P1 arrives"), p2_left.expect("P2 is released"));
+    assert!(left >= arrived - 1.0 && left <= arrived + 15.0, "P2 leaves when P1 arrives: {arrived:.0} / {left:.0}");
+}
+
+#[test]
+fn conditions_read_the_picture_not_the_truth() {
+    let run_case = |enemy_at: [f64; 2]| {
+        let ds = data();
+        // A ridge across the map hides everything behind it.
+        let m = map(&ds, 400, 1400, "cropland", |_, y| if (2000.0..2200.0).contains(&y) { 60.0 } else { 0.0 });
+        let blue: Vec<_> = (0..4)
+            .map(|i| unit(&format!("1-{}", i + 1), "bulwark_a1", [700.0 + i as f64 * 60.0, 400.0], 0.0, Some("1")))
+            .collect();
+        let red = vec![unit("211", "kurgan_b", enemy_at, 180.0, Some("21"))];
+        let mut sim = Sim::new(&scenario(10 * 3600, blue, red), ds, m).unwrap();
+        sim.set_ai_enabled(SideId(1), false);
+        sim.submit_immediate(
+            BLUE,
+            Command::AddGraphic {
+                graphic: Graphic {
+                    id: 0,
+                    label: "OBJ A".into(),
+                    kind: GraphicKind::Objective { centre: enemy_at, radius: 250.0 },
+                },
+            },
+        );
+        let mut a = step_at(1, [800.0, 450.0]);
+        a.leg.on_contact = Some(ContactReaction::Continue);
+        a.wait = waits(TriggerCondition::EnemyInArea { graphic: 1 });
+        send(&mut sim, Plan { steps: vec![a, step_at(2, [800.0, 600.0])] }, 1);
+        // The enemy drives about (movement gives it away); nobody fires.
+        let red = (0..sim.truth().len()).find(|&k| sim.truth().side[k] == SideId(1)).unwrap();
+        let unit = sim.truth().id[red];
+        for (side, to) in [(BLUE, Addressee::Platoon(P1)), (SideId(1), Addressee::Unit(unit))] {
+            sim.submit_immediate(side, Command::WeaponsControl { to, status: sim::view::WeaponsStatus::Hold });
+        }
+        let to = [enemy_at[0], enemy_at[1] + if enemy_at[1] < 2000.0 { 300.0 } else { -300.0 }];
+        sim.submit_immediate(
+            SideId(1),
+            Command::Move { unit, destination: to, via: vec![], speed_limit_mps: Some(3.0) },
+        );
+        let mut known = 0;
+        for _ in 0..20 {
+            run(&mut sim, 10.0);
+            known = known.max(sim.perceived(BLUE).live_contacts().count());
+        }
+        (!view_task(&sim).starts_with("WAITING"), known)
+    };
+    let (released, known) = run_case([800.0, 3000.0]);
+    assert_eq!((released, known), (false, 0), "an enemy nobody has seen never fires the condition");
+    let (released, known) = run_case([800.0, 1000.0]);
+    assert!(known > 0 && released, "once reported, the same condition holds: known {known}, released {released}");
 }

@@ -32,6 +32,7 @@
     battle_formation: line,
     smoke_when_engaged: true,
     break_contact_distance_m: (value: 1000.0, source: "estimate", confidence: estimate, notes: "Far enough to be out of the threat's direct-fire arc behind the screen; the drill bounds back to this distance."),
+    code_words: ["HAMMER", "ANVIL", "SWORD", "SHIELD", "FALCON", "RAVEN", "COBRA", "TIGER", "EAGLE"],
     break_off_losses: (value: 0.67, source: "estimate", confidence: estimate),
     // Ordered march speeds (m/s): 40, 25 and 15 km/h.
     speed_limits_mps: [

@@ -92,6 +92,8 @@ pub struct OwnUnit {
     pub smoke_salvos: u32,
     /// Engine smoke: None = the vehicle has none, Some(on).
     pub engine_smoke: Option<bool>,
+    /// Crew suppression 0..1 (rises under fire).
+    pub suppression: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -147,6 +149,8 @@ pub struct PlatoonView {
     /// March speed limit (m/s), None = formation speed.
     pub speed_limit: Option<f64>,
     pub plan: Option<PlanView>,
+    /// Step ids reached by the plan that last finished (for `PlatoonAt` synchronisation).
+    pub plan_done: Vec<u16>,
     pub contact_reaction: ContactReaction,
 }
 
@@ -178,6 +182,25 @@ pub enum TriggerCondition {
     AtTime { time_s: f64 },
     /// Plan only: seconds since the step started waiting (a trigger never fires on it).
     Elapsed { s: f64 },
+    /// The side has sent code word `word` (plans: since the wait began). FM 6-0 execution by code word.
+    CodeWord { word: u8 },
+    /// A recently reported enemy is within `range_m` of the platoon.
+    ContactWithin { platoon: PlatoonId, range_m: f64 },
+    /// A recently reported enemy is inside the area of an objective, battle position or TRP.
+    EnemyInArea { graphic: u32 },
+    /// The platoon has at most `remaining` vehicles left (not destroyed).
+    StrengthAtMost { platoon: PlatoonId, remaining: u32 },
+    /// A vehicle of the platoon is suppressed, i.e. taking fire.
+    UnderFire { platoon: PlatoonId },
+    /// Plan only: platoon `platoon` has reached (is at or has passed) its plan step `step`.
+    PlatoonAt { platoon: PlatoonId, step: u16 },
+}
+
+/// A code word the side has sent (latest transmission).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CodeWordView {
+    pub word: u8,
+    pub tick: u64,
 }
 
 /// Battle-position posture (ATP 3-20.15 ch. 5).
@@ -404,6 +427,7 @@ pub struct PerceivedWorld {
     pub weather: WeatherView,
     pub fire_support: Vec<BatteryView>,
     pub impacts: Vec<ImpactView>,
+    pub code_words: Vec<CodeWordView>,
 }
 
 impl PerceivedWorld {
@@ -422,6 +446,7 @@ impl PerceivedWorld {
             weather: WeatherView::default(),
             fire_support: Vec::new(),
             impacts: Vec::new(),
+            code_words: Vec::new(),
         }
     }
 

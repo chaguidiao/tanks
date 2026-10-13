@@ -9,7 +9,7 @@
 use ai::picture::{ConditionSet, Plan, PlanView, PlatoonId, SpeedSetting, StepAction, TriggerCondition};
 use terrain::hash::StableHasher;
 
-use crate::command::PlatoonReport;
+use crate::command::{Addressee, Command, PlatoonReport, SmokeMode};
 use crate::control;
 use crate::platoon::{Platoon, PlatoonOrder};
 use crate::platoon_ai::{Ctx, centroid};
@@ -27,6 +27,9 @@ pub enum Phase {
     Start,
     /// Moving; `stop` = index of the step this move ends at.
     Leg { stop: usize },
+    /// Arrived at the cursor step and setting into the battle position its actions ordered;
+    /// `since` = arrival tick.
+    Setting { since: u64 },
     /// Holding at the cursor step. `signs` = reference sides for line-crossing conditions.
     Waiting { since: u64, signs: Vec<f64> },
 }
@@ -40,11 +43,13 @@ pub struct PlanState {
     pub passed: Vec<u16>,
     /// Halted by the player: nothing advances until RESUME.
     pub paused: bool,
+    /// Branch condition references of the cursor step: (step id, tick the step began, signs).
+    branch_ref: Option<(u16, u64, Vec<f64>)>,
 }
 
 impl PlanState {
     pub fn new(plan: Plan, cursor: usize) -> Self {
-        Self { plan, cursor, phase: Phase::Start, passed: Vec::new(), paused: false }
+        Self { plan, cursor, phase: Phase::Start, passed: Vec::new(), paused: false, branch_ref: None }
     }
 
     pub fn cursor_id(&self) -> u16 {
@@ -59,9 +64,10 @@ impl PlanState {
             Phase::Waiting { since, signs } if same_step && plan.steps[start].wait.is_some() => {
                 Phase::Waiting { since, signs }
             }
+            Phase::Setting { since } if same_step => Phase::Setting { since },
             _ => Phase::Start,
         };
-        Self { plan, cursor: start, phase, passed: self.passed, paused: self.paused }
+        Self { plan, cursor: start, phase, passed: self.passed, paused: self.paused, branch_ref: None }
     }
 
     pub fn view(&self) -> PlanView {
@@ -91,6 +97,10 @@ impl PlanState {
                 h.u8(2);
                 h.u64(*since);
             }
+            Phase::Setting { since } => {
+                h.u8(3);
+                h.u64(*since);
+            }
         }
         h.u64(self.passed.len() as u64);
     }
@@ -109,9 +119,21 @@ fn run(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx) -> bool {
     if st.paused {
         return true;
     }
+    if branch(st, p, ctx) {
+        return true;
+    }
     // A bounded chain of transitions per tick (arrive -> act -> next leg).
     for _ in 0..8 {
         match st.phase.clone() {
+            Phase::Setting { since } => match p.order {
+                PlatoonOrder::Occupy { reported: true, .. } => {
+                    if !finish_arrival(st, p, ctx, since) {
+                        return false;
+                    }
+                }
+                PlatoonOrder::Occupy { .. } => return true,
+                _ => return false,
+            },
             Phase::Start => {
                 if !issue_leg(st, p, ctx) {
                     return true;
@@ -146,9 +168,9 @@ fn run(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx) -> bool {
                 if !set_met(pic, set, &signs, since, ctx.tick) {
                     return true;
                 }
-                let actions = step.on_release.clone();
+                let (actions, at) = (step.on_release.clone(), step.at);
                 let n = st.cursor as u16 + 1;
-                run_actions(&actions, n, p, ctx);
+                run_actions(&actions, n, at, p, ctx);
                 if !advance(st, p, ctx) {
                     return false;
                 }
@@ -242,15 +264,49 @@ fn arrive(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx, stop: usize) -> bo
     if step.wait.is_some() {
         ctx.report(p, PlatoonReport::AtCheckpoint { n, waiting: true });
     }
-    run_actions(&step.actions, n, p, ctx);
-    if let Some(set) = &step.wait {
+    run_actions(&step.actions, n, step.at, p, ctx);
+    if matches!(p.order, PlatoonOrder::Occupy { reported: false, .. }) {
+        st.phase = Phase::Setting { since: ctx.tick };
+        return true;
+    }
+    finish_arrival(st, p, ctx, ctx.tick)
+}
+
+/// Actions done (battle position set): hold for the wait condition, or go on.
+fn finish_arrival(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx, since: u64) -> bool {
+    if let Some(set) = &st.plan.steps[st.cursor].wait {
         let pic = &ctx.pictures[p.side.0 as usize];
         let signs = set.conditions.iter().map(|c| control::reference_sign(pic, c)).collect();
-        st.phase = Phase::Waiting { since: ctx.tick, signs };
+        st.phase = Phase::Waiting { since, signs };
         true
     } else {
         advance(st, p, ctx)
     }
+}
+
+/// Contingency: when the cursor step's branch condition holds, go to the branch step instead
+/// (FM 6-0 branch plan; the platoon moves from where it is). True = jumped.
+fn branch(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx) -> bool {
+    let step = &st.plan.steps[st.cursor];
+    let Some(b) = &step.branch else { return false };
+    let Some(idx) = st.plan.index_of(b.goto) else { return false };
+    if idx == st.cursor {
+        return false;
+    }
+    let pic = &ctx.pictures[p.side.0 as usize];
+    if st.branch_ref.as_ref().is_none_or(|(id, ..)| *id != step.id) {
+        let signs = b.when.conditions.iter().map(|c| control::reference_sign(pic, c)).collect();
+        st.branch_ref = Some((step.id, ctx.tick, signs));
+    }
+    let (_, since, signs) = st.branch_ref.clone().expect("set above");
+    if !set_met(pic, &b.when, &signs, since, ctx.tick) {
+        return false;
+    }
+    ctx.report(p, PlatoonReport::PlanBranch { to: idx as u16 + 1 });
+    st.cursor = idx;
+    st.phase = Phase::Start;
+    st.branch_ref = None;
+    true
 }
 
 /// Step done: go on to the next one, or finish the plan.
@@ -258,6 +314,7 @@ fn advance(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx) -> bool {
     let id = st.cursor_id();
     st.passed.push(id);
     if st.cursor + 1 >= st.plan.steps.len() {
+        p.finished = st.passed.clone();
         ctx.report(p, PlatoonReport::PlanComplete);
         return false;
     }
@@ -266,7 +323,8 @@ fn advance(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx) -> bool {
     true
 }
 
-fn run_actions(actions: &[StepAction], n: u16, p: &Platoon, ctx: &mut Ctx) {
+fn run_actions(actions: &[StepAction], n: u16, at: crate::Vec2, p: &mut Platoon, ctx: &mut Ctx) {
+    let to = Addressee::Platoon(p.id);
     for a in actions {
         match a {
             StepAction::Face { bearing } => {
@@ -277,12 +335,33 @@ fn run_actions(actions: &[StepAction], n: u16, p: &Platoon, ctx: &mut Ctx) {
                 }
             }
             StepAction::Report => ctx.report(p, PlatoonReport::AtCheckpoint { n, waiting: false }),
-            // Phase P2.
-            StepAction::OccupyBp { .. }
-            | StepAction::SmokeScreen
-            | StepAction::EngineSmoke(_)
-            | StepAction::FireSmoke { .. }
-            | StepAction::CallForFire { .. } => {}
+            // Battle position at the checkpoint (ATP 3-20.15 ch. 5); the plan holds until it is set.
+            StepAction::OccupyBp { radius_m, facing, kind } => {
+                p.order = PlatoonOrder::Occupy {
+                    centre: at,
+                    radius: *radius_m,
+                    facing: *facing,
+                    kind: *kind,
+                    assigned: false,
+                    reported: false,
+                };
+                p.held = None;
+                p.withdraw = false;
+            }
+            StepAction::SmokeScreen => ctx.sim_cmds.push((p.side, Command::Smoke { to, mode: SmokeMode::Screen })),
+            StepAction::EngineSmoke(on) => {
+                let mode = if *on { SmokeMode::EngineOn } else { SmokeMode::EngineOff };
+                ctx.sim_cmds.push((p.side, Command::Smoke { to, mode }));
+            }
+            StepAction::FireSmoke { at, rounds } => {
+                ctx.sim_cmds.push((p.side, Command::FireSmoke { to, at: *at, rounds: *rounds }));
+            }
+            StepAction::CallForFire { battery, at, kind, volleys } => {
+                ctx.sim_cmds.push((
+                    p.side,
+                    Command::CallForFire { battery: *battery, at: *at, kind: *kind, volleys: *volleys },
+                ));
+            }
         }
     }
 }
@@ -291,6 +370,14 @@ fn run_actions(actions: &[StepAction], n: u16, p: &Platoon, ctx: &mut Ctx) {
 pub fn set_met(pic: &ai::picture::PerceivedWorld, set: &ConditionSet, signs: &[f64], since: u64, tick: u64) -> bool {
     let one = |(i, c): (usize, &TriggerCondition)| match c {
         TriggerCondition::Elapsed { s } => (tick.saturating_sub(since)) as f64 * DT >= *s,
+        // Sent after the platoon began to wait: a word is a transmission, not a state.
+        TriggerCondition::CodeWord { word } => pic.code_words.iter().any(|c| c.word == *word && c.tick >= since),
+        TriggerCondition::PlatoonAt { platoon, step } => {
+            pic.platoon(*platoon).and_then(|v| v.plan.as_ref()).map_or_else(
+                || pic.platoon(*platoon).is_some_and(|v| v.plan_done.contains(step)),
+                |pl| pl.passed.contains(step) || (pl.cursor_id == *step && pl.waiting.is_some()),
+            )
+        }
         _ => control::condition_met(pic, c, signs.get(i).copied().unwrap_or(1.0)),
     };
     let mut it = set.conditions.iter().enumerate();

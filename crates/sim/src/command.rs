@@ -121,6 +121,16 @@ pub enum Command {
         plan: Plan,
         start: u16,
     },
+    /// Set what the platoon does on meeting the enemy (ATP 3-20.15 App. F battle drills).
+    SetContactReaction {
+        platoon: PlatoonId,
+        reaction: ai::picture::ContactReaction,
+    },
+    /// Send a pre-arranged code word to every platoon of the side at once (FM 6-0 execution
+    /// matrix; no radio delay, never missed in v1).
+    CodeWord {
+        word: u8,
+    },
     /// Draw a control measure (not a radio order: no delay).
     AddGraphic {
         graphic: Graphic,
@@ -203,6 +213,10 @@ pub enum Event {
     TriggerFired {
         side: SideId,
         id: u32,
+    },
+    CodeWordSent {
+        side: SideId,
+        word: u8,
     },
     /// Own vehicle observed its round strike.
     ShotResult {

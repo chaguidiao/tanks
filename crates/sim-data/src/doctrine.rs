@@ -87,6 +87,10 @@ pub struct DoctrinePack {
     pub smoke_when_engaged: bool,
     /// Distance a platoon withdraws from the threat in the break-contact drill (m).
     pub break_contact_distance_m: Stat<f64>,
+    /// Pre-arranged code words (FM 6-0 execution matrix): the index is the word's number on the
+    /// command card (Ctrl+1..9).
+    #[serde(default)]
+    pub code_words: Vec<String>,
 }
 
 impl DoctrinePack {

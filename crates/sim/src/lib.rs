@@ -214,6 +214,7 @@ impl Sim {
                                 last_indirect: None,
                                 withdraw: false,
                                 plan: None,
+                                finished: Vec::new(),
                                 contact_reaction: Default::default(),
                             });
                             platoons.last_mut().expect("pushed")
@@ -406,7 +407,13 @@ impl Sim {
     /// tick reaches the same state.
     pub fn settle(&mut self) {
         let (control, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.incoming).into_iter().partition(|c| {
-            matches!(c.cmd, Command::AddGraphic { .. } | Command::RemoveGraphic { .. } | Command::AddTrigger { .. })
+            matches!(
+                c.cmd,
+                Command::AddGraphic { .. }
+                    | Command::RemoveGraphic { .. }
+                    | Command::AddTrigger { .. }
+                    | Command::CodeWord { .. }
+            )
         });
         self.incoming = rest;
         let mut events = Vec::new();
@@ -442,7 +449,10 @@ impl Sim {
         for c in std::mem::take(&mut self.incoming) {
             let control = matches!(
                 c.cmd,
-                Command::AddGraphic { .. } | Command::RemoveGraphic { .. } | Command::AddTrigger { .. }
+                Command::AddGraphic { .. }
+                    | Command::RemoveGraphic { .. }
+                    | Command::AddTrigger { .. }
+                    | Command::CodeWord { .. }
             );
             let delay = if c.immediate || control {
                 0
@@ -519,6 +529,7 @@ impl Sim {
 
         // 2. Platoon AI.
         if tick.is_multiple_of(PLATOON_AI_EVERY) {
+            let mut sim_cmds = Vec::new();
             let mut ctx = platoon_ai::Ctx {
                 world: &mut self.world,
                 vehicles: &self.vehicles,
@@ -531,8 +542,12 @@ impl Sim {
                 events: &mut events,
                 impacts: &self.impacts,
                 fires: &self.data.fires.suppression,
+                sim_cmds: &mut sim_cmds,
             };
             platoon_ai::step(&mut self.platoons, &mut ctx);
+            for (side, cmd) in sim_cmds {
+                self.apply(&TimedCommand { tick, side, cmd, immediate: true, generated: true }, &mut events);
+            }
         }
 
         // 3. Vehicle AI.
@@ -966,6 +981,7 @@ impl Sim {
             }
             Command::SetPlan { platoon, plan, start } => {
                 let Some(p) = self.platoon_mut(c.side, *platoon) else { return };
+                p.finished.clear();
                 if plan.steps.is_empty() {
                     p.plan = None;
                 } else if let Some(idx) = plan.index_of(*start) {
@@ -1023,6 +1039,18 @@ impl Sim {
                 if fires::cease(b) {
                     events.push(Event::FireSupport { side: c.side, battery: *battery, at, report: FireReport::Ceased });
                 }
+            }
+            Command::SetContactReaction { platoon, reaction } => {
+                if let Some(p) = self.platoon_mut(c.side, *platoon) {
+                    p.contact_reaction = *reaction;
+                    events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
+                }
+            }
+            Command::CodeWord { word } => {
+                let s = &mut self.sides[c.side.0 as usize];
+                s.picture.code_words.retain(|w| w.word != *word);
+                s.picture.code_words.push(ai::picture::CodeWordView { word: *word, tick: self.tick });
+                events.push(Event::CodeWordSent { side: c.side, word: *word });
             }
             Command::AddGraphic { graphic } => {
                 let s = &mut self.sides[c.side.0 as usize];

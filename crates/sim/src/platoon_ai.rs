@@ -13,14 +13,14 @@
 //!   the contact has been quiet for a while.
 
 use ai::formation::{along, length, slot_position};
-use ai::picture::{Condition, ContactReaction, PerceivedWorld};
+use ai::picture::{Condition, ContactReaction, PerceivedWorld, SideId};
 use ai::position::{BpQuery, Candidate, assign, evaluate};
 use sim_data::{DoctrinePack, Technique, VehicleDef};
 use terrain::BakedMap;
 use terrain::ground::Ground;
 use terrain::path::Pathfinder;
 
-use crate::command::{PlatoonReport, PositionKind};
+use crate::command::{Command, PlatoonReport, PositionKind};
 use crate::platoon::{Platoon, PlatoonOrder};
 use crate::world::{Order, World};
 use crate::{DT, Event, Vec2, dist};
@@ -37,6 +37,8 @@ const CONTACT_FRESH_S: f64 = 25.0;
 const QUIET_RESUME_S: f64 = 45.0;
 const SLOT_ARRIVE: f64 = 6.0;
 const BP_ARRIVE: f64 = 1.5;
+/// Search radius for hasty hull-down positions around the platoon (m).
+const HASTY_RADIUS_M: f64 = 150.0;
 
 pub struct Ctx<'a> {
     pub world: &'a mut World,
@@ -50,6 +52,9 @@ pub struct Ctx<'a> {
     pub events: &'a mut Vec<Event>,
     pub impacts: &'a [crate::fires::Impact],
     pub fires: &'a sim_data::SuppressionModel,
+    /// Orders the platoon phase hands to the sim to carry out (smoke, fire support, drills); they
+    /// apply right after the phase without radio delay.
+    pub sim_cmds: &'a mut Vec<(SideId, Command)>,
 }
 
 impl Ctx<'_> {
@@ -196,6 +201,12 @@ fn contact_drill(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
     else {
         return;
     };
+    if p.contact_reaction == ContactReaction::BreakContact {
+        // Battle drill break contact (ATP 3-20.15 App. F): smoke and withdraw; abandons the plan.
+        ctx.report(p, PlatoonReport::Contact { at: c, toward: threat });
+        ctx.sim_cmds.push((p.side, Command::BreakContact { platoon: p.id }));
+        return;
+    }
     // Checkpoints already passed are not revisited when the move resumes.
     if let Some((destination, ahead)) = p.order.move_ahead() {
         p.resume = Some((destination, ahead, p.technique));
@@ -207,6 +218,10 @@ fn contact_drill(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
         if let Some(ai) = ctx.world.ai[k].as_mut() {
             ai.order = Order::Face { heading: b };
         }
+    }
+    if p.contact_reaction == ContactReaction::HastyPosition {
+        // Hasty positions (ATP 3-20.15 ch. 5): hull-down ground close by, facing the threat.
+        assign_positions(p, ctx, d, c, HASTY_RADIUS_M, ai::drive::bearing(c, threat), PositionKind::HullDown);
     }
     ctx.report(p, PlatoonReport::Contact { at: c, toward: threat });
 }
@@ -372,49 +387,63 @@ fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
     }
 }
 
+/// Pick firing positions for the movers in a circle and send them there (shared by the battle
+/// position order and the hasty-position contact reaction).
+fn assign_positions(
+    p: &mut Platoon,
+    ctx: &mut Ctx,
+    d: &DoctrinePack,
+    centre: Vec2,
+    radius: f64,
+    facing: f64,
+    kind: PositionKind,
+) {
+    let movers: Vec<usize> = p.members.iter().copied().filter(|&k| ctx.world.can_move(k)).collect();
+    let Some(vi) = movers.first().and_then(|&k| ctx.world.vehicle[k]) else { return };
+    let v = &ctx.vehicles[vi];
+    let q = BpQuery {
+        centre,
+        radius,
+        facing,
+        hull_height: v.dimensions.hull_height_m.get(),
+        sight_height: v.dimensions.sight_height_m.get(),
+        gun_depression: -v.gun.depression_rad.get(),
+        turret_down: kind == PositionKind::TurretDown,
+    };
+    let g = Ground::new(ctx.map, ctx.td);
+    let layer = ctx.map.mobility(&v.id).expect("layer");
+    let hf = &ctx.map.elevation;
+    let passable = |x: f64, y: f64| {
+        let (i, j) = hf.cell_of(x, y);
+        layer.speed.get(i, j) > 0 && hf.node_slope(i, j) < 0.3
+    };
+    let cands = evaluate(&g, &q, &passable);
+    let starts: Vec<Vec2> = movers.iter().map(|&k| ctx.world.transform[k].pos).collect();
+    let mut chosen = assign(&cands, movers.len(), d.bp_dispersion_m.get(), &starts);
+    if chosen.is_empty() {
+        // No usable ground found: line up across the centre facing the threat.
+        chosen = (0..movers.len())
+            .map(|i| Candidate {
+                pos: slot_position(centre, facing, ((i as f64 - (movers.len() as f64 - 1.0) / 2.0) * 80.0, 0.0)),
+                score: 0.0,
+                hull_hidden: false,
+                coverage: 1.0,
+            })
+            .collect();
+    }
+    p.bp.clear();
+    for (&k, c) in movers.iter().zip(chosen) {
+        if let Some(r) = ctx.route(k, c.pos) {
+            ctx.world.set_route(k, r, None, Some(facing), true, BP_ARRIVE);
+        }
+        p.bp.push((k, c));
+    }
+}
+
 fn occupy_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
     let PlatoonOrder::Occupy { centre, radius, facing, kind, assigned, reported } = p.order.clone() else { return };
-    let movers: Vec<usize> = p.members.iter().copied().filter(|&k| ctx.world.can_move(k)).collect();
     if !assigned {
-        let Some(vi) = movers.first().and_then(|&k| ctx.world.vehicle[k]) else { return };
-        let v = &ctx.vehicles[vi];
-        let q = BpQuery {
-            centre,
-            radius,
-            facing,
-            hull_height: v.dimensions.hull_height_m.get(),
-            sight_height: v.dimensions.sight_height_m.get(),
-            gun_depression: -v.gun.depression_rad.get(),
-            turret_down: kind == PositionKind::TurretDown,
-        };
-        let g = Ground::new(ctx.map, ctx.td);
-        let layer = ctx.map.mobility(&v.id).expect("layer");
-        let hf = &ctx.map.elevation;
-        let passable = |x: f64, y: f64| {
-            let (i, j) = hf.cell_of(x, y);
-            layer.speed.get(i, j) > 0 && hf.node_slope(i, j) < 0.3
-        };
-        let cands = evaluate(&g, &q, &passable);
-        let starts: Vec<Vec2> = movers.iter().map(|&k| ctx.world.transform[k].pos).collect();
-        let mut chosen = assign(&cands, movers.len(), d.bp_dispersion_m.get(), &starts);
-        if chosen.is_empty() {
-            // No usable ground found: line up across the centre facing the threat.
-            chosen = (0..movers.len())
-                .map(|i| Candidate {
-                    pos: slot_position(centre, facing, ((i as f64 - (movers.len() as f64 - 1.0) / 2.0) * 80.0, 0.0)),
-                    score: 0.0,
-                    hull_hidden: false,
-                    coverage: 1.0,
-                })
-                .collect();
-        }
-        p.bp.clear();
-        for (&k, c) in movers.iter().zip(chosen) {
-            if let Some(r) = ctx.route(k, c.pos) {
-                ctx.world.set_route(k, r, None, Some(facing), true, BP_ARRIVE);
-            }
-            p.bp.push((k, c));
-        }
+        assign_positions(p, ctx, d, centre, radius, facing, kind);
         p.order = PlatoonOrder::Occupy { centre, radius, facing, kind, assigned: true, reported: false };
         return;
     }

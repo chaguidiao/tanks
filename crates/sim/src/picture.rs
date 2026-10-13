@@ -333,6 +333,7 @@ impl SideState {
                 engine_smoke: w.vehicle[k]
                     .filter(|&vi| vehicles[vi].engine_smoke.is_some())
                     .map(|_| w.smoke[k].engine_on),
+                suppression: w.suppression[k],
             });
         }
     }
