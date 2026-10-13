@@ -183,6 +183,8 @@ pub struct Game {
     /// Route being drafted: checkpoints (and, once sent, the destination). Built with
     /// Shift+right click (sent when Shift is released) or with the ROUTE tool.
     pub draft: Vec<[f64; 2]>,
+    /// A plain right click went down on the map; the move goes out on release.
+    rmb_move_armed: bool,
     acc: f64,
     prev: Vec<(EntityId, [f64; 2], f64)>,
     pub log: VecDeque<(String, String)>,
@@ -222,6 +224,7 @@ impl Game {
             fire_kind: FireKind::He,
             graphics: Vec::new(),
             draft: Vec::new(),
+            rmb_move_armed: false,
             acc: 0.0,
             prev: Vec::new(),
             log: VecDeque::new(),
@@ -622,11 +625,16 @@ impl Game {
                         self.draft.push(world);
                     }
                 }
-                _ => {
-                    self.draft.clear();
-                    self.issue_move(Vec::new(), world);
-                }
+                // A plain right click moves on release (P3 adds hold-for-menu).
+                _ => self.rmb_move_armed = true,
             }
+        }
+        if !inp.right_down && !inp.right_released {
+            self.rmb_move_armed = false;
+        }
+        if inp.right_released && std::mem::take(&mut self.rmb_move_armed) && !over_ui {
+            self.draft.clear();
+            self.issue_move(Vec::new(), world);
         }
         // Shift released: the queued route goes out as one order.
         if !inp.shift && !self.draft.is_empty() && self.tool != Tool::Route {
