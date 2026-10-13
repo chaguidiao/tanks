@@ -20,6 +20,10 @@ pub struct Settings {
     /// Map layers shown when a map opens.
     pub contours: bool,
     pub grid: bool,
+    /// A plain right click opens the context menu (MOVE HERE first) instead of moving.
+    pub right_click_menu: bool,
+    /// The clock stops while the context menu is open.
+    pub pause_on_menu: bool,
 }
 
 impl Default for Settings {
@@ -32,6 +36,8 @@ impl Default for Settings {
             edge_pan: false,
             contours: true,
             grid: true,
+            right_click_menu: false,
+            pause_on_menu: true,
         }
     }
 }
@@ -81,6 +87,8 @@ impl Settings {
                 ("edge_pan", Some(b)) => s.edge_pan = b,
                 ("contours", Some(b)) => s.contours = b,
                 ("grid", Some(b)) => s.grid = b,
+                ("pause_on_menu", Some(b)) => s.pause_on_menu = b,
+                ("right_click", _) => s.right_click_menu = v == "menu",
                 ("fps_cap", _) => {
                     if let Ok(n) = v.parse::<u32>()
                         && FPS_CAPS.contains(&n)
@@ -104,7 +112,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Tanks options (written by the OPTIONS screen)\n\
-             fullscreen = {}\nfps_cap = {}\nttf_font = {}\npan_speed = {}\nedge_pan = {}\ncontours = {}\ngrid = {}\n",
+             fullscreen = {}\nfps_cap = {}\nttf_font = {}\npan_speed = {}\nedge_pan = {}\ncontours = {}\ngrid = {}\nright_click = {}\npause_on_menu = {}\n",
             on_off(self.fullscreen),
             self.fps_cap,
             on_off(self.ttf_font),
@@ -112,6 +120,8 @@ impl Settings {
             on_off(self.edge_pan),
             on_off(self.contours),
             on_off(self.grid),
+            if self.right_click_menu { "menu" } else { "move" },
+            on_off(self.pause_on_menu),
         )
     }
 

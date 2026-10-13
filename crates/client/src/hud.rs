@@ -270,3 +270,326 @@ pub fn tooltip<A>(f: &mut Frame, buttons: &[Button<A>], mouse: P2, screen: P2) {
     f.rect_lines(x, y, w, h, style::TEXT_DIM);
     f.text(&text, x + 8.0, y + 5.0, style::FONT_S, style::TEXT);
 }
+
+/// One row of a context menu: a leaf with an action, or a submenu.
+#[derive(Debug, Clone)]
+pub struct MenuItem<A> {
+    pub label: String,
+    pub value: String,
+    /// Display text of the hotkey; a single letter is also the menu accelerator.
+    pub key: &'static str,
+    pub tip: String,
+    pub enabled: bool,
+    pub checked: bool,
+    pub action: Option<A>,
+    pub sub: Vec<MenuItem<A>>,
+}
+
+impl<A> MenuItem<A> {
+    pub fn new(label: impl Into<String>, action: A) -> Self {
+        Self {
+            label: label.into(),
+            value: String::new(),
+            key: "",
+            tip: String::new(),
+            enabled: true,
+            checked: false,
+            action: Some(action),
+            sub: Vec::new(),
+        }
+    }
+    pub fn submenu(label: impl Into<String>, sub: Vec<MenuItem<A>>) -> Self {
+        Self {
+            label: label.into(),
+            value: String::new(),
+            key: "",
+            tip: String::new(),
+            enabled: !sub.is_empty(),
+            checked: false,
+            action: None,
+            sub,
+        }
+    }
+    pub fn key(mut self, k: &'static str) -> Self {
+        self.key = k;
+        self
+    }
+    pub fn value(mut self, v: impl Into<String>) -> Self {
+        self.value = v.into();
+        self
+    }
+    pub fn checked(mut self, c: bool) -> Self {
+        self.checked = c;
+        self
+    }
+    /// Greyed, with the reason as its tooltip.
+    pub fn disabled(mut self, why: impl Into<String>) -> Self {
+        self.enabled = false;
+        self.tip = why.into();
+        self
+    }
+}
+
+pub const MENU_ROW_H: f32 = 20.0;
+
+/// What a frame of menu input resulted in.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MenuEvent<A> {
+    None,
+    Close,
+    Pick(A),
+}
+
+/// A cascading pop-up menu. `path` = indices of the open submenu items (level 0 upwards);
+/// `focus` = the highlighted row of the deepest open level.
+#[derive(Debug, Clone)]
+pub struct PopupMenu<A> {
+    pub at: P2,
+    pub title: String,
+    pub items: Vec<MenuItem<A>>,
+    pub path: Vec<usize>,
+    pub focus: usize,
+}
+
+impl<A: Clone> PopupMenu<A> {
+    pub fn new(at: P2, title: impl Into<String>, items: Vec<MenuItem<A>>) -> Self {
+        let focus = items.iter().position(|i| i.enabled).unwrap_or(0);
+        Self { at, title: title.into(), items, path: Vec::new(), focus }
+    }
+
+    fn level(&self, depth: usize) -> &[MenuItem<A>] {
+        let mut items = &self.items[..];
+        for &i in &self.path[..depth] {
+            items = &items[i].sub;
+        }
+        items
+    }
+
+    fn row_text(it: &MenuItem<A>) -> (String, String) {
+        let label = if it.checked { format!("* {}", it.label) } else { format!("  {}", it.label) };
+        let mut value = it.value.clone();
+        if !it.key.is_empty() {
+            if !value.is_empty() {
+                value.push_str("  ");
+            }
+            value.push_str(&format!("[{}]", it.key));
+        }
+        if !it.sub.is_empty() {
+            value.push_str(" >");
+        }
+        (label, value)
+    }
+
+    /// Frame and rows of every open level; the row action is the item's index path.
+    pub fn layout(&self, screen: P2) -> Vec<(Rect, Vec<Button<Vec<usize>>>)> {
+        let mut out: Vec<(Rect, Vec<Button<Vec<usize>>>)> = Vec::new();
+        let bottom = band_y(screen) - 4.0;
+        for depth in 0..=self.path.len() {
+            let items = self.level(depth);
+            let w = items
+                .iter()
+                .map(|it| {
+                    let (l, v) = Self::row_text(it);
+                    text_w(&l, style::FONT_S) + text_w(&v, style::FONT_S) + 28.0
+                })
+                .fold(150.0f32, f32::max);
+            let head = if depth == 0 && !self.title.is_empty() { MENU_ROW_H } else { 0.0 };
+            let h = items.len() as f32 * MENU_ROW_H + head + 4.0;
+            let (mut x, y0) = match out.last() {
+                None => (self.at[0], self.at[1]),
+                Some((fr, rows)) => {
+                    let open = self.path[depth - 1];
+                    (fr.x + fr.w - 2.0, rows[open].r.y - 2.0)
+                }
+            };
+            if x + w > screen[0] - 4.0 {
+                x = match out.last() {
+                    Some((fr, _)) => fr.x - w + 2.0,
+                    None => screen[0] - w - 4.0,
+                };
+            }
+            let x = x.max(4.0);
+            let y = y0.min(bottom - h).max(TOP_H + 4.0);
+            let mut rows = Vec::new();
+            for (k, it) in items.iter().enumerate() {
+                let (l, v) = Self::row_text(it);
+                let mut p: Vec<usize> = self.path[..depth].to_vec();
+                p.push(k);
+                let r = Rect::new(x + 2.0, y + 2.0 + head + k as f32 * MENU_ROW_H, w - 4.0, MENU_ROW_H);
+                let mut b = Button::new(r, Look::Row, l, p).value(v).tip(it.tip.clone()).enabled(it.enabled);
+                b.focused = depth == self.path.len() && k == self.focus;
+                b.active = self.path.get(depth) == Some(&k);
+                rows.push(b);
+            }
+            out.push((Rect::new(x, y, w, h), rows));
+        }
+        out
+    }
+
+    fn item(&self, path: &[usize]) -> &MenuItem<A> {
+        let mut items = &self.items[..];
+        let mut it = &items[path[0]];
+        for &i in &path[1..] {
+            items = &it.sub;
+            it = &items[i];
+        }
+        it
+    }
+
+    /// Open the submenu or return the action of the item at `path`.
+    fn activate(&mut self, path: &[usize]) -> MenuEvent<A> {
+        let it = self.item(path);
+        if !it.enabled {
+            return MenuEvent::None;
+        }
+        if !it.sub.is_empty() {
+            self.path = path.to_vec();
+            self.focus = self.item(path).sub.iter().position(|i| i.enabled).unwrap_or(0);
+            return MenuEvent::None;
+        }
+        it.action.clone().map_or(MenuEvent::None, MenuEvent::Pick)
+    }
+
+    /// One frame of input: arrows/Enter/Esc/accelerators and the mouse. A click outside every
+    /// level closes the menu.
+    pub fn update(&mut self, inp: &crate::render::Input) -> MenuEvent<A> {
+        use crate::render::Key;
+        let layout = self.layout(inp.screen);
+        let n = self.level(self.path.len()).len();
+        let depth = self.path.len();
+        let step =
+            |from: usize, up: bool, items: &[MenuItem<A>]| {
+                (1..=items.len())
+                    .map(|d| {
+                        if up { (from + items.len() - d % items.len()) % items.len() } else { (from + d) % items.len() }
+                    })
+                    .find(|&k| items[k].enabled)
+                    .unwrap_or(from)
+            };
+        if n > 0 {
+            if inp.hit(Key::Down) {
+                self.focus = step(self.focus, false, self.level(depth));
+            }
+            if inp.hit(Key::Up) {
+                self.focus = step(self.focus, true, self.level(depth));
+            }
+        }
+        if inp.hit(Key::Escape) || inp.hit(Key::Left) {
+            if let Some(open) = self.path.pop() {
+                self.focus = open;
+            } else {
+                return MenuEvent::Close;
+            }
+        }
+        if inp.hit(Key::Enter) || inp.hit(Key::Right) {
+            let mut p = self.path.clone();
+            p.push(self.focus);
+            if self.focus < n && (inp.hit(Key::Enter) || !self.item(&p).sub.is_empty()) {
+                return self.activate(&p);
+            }
+        }
+        for k in &inp.pressed {
+            if let Key::Char(c) = k {
+                let hit = self.level(depth).iter().position(|it| {
+                    it.enabled && it.key.len() == 1 && it.key.chars().next().is_some_and(|x| x.eq_ignore_ascii_case(c))
+                });
+                if let Some(i) = hit {
+                    let mut p = self.path.clone();
+                    p.push(i);
+                    return self.activate(&p);
+                }
+            }
+        }
+        let over = layout.iter().enumerate().rev().find(|(_, (fr, _))| fr.contains(inp.mouse));
+        if inp.mouse_delta != [0.0, 0.0]
+            && let Some((d, (_, rows))) = over
+            && d == depth
+            && let Some(k) = rows.iter().position(|b| b.r.contains(inp.mouse) && b.enabled)
+        {
+            self.focus = k;
+        }
+        if inp.left_pressed || inp.right_pressed {
+            return match over {
+                None => MenuEvent::Close,
+                Some((_, (_, rows))) if inp.left_pressed => match rows.iter().find(|b| b.r.contains(inp.mouse)) {
+                    Some(b) if b.enabled => {
+                        let p = b.action.clone();
+                        self.activate(&p)
+                    }
+                    _ => MenuEvent::None,
+                },
+                Some(_) => MenuEvent::None,
+            };
+        }
+        MenuEvent::None
+    }
+
+    pub fn draw(&self, f: &mut Frame, screen: P2, mouse: P2) {
+        let layout = self.layout(screen);
+        for (d, (fr, rows)) in layout.iter().enumerate() {
+            panel(f, *fr);
+            if d == 0 && !self.title.is_empty() {
+                f.text(&self.title, fr.x + 8.0, fr.y + 5.0, style::FONT_S, style::TEXT_DIM);
+            }
+            draw(f, rows, mouse);
+        }
+        let all: Vec<Button<Vec<usize>>> = layout.into_iter().flat_map(|(_, r)| r).collect();
+        tooltip(f, &all, mouse, screen);
+    }
+
+    /// Screen rectangles of every open level (hit area).
+    pub fn frames(&self, screen: P2) -> Vec<Rect> {
+        self.layout(screen).into_iter().map(|(r, _)| r).collect()
+    }
+}
+
+#[cfg(test)]
+mod popup_tests {
+    use super::*;
+    use crate::render::{Input, Key};
+
+    fn menu() -> PopupMenu<u8> {
+        PopupMenu::new(
+            [100.0, 100.0],
+            "T",
+            vec![
+                MenuItem::new("A", 1).key("A"),
+                MenuItem::new("B", 2).disabled("NO"),
+                MenuItem::submenu("C", vec![MenuItem::new("C1", 3), MenuItem::new("C2", 4).key("X")]),
+            ],
+        )
+    }
+
+    fn keys(ks: &[Key]) -> Input {
+        Input { screen: [1600.0, 900.0], mouse: [5.0, 5.0], pressed: ks.to_vec(), ..Input::default() }
+    }
+
+    #[test]
+    fn arrows_skip_disabled_open_submenus_and_pick() {
+        let mut m = menu();
+        assert_eq!(m.update(&keys(&[Key::Down])), MenuEvent::None);
+        assert_eq!(m.focus, 2);
+        assert_eq!(m.update(&keys(&[Key::Right])), MenuEvent::None);
+        assert_eq!(m.path, vec![2]);
+        assert_eq!(m.update(&keys(&[Key::Down])), MenuEvent::None);
+        assert_eq!(m.update(&keys(&[Key::Enter])), MenuEvent::Pick(4));
+    }
+
+    #[test]
+    fn escape_backs_out_then_closes_and_letters_pick() {
+        let mut m = menu();
+        m.update(&keys(&[Key::Down, Key::Right]));
+        assert_eq!(m.update(&keys(&[Key::Escape])), MenuEvent::None);
+        assert!(m.path.is_empty());
+        assert_eq!(m.update(&keys(&[Key::Escape])), MenuEvent::Close);
+        assert_eq!(menu().update(&keys(&[Key::Char('a')])), MenuEvent::Pick(1));
+    }
+
+    #[test]
+    fn click_outside_closes() {
+        let mut m = menu();
+        let mut i = keys(&[]);
+        i.left_pressed = true;
+        assert_eq!(m.update(&i), MenuEvent::Close);
+    }
+}

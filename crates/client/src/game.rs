@@ -26,6 +26,9 @@ use crate::style;
 use crate::symbols;
 use crate::view::{Camera, Minimap};
 
+mod ctx;
+use ctx::{MenuTarget, Rmb};
+
 /// Time compression steps (DESIGN.md §2.1).
 pub const SPEEDS: [u32; 4] = [1, 2, 4, 8];
 const MAX_TICKS_PER_FRAME: u32 = 40;
@@ -183,8 +186,15 @@ pub struct Game {
     /// Route being drafted: checkpoints (and, once sent, the destination). Built with
     /// Shift+right click (sent when Shift is released) or with the ROUTE tool.
     pub draft: Vec<[f64; 2]>,
-    /// A plain right click went down on the map; the move goes out on release.
-    rmb_move_armed: bool,
+    /// A plain right press on the map: moves on release, opens the menu when held.
+    rmb: Option<Rmb>,
+    /// The open context menu, the map point it was opened at and what was under it.
+    menu: Option<hud::PopupMenu<ctx::MenuAct>>,
+    menu_world: [f64; 2],
+    menu_target_id: MenuTarget,
+    /// Options: a plain right click opens the menu; the clock stops while it is open.
+    pub rclick_menu: bool,
+    pub pause_on_menu: bool,
     acc: f64,
     prev: Vec<(EntityId, [f64; 2], f64)>,
     pub log: VecDeque<(String, String)>,
@@ -224,7 +234,12 @@ impl Game {
             fire_kind: FireKind::He,
             graphics: Vec::new(),
             draft: Vec::new(),
-            rmb_move_armed: false,
+            rmb: None,
+            menu: None,
+            menu_world: [0.0, 0.0],
+            menu_target_id: MenuTarget::Ground,
+            rclick_menu: false,
+            pause_on_menu: true,
             acc: 0.0,
             prev: Vec::new(),
             log: VecDeque::new(),
@@ -253,7 +268,7 @@ impl Game {
 
     /// Esc would cancel a tool or a drafted route (otherwise the app opens its menu).
     pub fn esc_in_use(&self) -> bool {
-        self.tool != Tool::None || !self.draft.is_empty()
+        self.tool != Tool::None || !self.draft.is_empty() || self.menu.is_some()
     }
 
     pub fn picture(&self) -> &PerceivedWorld {
@@ -534,13 +549,16 @@ impl Game {
             }
             return fx;
         }
-        let mut actions = self.hotkeys(inp);
+        let menu_was_open = self.menu.is_some();
+        let mut actions = if menu_was_open { Vec::new() } else { self.hotkeys(inp) };
         actions.extend(clicked.filter(|a| *a != GameAction::Aar));
         for a in actions {
             self.act(a, &mut fx);
         }
 
         let world = cam.to_world(inp.mouse);
+        let swallowed = self.rmb_update(inp, cam, over_ui, &mut fx) || menu_was_open;
+        let over_ui = over_ui || swallowed;
         if !over_ui && inp.left_pressed {
             match self.tool.clone() {
                 Tool::None => self.select(cam, inp.mouse, inp.ctrl),
@@ -625,22 +643,15 @@ impl Game {
                         self.draft.push(world);
                     }
                 }
-                // A plain right click moves on release (P3 adds hold-for-menu).
-                _ => self.rmb_move_armed = true,
+                // A plain right click moves on release; held, or on an object, it opens the menu.
+                _ => self.arm_rmb(inp),
             }
-        }
-        if !inp.right_down && !inp.right_released {
-            self.rmb_move_armed = false;
-        }
-        if inp.right_released && std::mem::take(&mut self.rmb_move_armed) && !over_ui {
-            self.draft.clear();
-            self.issue_move(Vec::new(), world);
         }
         // Shift released: the queued route goes out as one order.
         if !inp.shift && !self.draft.is_empty() && self.tool != Tool::Route {
             self.send_route();
         }
-        if !self.paused && !self.planning {
+        if !self.paused && !self.planning && !(self.menu.is_some() && self.pause_on_menu) {
             self.acc += inp.frame_time as f64 * SPEEDS[self.speed] as f64;
             let n = ((self.acc / sim::DT) as u32).min(MAX_TICKS_PER_FRAME);
             self.acc -= n as f64 * sim::DT;

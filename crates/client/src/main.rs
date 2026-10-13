@@ -61,6 +61,8 @@ struct Opts {
     select: Option<String>,
     press: Option<String>,
     keys: Option<String>,
+    /// `--rclick x,y[,hold_s]`: right click at a screen position (held = context menu).
+    rclick: Option<([f32; 2], f32)>,
 }
 
 impl Opts {
@@ -80,6 +82,7 @@ impl Opts {
             || self.zoom.is_some()
             || self.center.is_some()
             || self.layer.is_some()
+            || self.rclick.is_some()
     }
 }
 
@@ -120,6 +123,18 @@ fn opts() -> Result<Opts, String> {
         select: get("--select"),
         press: get("--press"),
         keys: get("--keys"),
+        rclick: match get("--rclick") {
+            None => None,
+            Some(v) => {
+                let n: Vec<f32> =
+                    v.split(',').map(|x| x.trim().parse().map_err(|_| "bad --rclick")).collect::<Result<_, _>>()?;
+                match n[..] {
+                    [x, y] => Some(([x, y], 0.0)),
+                    [x, y, h] => Some(([x, y], h)),
+                    _ => return Err("--rclick needs x,y[,hold_s]".into()),
+                }
+            }
+        },
     })
 }
 
@@ -200,6 +215,9 @@ struct App {
     last_input: Input,
     /// `--keys`: injected key presses (None = an idle frame).
     script_keys: std::collections::VecDeque<Option<Key>>,
+    /// `--rclick`: (screen position, seconds held, frames run).
+    script_rclick: Option<([f32; 2], f32, u32)>,
+    script_mouse: Option<[f32; 2]>,
     gfx: Gfx,
 }
 
@@ -280,6 +298,8 @@ fn run() -> Result<(), String> {
         quit: false,
         last_input: Input::default(),
         script_keys: o.keys.as_deref().map(parse_keys).transpose()?.unwrap_or_default(),
+        script_rclick: o.rclick.map(|(p, h)| (p, h, 0)),
+        script_mouse: None,
         gfx,
     };
     if o.direct() {
@@ -460,6 +480,8 @@ impl App {
             Opt::EdgePan => s.edge_pan = !s.edge_pan,
             Opt::Contours => s.contours = !s.contours,
             Opt::Grid => s.grid = !s.grid,
+            Opt::RightClick => s.right_click_menu = !s.right_click_menu,
+            Opt::PauseOnMenu => s.pause_on_menu = !s.pause_on_menu,
         }
         self.settings_changed();
     }
@@ -509,7 +531,26 @@ impl App {
 
     fn tick(&mut self) -> Result<(), String> {
         let mut inp = self.gfx.input();
+        if let Some((pos, hold, frame)) = &mut self.script_rclick
+            && matches!(self.screen, Screen::Map(_))
+        {
+            *frame += 1;
+            let down_frames = (*hold / 0.1).ceil() as u32 + 1;
+            let f = *frame;
+            self.script_mouse = Some(*pos);
+            inp.frame_time = 0.1;
+            inp.right_pressed = f == 3;
+            inp.right_down = (3..3 + down_frames).contains(&f);
+            inp.right_released = f == 3 + down_frames;
+            if f > 3 + down_frames {
+                self.script_rclick = None;
+            }
+        }
+        if let Some(m) = self.script_mouse {
+            inp.mouse = m;
+        }
         if !matches!(self.screen, Screen::Loading(_))
+            && self.script_rclick.is_none()
             && let Some(Some(k)) = self.script_keys.pop_front()
         {
             inp.pressed.push(k);

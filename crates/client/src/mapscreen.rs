@@ -329,6 +329,7 @@ impl MapScreen {
                 "SELECT   LMB PLATOON (CTRL: SINGLE TANK)  ROSTER / PANEL ROWS (CLICK AGAIN: CENTRE)  TAB NEXT",
                 "         SINGLE TANK: STATUS CARD (CREW, FUEL, ROUNDS, GUN, TARGET, SIGHTS)   I VEHICLE DATA (DATABASE)",
                 "MOVE     RMB MOVE   M MOVE TOOL   SHIFT+RMB ADD CHECKPOINT (RELEASE SHIFT TO SEND, APPENDS TO ROUTE)",
+                "MENU     HOLD RMB (OR RMB ON A UNIT / CONTACT / GRAPHIC) FOR THE CONTEXT MENU: ARROWS, ENTER, ESC, LETTERS",
                 "         R ROUTE TOOL: LMB CHECKPOINTS, RMB DESTINATION, BKSP UNDO   H HALT / RESUME",
                 "ORDERS   F FORMATION  T TECHNIQUE  S MOVE SPEED  B BATTLE POSITION ([ ] RADIUS)  W WEAPONS  A / CTRL+RMB ENGAGE",
                 "TIME     SPACE PAUSE  1-4 SPEED X1 X2 X4 X8   V VIEWSHED  L LINE OF SIGHT",
@@ -475,7 +476,16 @@ impl MapScreen {
         if inp.hit(Key::F(10)) || (inp.hit(Key::Escape) && !self.esc_in_use()) {
             return Some(Request::Menu);
         }
-        let (screen_buttons, game_buttons) = self.buttons(inp.screen);
+        let (mut screen_buttons, mut game_buttons) = self.buttons(inp.screen);
+        // Buttons under an open context menu are not reachable.
+        if let Mode::Game { game, .. } = &mut self.mode {
+            game.rclick_menu = ctx.settings.right_click_menu;
+            game.pause_on_menu = ctx.settings.pause_on_menu;
+            if game.menu_frames(inp.screen).iter().any(|r| r.contains(inp.mouse)) {
+                screen_buttons.clear();
+                game_buttons.clear();
+            }
+        }
         let clicked = hud::clicked(&screen_buttons, inp.mouse, inp.left_pressed)
             .map(Clicked::Screen)
             .or_else(|| hud::clicked(&game_buttons, inp.mouse, inp.left_pressed).map(Clicked::Game));
@@ -663,8 +673,16 @@ impl MapScreen {
         hud::draw(f, &game_buttons, inp.mouse);
         hud::draw(f, &screen_buttons, inp.mouse);
         status_line(f, inp, cam, map, ds, view.base);
-        hud::tooltip(f, &screen_buttons, inp.mouse, inp.screen);
-        hud::tooltip(f, &game_buttons, inp.mouse, inp.screen);
+        let menu = match &self.mode {
+            Mode::Game { game, .. } => game.menu(),
+            _ => None,
+        };
+        if let Some(m) = menu {
+            m.draw(f, inp.screen, inp.mouse);
+        } else {
+            hud::tooltip(f, &screen_buttons, inp.mouse, inp.screen);
+            hud::tooltip(f, &game_buttons, inp.mouse, inp.screen);
+        }
     }
 }
 
