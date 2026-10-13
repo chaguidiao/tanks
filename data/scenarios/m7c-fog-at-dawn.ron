@@ -1,0 +1,56 @@
+// M7c scenario: the M5 defence at first light in dense fog. Fog hurts thermal imagers almost as
+// much as optics, so the fight opens at a few hundred metres.
+(
+    id: "m7c-fog-at-dawn",
+    name: "FOG AT DAWN",
+    date: (1990, 10, 20),
+    start_time_s: 23400, // 06:30
+    map: (id: "demo", recipe: "rolling-farmland", seed: 42, size_m: 8000.0),
+    seed: 5,
+    briefing: "SITUATION: A RED TANK COMPANY IS EXPECTED FROM THE NORTH-EAST. DENSE FOG, VISIBILITY ABOUT 250 M, FIRST LIGHT.
+
+MISSION: 1ST AND 2ND PLATOONS HOLD THE VILLAGE CROSSROADS FOR 45 MINUTES. RED WINS BY HOLDING THE VILLAGE UNCONTESTED FOR 2 MINUTES. A SIDE THAT LOSES 70 % OF ITS TANKS LOSES.
+
+NOTES: THERMAL SIGHTS DO NOT HELP IN FOG. EXPECT CONTACT AT SHORT RANGE; SET BATTLE POSITIONS WITH OVERLAPPING FIELDS OF FIRE.",
+    weather: (preset: "fog", latitude_deg: 50.0, wind_speed_mps: 1.0, wind_from_deg: 270.0),
+    objectives: [(name: "VILLAGE", centre: (4500.0, 4300.0), radius_m: 350.0)],
+    victory: (time_limit_s: 2700.0, objective: "VILLAGE", attacker: 1, destroyed_fraction: 0.7),
+    sides: [
+        (
+            name: "BLUE",
+            doctrine: "western-combined",
+            units: [
+                (callsign: "1-1", vehicle: "bulwark_a1", position: (4560.0, 3720.0), heading_deg: 45.0, platoon: "1"),
+                (callsign: "1-2", vehicle: "bulwark_a1", position: (4640.0, 3700.0), heading_deg: 45.0, platoon: "1"),
+                (callsign: "1-3", vehicle: "bulwark_a1", position: (4480.0, 3690.0), heading_deg: 45.0, platoon: "1"),
+                (callsign: "1-4", vehicle: "bulwark_a1", position: (4520.0, 3640.0), heading_deg: 45.0, platoon: "1"),
+                (callsign: "2-1", vehicle: "bulwark_a1", position: (4800.0, 3720.0), heading_deg: 45.0, platoon: "2"),
+                (callsign: "2-2", vehicle: "bulwark_a1", position: (4880.0, 3700.0), heading_deg: 45.0, platoon: "2"),
+                (callsign: "2-3", vehicle: "bulwark_a1", position: (4720.0, 3690.0), heading_deg: 45.0, platoon: "2"),
+                (callsign: "2-4", vehicle: "bulwark_a1", position: (4760.0, 3640.0), heading_deg: 45.0, platoon: "2"),
+            ],
+            ai: (tasks: [
+                (platoons: ["1", "2"], mission: Defend(centre: (4700.0, 4550.0), radius_m: 220.0, facing_deg: 45.0)),
+            ]),
+        ),
+        (
+            name: "RED",
+            doctrine: "generic-opfor",
+            units: [
+                (callsign: "211", vehicle: "kurgan_b", position: (6400.0, 7500.0), heading_deg: 225.0, platoon: "21"),
+                (callsign: "212", vehicle: "kurgan_b", position: (6460.0, 7560.0), heading_deg: 225.0, platoon: "21"),
+                (callsign: "213", vehicle: "kurgan_b", position: (6520.0, 7620.0), heading_deg: 225.0, platoon: "21"),
+                (callsign: "221", vehicle: "kurgan_b", position: (6700.0, 7450.0), heading_deg: 225.0, platoon: "22"),
+                (callsign: "222", vehicle: "kurgan_b", position: (6760.0, 7510.0), heading_deg: 225.0, platoon: "22"),
+                (callsign: "223", vehicle: "kurgan_b", position: (6820.0, 7570.0), heading_deg: 225.0, platoon: "22"),
+                (callsign: "231", vehicle: "kurgan_b", position: (7000.0, 7400.0), heading_deg: 225.0, platoon: "23"),
+                (callsign: "232", vehicle: "kurgan_b", position: (7060.0, 7460.0), heading_deg: 225.0, platoon: "23"),
+                (callsign: "233", vehicle: "kurgan_b", position: (7120.0, 7520.0), heading_deg: 225.0, platoon: "23"),
+            ],
+            ai: (tasks: [
+                (platoons: ["21", "22", "23"], start_s: 60.0,
+                 mission: Attack(axis: [(6000.0, 6600.0), (5400.0, 5500.0)], objective: "VILLAGE")),
+            ]),
+        ),
+    ],
+)

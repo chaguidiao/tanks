@@ -4,7 +4,8 @@
 //! - critical dimension `d_c = sqrt(projected width × visible height)` from the target aspect
 //!   and the LOS visible fraction;
 //! - resolvable cycles `N = d_c / R · 1000 · cycles_per_mrad` for the observer's best sensor
-//!   (optical sights scaled by light level; night channels and thermals are not);
+//!   (optical sights scaled by light level, thermals by thermal contrast; atmospheric
+//!   transmittance and smoke per band);
 //! - Johnson criteria with the NVESD target transfer probability function
 //!   `P∞ = (N/N50)^E / (1 + (N/N50)^E)`, `E = 2.7 + 0.7·(N/N50)` (Vollmerhausen & Jacobs 2004);
 //! - ACQUIRE time-to-detect: detection is a Poisson process with rate `P∞ / τ`
@@ -23,6 +24,7 @@ use terrain::ground::Ground;
 use terrain::los::{Sight, sight};
 
 use crate::smoke::Band;
+use crate::weather::Atmosphere;
 use crate::world::{LocalTrack, World};
 
 /// Sensor checks every 5th tick = 4 Hz (DESIGN.md §4.1).
@@ -44,16 +46,11 @@ pub fn ttpf(n: f64, n50: f64) -> f64 {
     p / (1.0 + p)
 }
 
-/// Optical effectiveness by local time of day (fixed sunrise 06:00 / sunset 20:00 for now).
-pub fn light_factor(clock_s: f64, m: &DetectionModel) -> f64 {
-    let h = (clock_s / 3600.0).rem_euclid(24.0);
-    if (6.5..19.5).contains(&h) {
-        m.light_day.get()
-    } else if (5.0..6.5).contains(&h) || (19.5..21.0).contains(&h) {
-        m.light_twilight.get()
-    } else {
-        m.light_night.get()
-    }
+/// Speed above which a vehicle raises a visible dust plume (m/s).
+const DUST_SPEED_MPS: f64 = 4.0;
+
+fn tmoving_fast(world: &World, t: usize) -> bool {
+    world.mobility[t].as_ref().is_some_and(|mv| mv.speed > DUST_SPEED_MPS)
 }
 
 /// Target sample heights for partial visibility: track line, mid hull, hull roof, turret,
@@ -114,13 +111,13 @@ pub fn step(
     vehicles: &[VehicleDef],
     g: &Ground,
     m: &DetectionModel,
-    clock_s: f64,
+    atm: &Atmosphere,
     tick: u64,
     rng: &mut ChaCha8Rng,
     cache: &mut LosCache,
     smoke: &crate::smoke::SmokeField,
 ) -> Vec<Sighting> {
-    let light = light_factor(clock_s, m);
+    let light = atm.light;
     let max_r = m.max_range_m.get();
     let timeout = (m.track_timeout_s.get() / crate::DT) as u64;
     let mut out = Vec::new();
@@ -165,13 +162,13 @@ pub fn step(
             let sens = world.sensors[o].as_ref().expect("checked");
             let degrade = if sens.degraded { 0.5 } else { 1.0 };
             // Smoke on the path: per spectral band, a sensor below the blind threshold sees nothing.
-            let (t_vis, t_th) = if smoke.is_empty() {
-                (1.0, 1.0)
-            } else {
-                (smoke.transmittance(opos, tp.pos, Band::Visible), smoke.transmittance(opos, tp.pos, Band::Thermal))
-            };
+            let (mut t_vis, mut t_th) = (libm::exp(-atm.beta_visible * r), libm::exp(-atm.beta_thermal * r));
+            if !smoke.is_empty() {
+                t_vis *= smoke.transmittance(opos, tp.pos, Band::Visible);
+                t_th *= smoke.transmittance(opos, tp.pos, Band::Thermal);
+            }
             let (mut in_range, mut blinded) = (0, 0);
-            let cycles = sens
+            let (cycles, best) = sens
                 .sensors
                 .iter()
                 .filter(|&&(_, _, max)| r <= max)
@@ -179,16 +176,16 @@ pub fn step(
                     let (eff, band_t) = match kind {
                         SensorKind::Optical => (cpm * light, t_vis),
                         SensorKind::NightChannel => (cpm, t_vis),
-                        SensorKind::Thermal => (cpm, t_th),
+                        SensorKind::Thermal => (cpm * atm.thermal, t_th),
                     };
                     in_range += 1;
                     if band_t < smoke.blind_below {
                         blinded += 1;
                         return None;
                     }
-                    Some(dc / r * 1000.0 * eff * band_t * degrade)
+                    Some((dc / r * 1000.0 * eff * band_t * degrade, kind))
                 })
-                .fold(0.0, f64::max);
+                .fold((0.0, SensorKind::Optical), |a, b| if b.0 > a.0 { b } else { a });
             // Every sensor that could reach is screened: the pair is not seen, so tracks go stale.
             if in_range > 0 && blinded == in_range {
                 continue;
@@ -198,6 +195,10 @@ pub fn step(
             let mut cue = 1.0;
             if moving {
                 cue *= m.moving_target_factor.get();
+                // A dust plume behind a fast vehicle is seen by eye, not by a thermal imager.
+                if best != SensorKind::Thermal && tmoving_fast(world, t) {
+                    cue *= atm.dust_cue;
+                }
             }
             if fired {
                 cue *= m.firing_target_factor.get();

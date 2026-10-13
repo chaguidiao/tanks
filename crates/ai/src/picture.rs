@@ -194,6 +194,19 @@ pub struct SmokeView {
     pub strength: f64,
 }
 
+/// Sky, visibility and wind as the side's crews would judge them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WeatherView {
+    pub label: String,
+    pub sun_elevation_deg: f64,
+    /// Optical effectiveness 0..1.
+    pub light: f64,
+    pub visibility_m: f64,
+    pub precipitation_mm_h: f64,
+    pub wind_from_deg: f64,
+    pub wind_speed_mps: f64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PerceivedWorld {
     pub side: SideId,
@@ -206,6 +219,7 @@ pub struct PerceivedWorld {
     pub graphics: Vec<Graphic>,
     pub triggers: Vec<TriggerView>,
     pub smoke: Vec<SmokeView>,
+    pub weather: WeatherView,
 }
 
 impl PerceivedWorld {
@@ -221,6 +235,7 @@ impl PerceivedWorld {
             graphics: Vec::new(),
             triggers: Vec::new(),
             smoke: Vec::new(),
+            weather: WeatherView::default(),
         }
     }
 

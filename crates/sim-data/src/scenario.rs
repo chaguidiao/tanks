@@ -23,15 +23,43 @@ pub struct ScenarioDef {
     pub weather: WeatherDef,
 }
 
-/// Weather at the scenario (DESIGN.md decision 20). Wind moves smoke; presets for visibility and
-/// precipitation come with M7c.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+/// Weather and sky at the scenario (DESIGN.md decision 20). The preset (`data/combat/weather.ron`)
+/// sets visibility, precipitation and cloud; the date, local time and latitude fix the sun.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WeatherDef {
     /// Direction the wind blows from (deg, compass).
     #[serde(default)]
     pub wind_from_deg: f64,
     #[serde(default)]
     pub wind_speed_mps: f64,
+    #[serde(default = "default_preset")]
+    pub preset: String,
+    /// Latitude of the map centre (deg, north positive).
+    #[serde(default = "default_latitude")]
+    pub latitude_deg: f64,
+    /// Moon illumination, 0 = new, 1 = full (assumed above the horizon all night).
+    #[serde(default)]
+    pub moon_phase: f64,
+}
+
+fn default_preset() -> String {
+    "clear".into()
+}
+
+fn default_latitude() -> f64 {
+    50.0
+}
+
+impl Default for WeatherDef {
+    fn default() -> Self {
+        Self {
+            wind_from_deg: 0.0,
+            wind_speed_mps: 0.0,
+            preset: default_preset(),
+            latitude_deg: default_latitude(),
+            moon_phase: 0.0,
+        }
+    }
 }
 
 impl WeatherDef {

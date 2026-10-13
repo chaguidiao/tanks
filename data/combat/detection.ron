@@ -7,9 +7,22 @@
     moving_target_factor: (value: 1.5, source: "estimate", confidence: estimate, notes: "Motion and dust draw the eye."),
     firing_target_factor: (value: 6.0, source: "estimate", confidence: estimate, notes: "Muzzle flash, blast and obscuration cue observers."),
     observer_moving_factor: (value: 0.5, source: "estimate", confidence: estimate, notes: "Crews search poorly on the move."),
-    light_day: (value: 1.0, source: "reference", confidence: high),
-    light_twilight: (value: 0.35, source: "estimate", confidence: estimate),
-    light_night: (value: 0.005, source: "estimate", confidence: estimate, notes: "Unlit night: direct optics are useless beyond a few hundred metres. Moonlight and illumination come later."),
+    // Optical sight effectiveness by sun elevation (log-linear between points). Civil twilight
+    // ends at -6 deg, nautical at -12, astronomical at -18.
+    light_curve: [
+        (sun_elevation_deg: 10.0, factor: (value: 1.0, source: "reference: full daylight", confidence: high)),
+        (sun_elevation_deg: 0.0, factor: (value: 0.7, source: "estimate", confidence: estimate, notes: "Sun on the horizon: low-angle glare and long shadows.")),
+        (sun_elevation_deg: -3.0, factor: (value: 0.35, source: "estimate", confidence: estimate, notes: "Civil twilight: the earlier fixed 'twilight' value.")),
+        (sun_elevation_deg: -6.0, factor: (value: 0.15, source: "estimate", confidence: estimate)),
+        (sun_elevation_deg: -12.0, factor: (value: 0.02, source: "estimate", confidence: estimate, notes: "Nautical twilight: horizon barely visible.")),
+        (sun_elevation_deg: -18.0, factor: (value: 0.005, source: "estimate", confidence: estimate, notes: "Unlit night: direct optics are useless beyond a few hundred metres.")),
+    ],
+    moon_gain: (value: 6.0, source: "estimate", confidence: estimate, notes: "Full moon is about 0.1-0.3 lux against 0.001 lux of starlight; optics gain far less than the illuminance ratio suggests."),
+    thermal_crossover: (
+        centre_elevation_deg: (value: 8.0, source: "Vollmerhausen/Driggers-style field observation: thermal contrast minimum about an hour after sunrise and before sunset", confidence: estimate),
+        width_deg: (value: 6.0, source: "estimate", confidence: estimate),
+        depth: (value: 0.45, source: "estimate", confidence: estimate, notes: "Thermal effectiveness falls to 55 % at the crossover point; fresh sun-heated or cold-soaked days differ."),
+    ),
     max_range_m: (value: 6000.0, source: "estimate", confidence: estimate),
     track_timeout_s: (value: 15.0, source: "estimate", confidence: estimate),
 )

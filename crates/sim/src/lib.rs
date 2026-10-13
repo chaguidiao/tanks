@@ -22,6 +22,7 @@ pub mod sensors;
 pub mod smoke;
 pub mod vehicle;
 pub mod victory;
+pub mod weather;
 pub mod world;
 
 use std::sync::Arc;
@@ -105,6 +106,7 @@ pub struct Sim {
     ai_enabled: Vec<bool>,
     victory: victory::VictoryState,
     smoke: smoke::SmokeField,
+    weather: weather::Weather,
     /// Per side: the equipment year (scenario date or the side's tech year).
     years: Vec<i32>,
 }
@@ -240,6 +242,7 @@ impl Sim {
         let ai_enabled = commanders.iter().map(|c| c.is_some()).collect();
         let smoke =
             smoke::SmokeField::new(&data.smoke, scenario.weather.wind_from_deg, scenario.weather.wind_speed_mps);
+        let weather = weather::Weather::new(scenario, &data.weather)?;
         let years = scenario.sides.iter().map(|s| s.tech_year.unwrap_or(scenario.date.0)).collect();
         let mut sim = Self {
             tick: 0,
@@ -268,6 +271,7 @@ impl Sim {
             ai_enabled,
             victory: victory::VictoryState::default(),
             smoke,
+            weather,
             years,
         };
         sim.update_pictures();
@@ -499,7 +503,7 @@ impl Sim {
                 &self.vehicles,
                 &g,
                 &self.data.detection,
-                self.start_time_s as f64 + tick as f64 * DT,
+                &self.weather.at(self.start_time_s as f64 + tick as f64 * DT, &self.data.detection),
                 tick,
                 &mut self.rngs.sensors,
                 &mut self.los_cache,
@@ -938,6 +942,7 @@ impl Sim {
     }
 
     fn update_pictures(&mut self) {
+        let weather = self.weather.view(&self.weather.at(self.clock_s(), &self.data.detection));
         for side in self.sides.iter_mut() {
             let views: Vec<_> =
                 self.platoons.iter().filter(|p| p.side == side.picture.side).map(|p| p.view(&self.world)).collect();
@@ -945,6 +950,7 @@ impl Sim {
         }
         for (dst, src) in self.pictures.iter_mut().zip(&self.sides) {
             dst.clone_from(&src.picture);
+            dst.weather = weather.clone();
             if !self.smoke.is_empty() {
                 let near = |p: Vec2| {
                     dst.own.iter().any(|u| u.condition != Condition::Destroyed && dist(u.pos, p) < SMOKE_VIEW_M)

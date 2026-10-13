@@ -2008,6 +2008,18 @@ impl Game {
         }
         let side = &self.sim.side_names()[self.side.0 as usize];
         f.text(&format!("{side}  /  {}", self.scenario.name), 470.0, 10.0, style::FONT_S, style::TEXT_DIM);
+        let w = &self.sim.perceived(self.side).weather;
+        let sky = match w.sun_elevation_deg {
+            e if e > 0.0 => "DAY",
+            e if e > -6.0 => "CIVIL TWILIGHT",
+            e if e > -12.0 => "NAUTICAL TWILIGHT",
+            _ => "NIGHT",
+        };
+        let mut wx = format!("{sky}  {}  VIS {}", w.label, format::distance(w.visibility_m));
+        if w.precipitation_mm_h > 0.0 {
+            wx.push_str(&format!("  {:.0} MM/H", w.precipitation_mm_h));
+        }
+        f.text(&wx, 800.0, 10.0, style::FONT_S, style::TEXT_DIM);
 
         let prompt = self.prompt();
         let mode = match self.order_mode {

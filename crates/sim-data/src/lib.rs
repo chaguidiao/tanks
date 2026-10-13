@@ -56,6 +56,7 @@ pub struct DataSet {
     pub damage: DamageTables,
     pub penetration: PenetrationModel,
     pub smoke: SmokeModel,
+    pub weather: WeatherTable,
     pub terrain: TerrainData,
 }
 
@@ -105,6 +106,7 @@ impl DataSet {
             damage: load_ron(&root.join("combat/damage.ron"))?,
             penetration: load_ron(&root.join("combat/penetration.ron"))?,
             smoke: load_ron(&root.join("combat/smoke.ron"))?,
+            weather: load_ron(&root.join("combat/weather.ron"))?,
             terrain,
         };
         for a in &ds.ammo {

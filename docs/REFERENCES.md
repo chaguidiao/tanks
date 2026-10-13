@@ -66,6 +66,7 @@ A reading list grouped by subsystem. ★ = read first. Public sources only — n
 
 ## Smoke, weather, light and fire support (M7)
 - **FM 3-11.50 / ATP 3-11.50**, *Obscuration Operations* — smoke effects, screening, cloud behaviour in wind; tank self-screening doctrine in **ATP 3-20.15** (React to contact: employ smoke).
+- **Cooper (1969)** solar declination approximation, `δ = 23.44°·sin(360°/365·(N−81))`; sun elevation from hour angle (any solar-position text, e.g. Duffie & Beckman). Moon and twilight light levels (civil −6°, nautical −12°, astronomical −18°) are standard definitions; the optical light curve is an `estimate`.
 - **Koschmieder** relation: extinction k = 3.912 / V (meteorological visibility V, 2 % contrast) — fog/haze/rain presets in `data/combat/weather.ron`.
 - **Beer–Lambert** law for smoke transmittance T = exp(-k * CL), concentration-length; smoke mass extinction coefficients in open literature on HC and red-phosphorus screens (e.g. Palmer & Williams, *Appl. Opt.* 1974 on IR extinction of fog and smoke).
 - **J. Meeus**, *Astronomical Algorithms* (2nd ed., 1998) — low-precision solar position for sun elevation from date, time, latitude.

@@ -15,14 +15,62 @@ pub struct DetectionModel {
     pub moving_target_factor: Stat<f64>,
     pub firing_target_factor: Stat<f64>,
     pub observer_moving_factor: Stat<f64>,
-    /// Optical sight effectiveness multipliers by light level.
-    pub light_day: Stat<f64>,
-    pub light_twilight: Stat<f64>,
-    pub light_night: Stat<f64>,
+    /// Optical sight effectiveness by sun elevation, listed from the highest elevation down;
+    /// interpolated linearly in the logarithm of the factor.
+    pub light_curve: Vec<LightPoint>,
+    /// Full moon multiplies the night-time factor by `1 + moon_gain` (moon assumed up all night).
+    pub moon_gain: Stat<f64>,
+    pub thermal_crossover: CrossoverDef,
     /// Maximum range at which detection checks are made (m).
     pub max_range_m: Stat<f64>,
     /// A local track is dropped after this long without sight (s).
     pub track_timeout_s: Stat<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LightPoint {
+    pub sun_elevation_deg: f64,
+    pub factor: Stat<f64>,
+}
+
+/// Thermal crossover: around sunrise and sunset the target and its background reach the same
+/// temperature and thermal contrast collapses. The thermal factor is
+/// `1 - depth · exp(-((elevation - centre) / width)²)`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CrossoverDef {
+    pub centre_elevation_deg: Stat<f64>,
+    pub width_deg: Stat<f64>,
+    pub depth: Stat<f64>,
+}
+
+/// One weather condition (`data/combat/weather.ron`); a scenario names one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeatherPreset {
+    pub id: String,
+    pub name: String,
+    /// Meteorological visibility: the range at which a black object has 2 % contrast
+    /// (Koschmieder, extinction = 3.912 / V) (m).
+    pub visibility_m: Stat<f64>,
+    /// Extinction in the thermal band (8–12 µm) (per m).
+    pub thermal_extinction_per_m: Stat<f64>,
+    /// Multiplier on optical light by cloud and precipitation (1 = clear sky).
+    pub sky_light: Stat<f64>,
+    /// Extra spotting cue for a fast-moving vehicle raising dust (multiplies the moving-target
+    /// factor; 1 = none, wet ground or dense air).
+    pub dust_cue: Stat<f64>,
+    /// Display only (mm/h).
+    pub precipitation_mm_h: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeatherTable {
+    pub presets: Vec<WeatherPreset>,
+}
+
+impl WeatherTable {
+    pub fn preset(&self, id: &str) -> Option<&WeatherPreset> {
+        self.presets.iter().find(|p| p.id == id)
+    }
 }
 
 /// Outcome probabilities for one hit category. Remaining probability = no further effect.

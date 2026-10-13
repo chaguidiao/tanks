@@ -539,27 +539,37 @@ fn combat_sheet(ds: &DataSet, k: usize) -> Option<Sheet> {
     Some(match k {
         0 => {
             let d = &ds.detection;
+            let curve: Vec<Line> = d
+                .light_curve
+                .iter()
+                .map(|p| stat(&format!("SUN AT {:+.0}°", p.sun_elevation_deg), &p.factor, |x| format!("× {x:.3}")))
+                .collect();
+            let mut lines = vec![
+                section("CYCLES FOR 50 % PROBABILITY (N50)"),
+                stat("DETECT", &d.n50_detect, plain),
+                stat("RECOGNISE (TANK VS OTHER)", &d.n50_recognise, plain),
+                stat("IDENTIFY (WHICH TANK)", &d.n50_identify, plain),
+                section("SEARCH"),
+                stat("ACQUIRE TIME CONSTANT", &d.acquire_tau_s, secs),
+                stat("TARGET MOVING", &d.moving_target_factor, |x| format!("× {x:.2}")),
+                stat("TARGET FIRING", &d.firing_target_factor, |x| format!("× {x:.2}")),
+                stat("OBSERVER MOVING", &d.observer_moving_factor, |x| format!("× {x:.2}")),
+                section("OPTICAL SIGHTS BY LIGHT"),
+            ];
+            lines.extend(curve);
+            lines.extend([
+                stat("MOON GAIN", &d.moon_gain, |x| format!("× {x:.1} AT FULL MOON")),
+                stat("XOVER CENTRE", &d.thermal_crossover.centre_elevation_deg, |x| format!("{x:.0}° SUN")),
+                stat("XOVER WIDTH", &d.thermal_crossover.width_deg, |x| format!("{x:.0}°")),
+                stat("XOVER DEPTH", &d.thermal_crossover.depth, |x| format!("-{:.0} %", x * 100.0)),
+                section("LIMITS"),
+                stat("DETECTION CHECKS OUT TO", &d.max_range_m, |x| format!("{x:.0} M")),
+                stat("TRACK DROPPED AFTER", &d.track_timeout_s, secs),
+            ]);
             Sheet {
                 title: "DETECTION".into(),
                 sub: "JOHNSON CRITERIA / TTP CYCLES ACROSS THE TARGET, ACQUIRE SEARCH TIME".into(),
-                lines: vec![
-                    section("CYCLES FOR 50 % PROBABILITY (N50)"),
-                    stat("DETECT", &d.n50_detect, plain),
-                    stat("RECOGNISE (TANK VS OTHER)", &d.n50_recognise, plain),
-                    stat("IDENTIFY (WHICH TANK)", &d.n50_identify, plain),
-                    section("SEARCH"),
-                    stat("ACQUIRE TIME CONSTANT", &d.acquire_tau_s, secs),
-                    stat("TARGET MOVING", &d.moving_target_factor, |x| format!("× {x:.2}")),
-                    stat("TARGET FIRING", &d.firing_target_factor, |x| format!("× {x:.2}")),
-                    stat("OBSERVER MOVING", &d.observer_moving_factor, |x| format!("× {x:.2}")),
-                    section("OPTICAL SIGHTS BY LIGHT"),
-                    stat("DAY", &d.light_day, |x| format!("× {x:.2}")),
-                    stat("TWILIGHT", &d.light_twilight, |x| format!("× {x:.2}")),
-                    stat("NIGHT", &d.light_night, |x| format!("× {x:.2}")),
-                    section("LIMITS"),
-                    stat("DETECTION CHECKS OUT TO", &d.max_range_m, |x| format!("{x:.0} M")),
-                    stat("TRACK DROPPED AFTER", &d.track_timeout_s, secs),
-                ],
+                lines,
             }
         }
         1 => {
