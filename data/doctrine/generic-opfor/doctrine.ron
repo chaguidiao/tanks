@@ -32,6 +32,12 @@
     battle_formation: line,
     smoke_when_engaged: true,
     break_contact_distance_m: (value: 1000.0, source: "estimate", confidence: estimate, notes: "Far enough to be out of the threat's direct-fire arc behind the screen; the drill bounds back to this distance."),
+    fire_support: (
+        danger_close_m: (value: 200.0, source: "estimate", confidence: estimate, notes: "Beyond the unadjusted fall-of-shot error of a 155 mm mission at long range (about 60 m) with margin; real minimum safe distances for 155 mm HE in the open are of this order (ATP 3-09.42 danger close, 600 m for troops in the open, relaxed for armoured vehicles)."),
+        volleys: 3,
+        repeat_s: (value: 120.0, source: "estimate", confidence: estimate),
+        max_contact_age_s: (value: 20.0, source: "estimate", confidence: estimate, notes: "Fires are unadjusted, so only fresh reports are worth a mission."),
+    ),
     code_words: ["HAMMER", "ANVIL", "SWORD", "SHIELD", "FALCON", "RAVEN", "COBRA", "TIGER", "EAGLE"],
     break_off_losses: (value: 0.67, source: "estimate", confidence: estimate),
     // Ordered march speeds (m/s): 40, 25 and 15 km/h.

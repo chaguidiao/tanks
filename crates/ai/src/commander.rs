@@ -13,13 +13,14 @@
 
 use sim_data::{DoctrinePack, Formation, Mission, ObjectiveDef, Technique};
 
-use crate::picture::{Condition, PerceivedWorld, PlatoonId, Vec2};
+use crate::picture::{BatteryStatus, Condition, PerceivedWorld, PlatoonId, Vec2};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Order {
     Move { platoon: PlatoonId, destination: Vec2, formation: Formation, technique: Technique },
     Occupy { platoon: PlatoonId, centre: Vec2, radius: f64, facing: f64 },
     Halt { platoon: PlatoonId },
+    CallFire { battery: u32, at: Vec2, volleys: u32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -46,6 +47,8 @@ pub struct TaskState {
 #[derive(Debug, Clone)]
 pub struct Commander {
     pub tasks: Vec<TaskState>,
+    /// Time of the last call for fire (s).
+    pub last_call_s: f64,
 }
 
 fn dist(a: Vec2, b: Vec2) -> f64 {
@@ -54,7 +57,7 @@ fn dist(a: Vec2, b: Vec2) -> f64 {
 
 impl Commander {
     pub fn new(tasks: Vec<TaskState>) -> Self {
-        Self { tasks }
+        Self { tasks, last_call_s: f64::NEG_INFINITY }
     }
 
     fn centroid(pic: &PerceivedWorld, p: PlatoonId) -> Option<(Vec2, usize, usize)> {
@@ -69,12 +72,45 @@ impl Commander {
         Some((c, alive.len(), pv.members.len()))
     }
 
+    /// Fires on the freshest contact that is in range of a ready battery and not danger close
+    /// (ATP 3-09.42: fires on targets that threaten the scheme of manoeuvre).
+    fn call_fire(&mut self, pic: &PerceivedWorld, d: &DoctrinePack) -> Option<Order> {
+        let fs = d.fire_support.as_ref()?;
+        if pic.time_s - self.last_call_s < fs.repeat_s.get() {
+            return None;
+        }
+        let mine: Vec<Vec2> = pic.own.iter().filter(|u| u.condition != Condition::Destroyed).map(|u| u.pos).collect();
+        let mut best: Option<(u32, Vec2, f64)> = None;
+        for b in pic.fire_support.iter().filter(|b| b.status == BatteryStatus::Ready && b.he_rounds > 0) {
+            for c in pic.live_contacts().filter(|c| pic.time_s - c.last_report_s <= fs.max_contact_age_s.get()) {
+                let r = dist(b.pos, c.pos);
+                if r < b.min_range_m || r > b.max_range_m {
+                    continue;
+                }
+                let nearest_own = mine.iter().map(|p| dist(*p, c.pos)).fold(f64::INFINITY, f64::min);
+                if nearest_own < fs.danger_close_m.get() {
+                    continue;
+                }
+                // Prefer the target closest to our own forces: it is the one that matters most.
+                if best.is_none_or(|(_, _, n)| nearest_own < n) {
+                    best = Some((b.id, c.pos, nearest_own));
+                }
+            }
+        }
+        let (battery, at, _) = best?;
+        self.last_call_s = pic.time_s;
+        Some(Order::CallFire { battery, at, volleys: fs.volleys })
+    }
+
     /// One decision step. Returns new orders.
     pub fn step(&mut self, pic: &PerceivedWorld, d: &DoctrinePack, objectives: &[ObjectiveDef]) -> Vec<Order> {
         let mut out = Vec::new();
         let fresh: Vec<Vec2> =
             pic.live_contacts().filter(|c| pic.time_s - c.last_report_s < 30.0).map(|c| c.pos).collect();
         let under_fire = pic.shots.iter().any(|s| !s.own);
+        if let Some(o) = self.call_fire(pic, d) {
+            out.push(o);
+        }
         for t in self.tasks.iter_mut() {
             if pic.time_s < t.start_s {
                 continue;

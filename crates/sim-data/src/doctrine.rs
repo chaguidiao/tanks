@@ -91,6 +91,23 @@ pub struct DoctrinePack {
     /// command card (Ctrl+1..9).
     #[serde(default)]
     pub code_words: Vec<String>,
+    /// Commander-level call for fire on fresh contacts; `None` = the AI never calls fire.
+    #[serde(default)]
+    pub fire_support: Option<FireSupportDoctrine>,
+}
+
+/// When the commander AI calls its batteries (FM 6-20-30 / ATP 3-09.42: fire support is
+/// requested on targets that threaten the scheme of manoeuvre, never danger close).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FireSupportDoctrine {
+    /// No call if any own vehicle is closer than this to the target (m).
+    pub danger_close_m: Stat<f64>,
+    /// Volleys per mission.
+    pub volleys: u32,
+    /// Minimum time between calls by a side (s).
+    pub repeat_s: Stat<f64>,
+    /// Only contacts reported within this many seconds are targeted.
+    pub max_contact_age_s: Stat<f64>,
 }
 
 impl DoctrinePack {

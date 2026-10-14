@@ -302,3 +302,42 @@ fn fire_support_is_deterministic() {
     };
     assert_eq!(hash(), hash());
 }
+
+fn with_ai(mut sc: ScenarioDef) -> ScenarioDef {
+    sc.sides[0].ai = Some(sim_data::AiPlan { tasks: vec![] });
+    sc
+}
+
+#[test]
+fn the_commander_ai_calls_fire_on_a_fresh_contact_in_range() {
+    let (ds, m) = world();
+    let sc = with_ai(with_battery(
+        scenario(
+            NOON,
+            vec![unit("1-1", "bulwark_a1", [500.0, 1500.0], 0.0, Some("1"))],
+            vec![unit("211", "kurgan_b", [500.0, 3500.0], 180.0, Some("21"))],
+        ),
+        None,
+        None,
+    ));
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    let rep = fire_reports(&run_events(&mut sim, 60.0));
+    assert!(rep.iter().any(|(_, r)| matches!(r, FireReport::Accepted { .. })), "no mission called: {rep:?}");
+}
+
+#[test]
+fn the_commander_ai_does_not_call_danger_close() {
+    let (ds, m) = world();
+    let sc = with_ai(with_battery(
+        scenario(
+            NOON,
+            vec![unit("1-1", "bulwark_a1", [500.0, 1500.0], 0.0, Some("1"))],
+            vec![unit("211", "kurgan_b", [500.0, 1650.0], 180.0, Some("21"))],
+        ),
+        None,
+        None,
+    ));
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    let rep = fire_reports(&run_events(&mut sim, 60.0));
+    assert!(rep.is_empty(), "danger close call: {rep:?}");
+}
