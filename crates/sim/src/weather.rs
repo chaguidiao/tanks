@@ -142,6 +142,29 @@ mod tests {
     }
 
     #[test]
+    fn the_sun_carries_on_across_midnight() {
+        // Same hour on consecutive days differs only by the slow declination change.
+        for day in 0..3 {
+            let a = sun_elevation_deg(52.0, (2000, 6, 21), day, 12.0);
+            let b = sun_elevation_deg(52.0, (2000, 6, 21), day + 1, 12.0);
+            assert!((a - b).abs() < 0.5, "{a} {b}");
+        }
+        let late = sun_elevation_deg(52.0, (2000, 6, 21), 0, 23.99);
+        let early = sun_elevation_deg(52.0, (2000, 6, 21), 1, 0.0);
+        assert!((late - early).abs() < 0.5, "{late} {early}");
+        let m = model();
+        let w = |t: f64| {
+            light_factor(
+                sun_elevation_deg(52.0, (2000, 6, 21), (t / 86_400.0) as i32, (t % 86_400.0) / 3600.0),
+                0.0,
+                1.0,
+                &m,
+            )
+        };
+        assert!((w(86_399.0) - w(86_400.0)).abs() < 0.01);
+    }
+
+    #[test]
     fn light_falls_with_the_sun_and_the_moon_helps() {
         let m = model();
         let mut prev = f64::MAX;

@@ -1672,6 +1672,19 @@ mod tests {
     }
 
     #[test]
+    fn followers_get_their_own_route_graphic() {
+        let mut g = game();
+        let (a, b) = platoons(&g);
+        select(&mut g, Some(a));
+        g.also_of = Some(a);
+        g.add_follower(b);
+        g.issue_move(vec![], [700.0, 900.0]);
+        for p in [a, b] {
+            assert!(g.graphics.iter().any(|o| o.platoon == Some(p) && matches!(o.kind, GraphicKind::Route { .. })));
+        }
+    }
+
+    #[test]
     fn shift_right_click_appends_and_sends_a_plain_move_on_release() {
         let mut g = game();
         let (a, _) = platoons(&g);

@@ -558,6 +558,39 @@ impl Game {
         Some(c)
     }
 
+    /// Order graphic and radio line for a follower platoon, as the primary gets for its own.
+    fn follower_note(&mut self, p: PlatoonId, c: &Command) {
+        let cs = self.platoon_cs(p);
+        let from = self.platoon_centre(p);
+        match c {
+            Command::PlatoonMove { destination, via, .. } => {
+                let mut points: Vec<[f64; 2]> = from.into_iter().collect();
+                points.extend(via.iter().copied());
+                points.push(*destination);
+                self.graphics.retain(|g| g.platoon != Some(p));
+                self.graphics.push(OrderGraphic {
+                    platoon: Some(p),
+                    unit: None,
+                    kind: GraphicKind::Route { points },
+                    acknowledged: false,
+                });
+                self.radio(format!("TO {cs}: MOVE TO GRID {}.", format::grid(*destination)));
+            }
+            Command::OccupyPosition { centre, radius_m, facing, .. } => {
+                let label = format!("BP {cs}");
+                self.radio(format!("TO {cs}: OCCUPY {label}, HULL-DOWN, ORIENT {} MILS.", format::mils(*facing)));
+                self.graphics.retain(|g| g.platoon != Some(p));
+                self.graphics.push(OrderGraphic {
+                    platoon: Some(p),
+                    unit: None,
+                    kind: GraphicKind::Bp { centre: *centre, radius: *radius_m, facing: *facing, label },
+                    acknowledged: false,
+                });
+            }
+            _ => {}
+        }
+    }
+
     pub fn order(&mut self, cmd: Command) {
         let mode = self.order_mode;
         if let Some(primary) = self.sel_platoon {
@@ -569,6 +602,7 @@ impl Game {
                 };
                 if let Some(c) = Self::for_follower(&cmd, primary, p, off) {
                     self.order_mode = mode;
+                    self.follower_note(p, &c);
                     self.order_one(c);
                 }
             }
@@ -1704,6 +1738,38 @@ impl Game {
         (s.any() && s.transmittance > 0.1, s.transmittance)
     }
 
+    /// Terrain profile between the two LOS points with the sight line from eye to target top.
+    fn draw_los_profile(&self, f: &mut Frame, cam: &Camera, a: [f64; 2], b: [f64; 2], colour: Rgba) {
+        const N: usize = 96;
+        let g = Ground::new(self.sim.map(), &self.sim.data().terrain);
+        let hs: Vec<f64> = (0..=N)
+            .map(|i| {
+                let t = i as f64 / N as f64;
+                g.height(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+            })
+            .collect();
+        let (eye, tgt) = (hs[0] + self.eye_height(), hs[N] + 2.4);
+        let lo = hs.iter().copied().fold(eye.min(tgt), f64::min);
+        let hi = hs.iter().copied().fold(eye.max(tgt), f64::max).max(lo + 5.0);
+        let (w, h) = (360.0_f32, 110.0_f32);
+        let (x, y) = ((cam.screen[0] - w) * 0.5, cam.screen[1] - h - 40.0);
+        f.rect(x - 6.0, y - 18.0, w + 12.0, h + 24.0, Rgba(14, 18, 20, 220));
+        f.rect_lines(x - 6.0, y - 18.0, w + 12.0, h + 24.0, style::TEXT);
+        let pt = |i: usize, z: f64| -> P2 { [x + w * i as f32 / N as f32, y + h - h * ((z - lo) / (hi - lo)) as f32] };
+        for i in 0..N {
+            f.line(pt(i, hs[i]), pt(i + 1, hs[i + 1]), 1.5, style::TEXT);
+        }
+        f.line(pt(0, eye), pt(N, tgt), 1.0, colour);
+        let d = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+        f.text(
+            &format!("PROFILE {}  {:.0}-{:.0} M ELEV", format::distance(d), lo, hi),
+            x,
+            y - 14.0,
+            style::FONT,
+            style::TEXT,
+        );
+    }
+
     fn interp(&self, id: EntityId, pos: [f64; 2], heading: f64) -> ([f64; 2], f64) {
         let a = if self.paused { 1.0 } else { (self.acc / sim::DT).clamp(0.0, 1.0) };
         match self.prev.iter().find(|p| p.0 == id) {
@@ -1995,6 +2061,9 @@ impl Game {
                 };
                 let s = cam.to_screen(b);
                 f.text(&txt, s[0] + 8.0, s[1] + 6.0, style::FONT, c);
+                if result.is_some() {
+                    self.draw_los_profile(f, cam, *a, b, c);
+                }
             }
             _ => {}
         }
