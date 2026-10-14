@@ -108,6 +108,10 @@ pub struct FireSupportDoctrine {
     pub repeat_s: Stat<f64>,
     /// Only contacts reported within this many seconds are targeted.
     pub max_contact_age_s: Stat<f64>,
+    /// Smoke volleys called on the nearest fresh contact when an attack deploys for the assault
+    /// (ATP 3-09.42 / FM 3-90: obscure the enemy's observation of the assault force); 0 = never.
+    #[serde(default)]
+    pub smoke_volleys: u32,
 }
 
 impl DoctrinePack {

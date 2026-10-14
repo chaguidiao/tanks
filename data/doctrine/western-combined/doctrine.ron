@@ -37,6 +37,7 @@
         volleys: 3,
         repeat_s: (value: 150.0, source: "estimate", confidence: estimate),
         max_contact_age_s: (value: 20.0, source: "estimate", confidence: estimate, notes: "Fires are unadjusted, so only fresh reports are worth a mission."),
+        smoke_volleys: 2,
     ),
     code_words: ["HAMMER", "ANVIL", "SWORD", "SHIELD", "FALCON", "RAVEN", "COBRA", "TIGER", "EAGLE"],
     break_off_losses: (value: 0.5, source: "estimate", confidence: estimate),

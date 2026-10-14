@@ -411,3 +411,32 @@ fn adjusting_needs_a_previous_mission_and_an_idle_battery() {
     let rep = fire_reports(&run_events(&mut sim, 1.0));
     assert!(matches!(rep[0].1, FireReport::Denied(DenyReason::Busy)), "{rep:?}");
 }
+
+#[test]
+fn the_commander_ai_screens_with_smoke_on_entering_battle() {
+    let (ds, m) = world();
+    let mut sc = with_battery(
+        scenario(
+            NOON,
+            vec![unit("1-1", "bulwark_a1", [500.0, 1500.0], 0.0, Some("1"))],
+            vec![unit("211", "kurgan_b", [500.0, 3500.0], 180.0, Some("21"))],
+        ),
+        Some(0),
+        Some(12),
+    );
+    sc.objectives = vec![sim_data::ObjectiveDef { name: "OBJ".into(), centre: [500.0, 3000.0], radius_m: 200.0 }];
+    sc.sides[0].ai = Some(sim_data::AiPlan {
+        tasks: vec![sim_data::AiTask {
+            platoons: vec!["1".into()],
+            mission: sim_data::Mission::Attack {
+                axis: vec![[500.0, 2200.0], [500.0, 3000.0]],
+                objective: "OBJ".into(),
+            },
+            start_s: 20.0,
+        }],
+    });
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    let ev = run_events(&mut sim, 90.0);
+    let smoke = ev.iter().any(|(_, e)| matches!(e, Event::FireSupport { report: FireReport::Accepted { .. }, .. }));
+    assert!(smoke, "no smoke mission called on entering battle (battery has no HE)");
+}

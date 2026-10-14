@@ -38,6 +38,8 @@ const MAX_TICKS_PER_FRAME: u32 = 40;
 /// Zoomed out beyond this (m/px), platoons are drawn as one symbol (DESIGN.md §10.1).
 const AGGREGATE_MPP: f64 = 7.0;
 
+/// A drag shorter than this (px) is a click, not a selection box.
+const BOX_MIN_PX: f32 = 8.0;
 /// Distance of the REVERSE order (m).
 const REVERSE_M: f64 = 100.0;
 
@@ -216,6 +218,10 @@ pub struct Game {
     /// only while `also_of` is still the selected platoon.
     also: Vec<PlatoonId>,
     pub also_of: Option<PlatoonId>,
+    /// Screen position where a left-button drag started (box selection).
+    drag: Option<P2>,
+    /// Control groups 1..9 (Ctrl+Shift+N sets, Shift+N recalls): platoons, primary first.
+    groups: Vec<Vec<PlatoonId>>,
     pub sel_unit: Option<EntityId>,
     pub paused: bool,
     pub speed: usize,
@@ -281,6 +287,8 @@ impl Game {
             sel_platoon: None,
             also: Vec::new(),
             also_of: None,
+            drag: None,
+            groups: vec![Vec::new(); 9],
             sel_unit: None,
             paused: true,
             speed: 0,
@@ -692,13 +700,13 @@ impl Game {
             a.push(GameAction::VehicleData);
         }
         for k in 0..SPEEDS.len() {
-            if inp.hit(Key::Num(k as u8 + 1)) && !inp.ctrl {
+            if inp.hit(Key::Num(k as u8 + 1)) && !inp.ctrl && !inp.shift {
                 a.push(GameAction::Speed(k));
             }
         }
         // Ctrl+1..9: code words in the doctrine pack's order.
         for k in 1..=9u8 {
-            if inp.ctrl && inp.hit(Key::Num(k)) {
+            if inp.ctrl && !inp.shift && inp.hit(Key::Num(k)) {
                 a.push(GameAction::CodeWord(k - 1));
             }
         }
@@ -722,6 +730,17 @@ impl Game {
             }
             return fx;
         }
+        self.control_groups(inp);
+        if inp.left_released {
+            if let Some(start) = self.drag.take()
+                && self.tool == Tool::None
+                && (start[0] - inp.mouse[0]).abs().max((start[1] - inp.mouse[1]).abs()) > BOX_MIN_PX
+            {
+                self.box_select(cam, start, inp.mouse, inp.shift);
+            }
+        } else if !inp.left_down {
+            self.drag = None;
+        }
         let menu_was_open = self.menu.is_some();
         let mut actions = if menu_was_open { Vec::new() } else { self.hotkeys(inp) };
         actions.extend(clicked.filter(|a| *a != GameAction::Aar));
@@ -738,6 +757,9 @@ impl Game {
         let over_ui = over_ui || swallowed;
         if self.plan_mouse(inp, cam, over_ui) {
         } else if !over_ui && inp.left_pressed {
+            if self.tool == Tool::None {
+                self.drag = Some(inp.mouse);
+            }
             match self.tool.clone() {
                 Tool::None => self.select(cam, inp.mouse, inp.ctrl, inp.shift),
                 Tool::PlanCp => self.plan_add_cp(world),
@@ -1476,6 +1498,68 @@ impl Game {
         }
     }
 
+    /// Select the platoons that have a vehicle inside the screen rectangle; Shift adds to the
+    /// current selection.
+    fn box_select(&mut self, cam: &Camera, a: P2, b: P2, add: bool) {
+        let (x0, x1) = (a[0].min(b[0]), a[0].max(b[0]));
+        let (y0, y1) = (a[1].min(b[1]), a[1].max(b[1]));
+        let mut ps: Vec<PlatoonId> = Vec::new();
+        for u in self.picture().own.iter().filter(|u| u.condition != Condition::Destroyed) {
+            let s = cam.to_screen(u.pos);
+            if let Some(p) = u.platoon
+                && s[0] >= x0
+                && s[0] <= x1
+                && s[1] >= y0
+                && s[1] <= y1
+                && !ps.contains(&p)
+            {
+                ps.push(p);
+            }
+        }
+        ps.sort();
+        if add {
+            let mut cur: Vec<PlatoonId> = self.sel_platoon.into_iter().chain(self.followers()).collect();
+            for p in ps {
+                if !cur.contains(&p) {
+                    cur.push(p);
+                }
+            }
+            ps = cur;
+        }
+        self.select_platoons(&ps);
+    }
+
+    /// Select `ps`: the first is the primary, the rest follow its orders.
+    fn select_platoons(&mut self, ps: &[PlatoonId]) {
+        let Some(&first) = ps.first() else { return };
+        self.sel_platoon = Some(first);
+        self.also = ps[1..].to_vec();
+        self.also_of = Some(first);
+        self.sel_unit = self.picture().platoon(first).and_then(|v| v.members.first().copied());
+    }
+
+    /// Ctrl+Shift+1..9 stores the selected platoons, Shift+1..9 selects them again.
+    fn control_groups(&mut self, inp: &Input) {
+        for k in 1..=9u8 {
+            if !inp.shift || !inp.hit(Key::Num(k)) {
+                continue;
+            }
+            let i = k as usize - 1;
+            if inp.ctrl {
+                if let Some(p) = self.sel_platoon {
+                    let g: Vec<PlatoonId> = std::iter::once(p).chain(self.followers()).collect();
+                    let names: Vec<String> = g.iter().map(|p| self.platoon_cs(*p)).collect();
+                    self.radio(format!("CONTROL GROUP {k}: PLATOON {}.", names.join(" + ")));
+                    self.groups[i] = g;
+                }
+            } else {
+                let g: Vec<PlatoonId> =
+                    self.groups[i].iter().copied().filter(|p| self.picture().platoon(*p).is_some()).collect();
+                self.select_platoons(&g);
+            }
+        }
+    }
+
     fn engage_at(&mut self, cam: &Camera, s: P2) {
         let Some(u) = self.sel_unit else { return };
         let c = self
@@ -1738,6 +1822,18 @@ impl Game {
     }
 
     fn draw_tool(&self, f: &mut Frame, cam: &Camera, mouse: P2) {
+        if let Some(a) = self.drag
+            && self.tool == Tool::None
+            && (a[0] - mouse[0]).abs().max((a[1] - mouse[1]).abs()) > BOX_MIN_PX
+        {
+            f.rect_lines(
+                a[0].min(mouse[0]),
+                a[1].min(mouse[1]),
+                (a[0] - mouse[0]).abs(),
+                (a[1] - mouse[1]).abs(),
+                style::SELECT,
+            );
+        }
         match &self.tool {
             Tool::Move => {
                 if let Some(c) = self.selection_centre() {

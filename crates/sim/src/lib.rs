@@ -530,9 +530,12 @@ impl Sim {
                             kind: PositionKind::HullDown,
                         },
                         ai::commander::Order::Halt { platoon } => Command::Halt { to: Addressee::Platoon(platoon) },
-                        ai::commander::Order::CallFire { battery, at, volleys } => {
-                            Command::CallForFire { battery, at, kind: FireKind::He, volleys }
-                        }
+                        ai::commander::Order::CallFire { battery, at, volleys, smoke } => Command::CallForFire {
+                            battery,
+                            at,
+                            kind: if smoke { FireKind::Smoke } else { FireKind::He },
+                            volleys,
+                        },
                     };
                     self.incoming.push(TimedCommand { tick, side, cmd, immediate: tick == 0, generated: true });
                 }

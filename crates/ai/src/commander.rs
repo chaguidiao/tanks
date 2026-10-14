@@ -20,7 +20,7 @@ pub enum Order {
     Move { platoon: PlatoonId, destination: Vec2, formation: Formation, technique: Technique },
     Occupy { platoon: PlatoonId, centre: Vec2, radius: f64, facing: f64 },
     Halt { platoon: PlatoonId },
-    CallFire { battery: u32, at: Vec2, volleys: u32 },
+    CallFire { battery: u32, at: Vec2, volleys: u32, smoke: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -99,7 +99,26 @@ impl Commander {
         }
         let (battery, at, _) = best?;
         self.last_call_s = pic.time_s;
-        Some(Order::CallFire { battery, at, volleys: fs.volleys })
+        Some(Order::CallFire { battery, at, volleys: fs.volleys, smoke: false })
+    }
+
+    /// Smoke on the nearest fresh contact as the assault deploys, from a ready battery with smoke
+    /// in range (blinds the defenders' observation; not on top of own forces).
+    fn smoke_mission(last_call_s: &mut f64, pic: &PerceivedWorld, d: &DoctrinePack, lead: Vec2) -> Option<Order> {
+        let fs = d.fire_support.as_ref().filter(|f| f.smoke_volleys > 0)?;
+        let mine: Vec<Vec2> = pic.own.iter().filter(|u| u.condition != Condition::Destroyed).map(|u| u.pos).collect();
+        let target = pic
+            .live_contacts()
+            .filter(|c| pic.time_s - c.last_report_s <= fs.max_contact_age_s.get())
+            .filter(|c| mine.iter().all(|p| dist(*p, c.pos) >= fs.danger_close_m.get()))
+            .min_by(|a, b| dist(a.pos, lead).total_cmp(&dist(b.pos, lead)))?;
+        let b = pic.fire_support.iter().find(|b| {
+            b.status == BatteryStatus::Ready
+                && b.smoke_rounds > 0
+                && (b.min_range_m..=b.max_range_m).contains(&dist(b.pos, target.pos))
+        })?;
+        *last_call_s = pic.time_s;
+        Some(Order::CallFire { battery: b.id, at: target.pos, volleys: fs.smoke_volleys, smoke: true })
     }
 
     /// One decision step. Returns new orders.
@@ -193,6 +212,11 @@ impl Commander {
                         continue;
                     }
                     t.phase = want;
+                    if want == Phase::Battle
+                        && let Some(o) = Self::smoke_mission(&mut self.last_call_s, pic, d, lead)
+                    {
+                        out.push(o);
+                    }
                     let dir = crate::drive::bearing(lead, obj.centre);
                     let n = active.len() as f64;
                     for (k, (_, p)) in active.iter().enumerate() {
