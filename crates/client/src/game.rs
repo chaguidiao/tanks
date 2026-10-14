@@ -33,7 +33,7 @@ mod planedit;
 mod posture;
 use ctx::{MenuTarget, Rmb};
 use planedit::{EtaCache, Pick, PlanDraft};
-use posture::Posture;
+use posture::{Posture, Scope};
 
 /// Time compression steps (DESIGN.md §2.1).
 pub const SPEEDS: [u32; 4] = [1, 2, 4, 8];
@@ -127,6 +127,9 @@ pub enum Cmd {
     PhaseLine,
     Objective,
     Trp,
+    /// GRAPHICS list: phase line, objective, TRP.
+    Graphics,
+    OnContact,
     Viewshed,
     Los,
     /// Finish the route or phase line being drawn.
@@ -139,8 +142,6 @@ pub enum Cmd {
     Plan,
     PlanPrev,
     PlanNext,
-    /// Context menu of the selected checkpoint (keyboard path into every plan setting).
-    PlanMenu,
     PlanDelete,
     PlanRevert,
     /// Ctrl+Z / Ctrl+Y: draft edit history.
@@ -273,6 +274,7 @@ pub struct Game {
     pending_speed: Vec<(Addressee, Option<f64>, f64)>,
     /// A posture list asked for by a card button or hotkey; opened once the screen is known.
     posture_request: Option<Posture>,
+    graphics_request: bool,
     /// HALT (true) / RESUME (false) sent but not yet received.
     pending_held: Vec<(Addressee, bool, f64)>,
     /// Plan being edited (sent with SEND; drawn dashed until then).
@@ -342,6 +344,7 @@ impl Game {
             pending_technique: Vec::new(),
             pending_speed: Vec::new(),
             posture_request: None,
+            graphics_request: false,
             pending_held: Vec::new(),
             plan: None,
             parked: BTreeMap::new(),
@@ -690,21 +693,13 @@ impl Game {
             (Key::Char('p'), C::Plan),
             (Key::Char(','), C::PlanPrev),
             (Key::Char('.'), C::PlanNext),
-            (Key::Char('c'), C::PlanMenu),
+            (Key::Char('c'), C::OnContact),
+            (Key::Char('g'), C::Graphics),
             (Key::Delete, C::PlanDelete),
         ] {
             if inp.hit(k) && !(inp.ctrl && matches!(k, Key::Char(_))) {
                 a.push(GameAction::Cmd(c));
             }
-        }
-        if inp.hit(Key::Char('g')) {
-            // G cycles PL -> OBJ -> TRP -> off.
-            a.push(GameAction::Cmd(match &self.tool {
-                Tool::Graphic { kind: DrawKind::PhaseLine, .. } => C::Objective,
-                Tool::Graphic { kind: DrawKind::Objective, .. } => C::Trp,
-                Tool::Graphic { kind: DrawKind::Trp, .. } => C::Trp,
-                _ => C::PhaseLine,
-            }));
         }
         if inp.hit(Key::Space) {
             a.push(GameAction::Pause);
@@ -765,6 +760,7 @@ impl Game {
         self.sync_drafts();
         self.open_requested_menu(cam, inp);
         self.open_posture_menu(inp);
+        self.open_graphics_menu(inp);
         let world = cam.to_world(inp.mouse);
         let swallowed = self.rmb_update(inp, cam, over_ui, &mut fx) || menu_was_open;
         let over_ui = over_ui || swallowed;
@@ -1007,6 +1003,8 @@ impl Game {
                 }
             }
             Cmd::Ammo => self.request_posture(Posture::Ammo),
+            Cmd::OnContact => self.request_posture(Posture::OnContact),
+            Cmd::Graphics => self.graphics_request = true,
             Cmd::BattlePosition if self.sel_platoon.is_some() => {
                 self.toggle_tool(Tool::BattlePosition { centre: None });
                 self.append_tool = self.shift_held && matches!(self.tool, Tool::BattlePosition { .. });
@@ -1125,11 +1123,6 @@ impl Game {
                 None => self.radio("SELECT A PLATOON TO PLAN.".into()),
             },
             Cmd::PlanPrev | Cmd::PlanNext => self.plan_step_sel(c == Cmd::PlanNext),
-            Cmd::PlanMenu => {
-                if let Some(id) = self.selected_cp() {
-                    self.menu_request = Some((MenuTarget::PlanCp(id), Vec::new(), None));
-                }
-            }
             Cmd::PlanDelete => {
                 if let Some(id) = self.selected_cp()
                     && self.ensure_draft()
@@ -2101,7 +2094,7 @@ impl Game {
         let b = |label: &str, c: Cmd| Button::new(z, Look::Card, label, GameAction::Cmd(c));
         let sel = self.addressee().is_some();
         let plt = self.sel_platoon.is_some();
-        let cancel = (14, b("CANCEL", Cmd::Cancel).key("ESC").tip("CANCEL (RIGHT CLICK ALSO CANCELS)"));
+        let cancel = (7, b("CANCEL", Cmd::Cancel).key("ESC").tip("CANCEL (RIGHT CLICK ALSO CANCELS)"));
         let timing = match self.order_mode {
             OrderMode::Now => "NOW".to_owned(),
             OrderMode::OnEnemyCrossing => {
@@ -2133,8 +2126,8 @@ impl Game {
                         .tip("SEND THE ROUTE: LAST POINT IS THE DESTINATION"),
                 ),
                 (1, b("UNDO PT", Cmd::UndoPoint).key("BKSP").enabled(n > 0).tip("REMOVE THE LAST POINT")),
-                (3, technique()),
-                (4, contingency()),
+                (2, technique()),
+                (3, contingency()),
                 cancel,
             ];
         }
@@ -2152,15 +2145,15 @@ impl Game {
             return vec![
                 (0, b("RADIUS -", Cmd::RadiusDown).key("[").value(r.clone()).tip("SMALLER BATTLE POSITION")),
                 (1, b("RADIUS +", Cmd::RadiusUp).key("]").value(r).tip("LARGER BATTLE POSITION")),
-                (4, contingency()),
+                (3, contingency()),
                 cancel,
             ];
         }
         let is = |t: &Tool| std::mem::discriminant(&self.tool) == std::mem::discriminant(t);
         let gfx = |k: DrawKind| matches!(&self.tool, Tool::Graphic { kind, .. } if *kind == k);
-        let formation = self.posture_value(Posture::Formation);
-        let weapons = self.posture_value(Posture::Weapons);
-        vec![
+        let orders = format!("ORDERS · {}", self.scope_text(false));
+        let posture = format!("POSTURE · {}", self.scope_text(true));
+        let cells = vec![
             (
                 0,
                 b("MOVE", Cmd::Move)
@@ -2168,17 +2161,9 @@ impl Game {
                     .value("R-CLICK")
                     .enabled(sel)
                     .active(is(&Tool::Move))
-                    .tip("MOVE TO A POINT (OR RIGHT CLICK THE MAP)"),
+                    .tip("MOVE TO A POINT (OR RIGHT CLICK THE MAP; SHIFT ADDS A CHECKPOINT)"),
             ),
-            (
-                1,
-                b("ADD CPS", Cmd::Plan)
-                    .key("P")
-                    .enabled(plt)
-                    .active(self.tool == Tool::PlanCp)
-                    .tip("LEFT CLICKS ADD CHECKPOINTS TO THE PLATOON'S ORDERS (SHIFT+RIGHT CLICK ADDS ONE), ENTER SENDS"),
-            ),
-            (2, {
+            (1, {
                 let resume = self.addressee().is_some_and(|to| self.shown_held(to));
                 if resume {
                     b("RESUME", Cmd::Halt).key("H").value("ROUTE HELD").tip("CONTINUE THE HALTED ROUTE OR BP ORDER")
@@ -2190,16 +2175,16 @@ impl Game {
                 }
             }),
             (
-                3,
+                2,
                 b("BATTLE POS", Cmd::BattlePosition)
                     .key("B")
                     .value(format!("{:.0} M", self.bp_radius))
                     .enabled(plt)
                     .active(is(&Tool::BattlePosition { centre: None }))
-                    .tip("OCCUPY A BATTLE POSITION HULL-DOWN: CLICK CENTRE, THEN THREAT DIRECTION"),
+                    .tip("OCCUPY A BATTLE POSITION HULL-DOWN: CLICK CENTRE, THEN THREAT DIRECTION (SHIFT ADDS IT TO THE ORDERS)"),
             ),
             (
-                4,
+                3,
                 b("ENGAGE", Cmd::Engage)
                     .key("A")
                     .value("CTRL+R-CLK")
@@ -2208,115 +2193,29 @@ impl Game {
                     .tip("SELECTED TANK ENGAGES A CONTACT (PLATOONS DISTRIBUTE FIRE THEMSELVES)"),
             ),
             (
+                4,
+                b("REVERSE", Cmd::Reverse)
+                    .key("D")
+                    .enabled(sel)
+                    .tip("BACK UP 100 M IN REVERSE, HULL AND GUN STILL FACING THE SAME WAY (OUT OF A POSITION, AWAY FROM A THREAT)"),
+            ),
+            (
                 5,
-                b("FORMATION", Cmd::Formation)
-                    .key("F")
-                    .value(formation)
+                b("BREAK CONT", Cmd::BreakContact)
+                    .key("X")
                     .enabled(plt)
-                    .tip("PLATOON FORMATION (LIST; WITH A CP SELECTED, THAT LEG ONLY)"),
-            ),
-            (6, technique()),
-            (
-                7,
-                b("WEAPONS", Cmd::Weapons)
-                    .key("W")
-                    .value(weapons)
-                    .enabled(sel)
-                    .tip("WEAPONS CONTROL: FREE / TIGHT / HOLD (LIST)"),
-            ),
-            (8, contingency()),
-            (
-                9,
-                b("MOVE SPEED", Cmd::Speed)
-                    .key("S")
-                    .value(self.posture_value(Posture::Speed))
-                    .enabled(sel)
-                    .tip("MARCH SPEED: MAX OR A DOCTRINE SPEED (LIST; WITH A CP SELECTED, THAT LEG ONLY)"),
+                    .tip("SMOKE AND WITHDRAW THE PLATOON AWAY FROM THE NEAREST KNOWN THREAT"),
             ),
             (
-                14,
-                b("PHASE LINE", Cmd::PhaseLine)
-                    .key("G")
-                    .active(gfx(DrawKind::PhaseLine))
-                    .tip("DRAW A PHASE LINE (CONTROL MEASURE AND TRIGGER REFERENCE)"),
-            ),
-            (15, b("OBJECTIVE", Cmd::Objective).key("G").active(gfx(DrawKind::Objective)).tip("DRAW AN OBJECTIVE")),
-            (16, b("TRP", Cmd::Trp).key("G").active(gfx(DrawKind::Trp)).tip("PLACE TARGET REFERENCE POINTS")),
-            (
-                17,
-                b("VIEWSHED", Cmd::Viewshed)
-                    .key("V")
-                    .active(self.tool == Tool::Viewshed)
-                    .tip("SHOW WHAT CAN BE SEEN FROM A POINT"),
-            ),
-            (
-                18,
-                b("LOS", Cmd::Los)
-                    .key("L")
-                    .active(is(&Tool::Los { a: None, b: None, result: None }))
-                    .tip("LINE OF SIGHT BETWEEN TWO POINTS"),
-            ),
-            (
-                10,
+                6,
                 b("SMOKE", Cmd::Smoke)
                     .key("Z")
                     .value(self.addressee().map_or(String::new(), |to| format!("{} SALVOS", self.smoke_salvos(to))))
                     .enabled(self.addressee().is_some_and(|to| self.smoke_salvos(to) > 0))
                     .tip("FIRE SMOKE GRENADES TOWARDS THE NEAREST KNOWN THREAT (CREWS ALSO SCREEN WHEN FIRED UPON)"),
             ),
-            (11, {
-                let state = self.addressee().and_then(|to| self.engine_smoke(to));
-                b("ENG SMOKE", Cmd::EngineSmoke)
-                    .key("E")
-                    .value(match state {
-                        Some(true) => "ON",
-                        Some(false) => "OFF",
-                        None => "",
-                    })
-                    .enabled(state.is_some())
-                    .active(state == Some(true))
-                    .tip("EXHAUST SMOKE BEHIND MOVING VEHICLES (TOGGLE)")
-            }),
             (
-                12,
-                b("AMMO", Cmd::Ammo)
-                    .key("Q")
-                    .value(self.posture_value(Posture::Ammo))
-                    .enabled(sel)
-                    .tip("AMMUNITION TYPE: AUTO (BY TARGET CLASS) OR HELD ON ONE TYPE (LIST)"),
-            ),
-            (
-                13,
-                b("SMOKE RND", Cmd::SmokeRound)
-                    .key("N")
-                    .value(format!("{} RDS", self.smoke_rounds(self.addressee())))
-                    .enabled(self.smoke_rounds(self.addressee()) > 0)
-                    .active(is(&Tool::SmokeRound))
-                    .tip("FIRE TANK-GUN SMOKE ROUNDS AT A POINT (BLINDS OBSERVERS ON A DISTANT POSITION)"),
-            ),
-            (20, {
-                let (label, n) = match (self.fire_kind, self.fire_battery()) {
-                    (FireKind::He, Some(b)) => ("HE", b.he_rounds),
-                    (FireKind::Smoke, Some(b)) => ("SMOKE", b.smoke_rounds),
-                    _ => ("", 0),
-                };
-                b("CALL FIRE", Cmd::CallFire)
-                    .key("Y")
-                    .value(if label.is_empty() { String::new() } else { format!("{label} {n}") })
-                    .enabled(self.fire_battery().is_some_and(|_| n > 0))
-                    .active(self.tool == Tool::CallFire)
-                    .tip("CALL FOR FIRE ON A POINT: ARTILLERY BATTERY, FDC DELAY, THEN SHOT / SPLASH / ROUNDS COMPLETE (Y AGAIN: HE / SMOKE)")
-            }),
-            (
-                22,
-                b("ADJUST", Cmd::AdjustFire)
-                    .key("J")
-                    .enabled(self.last_burst().is_some() && self.fire_battery().is_some())
-                    .active(self.tool == Tool::AdjustFire)
-                    .tip("ADJUST FIRE: CLICK WHERE THE LAST OBSERVED ROUNDS SHOULD HAVE LANDED; THE BATTERY SHIFTS ITS AIM AND FIRES AGAIN WITH A SHORT DELAY"),
-            ),
-            (
-                21,
+                7,
                 b("PLAN", Cmd::Plan)
                     .key("P")
                     .value(
@@ -2332,23 +2231,146 @@ impl Game {
                         ),
                     )
                     .enabled(plt)
-                    .tip("CHECKPOINT PLAN: CPS WITH LEG SETTINGS, ACTIONS, WAITS (CODE WORDS) AND BRANCHES"),
+                    .active(self.tool == Tool::PlanCp)
+                    .tip("CHECKPOINT PLAN: LEFT CLICKS ADD CPS WITH LEG SETTINGS, ACTIONS, WAITS (CODE WORDS) AND BRANCHES; ENTER SENDS"),
             ),
             (
-                23,
-                b("REVERSE", Cmd::Reverse)
-                    .key("D")
-                    .enabled(sel)
-                    .tip("BACK UP 100 M IN REVERSE, HULL AND GUN STILL FACING THE SAME WAY (OUT OF A POSITION, AWAY FROM A THREAT)"),
-            ),
-            (
-                19,
-                b("BREAK CONT", Cmd::BreakContact)
-                    .key("X")
+                8,
+                b("FORMATION", Cmd::Formation)
+                    .key("F")
+                    .value(self.posture_value(Posture::Formation))
                     .enabled(plt)
-                    .tip("SMOKE AND WITHDRAW THE PLATOON AWAY FROM THE NEAREST KNOWN THREAT"),
+                    .tip("PLATOON FORMATION (LIST; WITH A CP SELECTED, THAT LEG ONLY)"),
             ),
-        ]
+            (9, technique()),
+            (
+                10,
+                b("MOVE SPEED", Cmd::Speed)
+                    .key("S")
+                    .value(self.posture_value(Posture::Speed))
+                    .enabled(sel)
+                    .tip("MARCH SPEED: MAX OR A DOCTRINE SPEED (LIST; WITH A CP SELECTED, THAT LEG ONLY)"),
+            ),
+            (
+                11,
+                b("WEAPONS", Cmd::Weapons)
+                    .key("W")
+                    .value(self.posture_value(Posture::Weapons))
+                    .enabled(sel)
+                    .tip("WEAPONS CONTROL: FREE / TIGHT / HOLD (LIST)"),
+            ),
+            (
+                12,
+                b("ON CONTACT", Cmd::OnContact)
+                    .key("C")
+                    .value(self.posture_value(Posture::OnContact))
+                    .enabled(plt)
+                    .tip("REACTION TO CONTACT: DRILL (HALT) / CONTINUE / HASTY POSITION / BREAK CONTACT (LIST; WITH A CP SELECTED, THAT LEG ONLY)"),
+            ),
+            (
+                13,
+                b("AMMO", Cmd::Ammo)
+                    .key("Q")
+                    .value(self.posture_value(Posture::Ammo))
+                    .enabled(sel)
+                    .tip("AMMUNITION TYPE: AUTO (BY TARGET CLASS) OR HELD ON ONE TYPE (LIST)"),
+            ),
+            (14, {
+                let state = self.addressee().and_then(|to| self.engine_smoke(to));
+                b("ENG SMOKE", Cmd::EngineSmoke)
+                    .key("E")
+                    .value(match state {
+                        Some(true) => "ON",
+                        Some(false) => "OFF",
+                        None => "",
+                    })
+                    .enabled(state.is_some())
+                    .active(state == Some(true))
+                    .tip("EXHAUST SMOKE BEHIND MOVING VEHICLES (TOGGLE)")
+            }),
+            (
+                16,
+                b("SMOKE RND", Cmd::SmokeRound)
+                    .key("N")
+                    .value(format!("{} RDS", self.smoke_rounds(self.addressee())))
+                    .enabled(self.smoke_rounds(self.addressee()) > 0)
+                    .active(is(&Tool::SmokeRound))
+                    .tip("FIRE TANK-GUN SMOKE ROUNDS AT A POINT (BLINDS OBSERVERS ON A DISTANT POSITION)"),
+            ),
+            (17, {
+                let (label, n) = match (self.fire_kind, self.fire_battery()) {
+                    (FireKind::He, Some(b)) => ("HE", b.he_rounds),
+                    (FireKind::Smoke, Some(b)) => ("SMOKE", b.smoke_rounds),
+                    _ => ("", 0),
+                };
+                b("CALL FIRE", Cmd::CallFire)
+                    .key("Y")
+                    .value(if label.is_empty() { String::new() } else { format!("{label} {n}") })
+                    .enabled(self.fire_battery().is_some_and(|_| n > 0))
+                    .active(self.tool == Tool::CallFire)
+                    .tip("CALL FOR FIRE ON A POINT: ARTILLERY BATTERY, FDC DELAY, THEN SHOT / SPLASH / ROUNDS COMPLETE (Y AGAIN: HE / SMOKE)")
+            }),
+            (
+                18,
+                b("ADJUST", Cmd::AdjustFire)
+                    .key("J")
+                    .enabled(self.last_burst().is_some() && self.fire_battery().is_some())
+                    .active(self.tool == Tool::AdjustFire)
+                    .tip("ADJUST FIRE: CLICK WHERE THE LAST OBSERVED ROUNDS SHOULD HAVE LANDED; THE BATTERY SHIFTS ITS AIM AND FIRES AGAIN WITH A SHORT DELAY"),
+            ),
+            (19, contingency()),
+            (
+                20,
+                b("GRAPHICS", Cmd::Graphics)
+                    .key("G")
+                    .value("LIST")
+                    .active(gfx(DrawKind::PhaseLine) || gfx(DrawKind::Objective) || gfx(DrawKind::Trp))
+                    .tip("CONTROL MEASURES: PHASE LINE (ALSO A TRIGGER REFERENCE), OBJECTIVE, TARGET REFERENCE POINTS (LIST)"),
+            ),
+            (
+                21,
+                b("VIEWSHED", Cmd::Viewshed)
+                    .key("V")
+                    .active(self.tool == Tool::Viewshed)
+                    .tip("SHOW WHAT CAN BE SEEN FROM A POINT"),
+            ),
+            (
+                22,
+                b("LOS", Cmd::Los)
+                    .key("L")
+                    .active(is(&Tool::Los { a: None, b: None, result: None }))
+                    .tip("LINE OF SIGHT BETWEEN TWO POINTS"),
+            ),
+        ];
+        cells
+            .into_iter()
+            .map(|(i, mut btn)| {
+                let group = match i / hud::CARD_COLS {
+                    0 => &orders,
+                    1 => &posture,
+                    _ => "FIRES / STAFF",
+                };
+                btn.tip = format!("{group}: {}", btn.tip);
+                (i, btn)
+            })
+            .collect()
+    }
+
+    /// Who a card order goes to and when: ("1", "NOW"), or the selected checkpoint's leg.
+    fn scope_lines(&self, posture: bool) -> [String; 2] {
+        let scope = if posture { self.posture_scope(Posture::Weapons) } else { self.addressee().map(Scope::Now) };
+        match scope {
+            None => ["NO".into(), "SELECTION".into()],
+            Some(Scope::Now(to)) => [self.addressee_cs(to), "NOW".into()],
+            Some(Scope::Leg(p, id)) => {
+                let n = self.shown_plan().and_then(|(_, pl, ..)| pl.index_of(id)).map_or(0, |i| i + 1);
+                [self.platoon_cs(p), format!("LEG CP {n}")]
+            }
+        }
+    }
+
+    fn scope_text(&self, posture: bool) -> String {
+        self.scope_lines(posture).join(" ")
     }
 
     /// Selection panel (top right): frame, header lines, member rows (and the DATA button),
@@ -2751,6 +2773,21 @@ impl Game {
             _ => "ORDERS: NO SELECTION".into(),
         };
         f.text(&title, cr.x + 8.0, cr.y + 6.0, style::FONT, style::TEXT_DIM);
+        if self.draft.is_empty()
+            && !matches!(self.tool, Tool::BattlePosition { .. } | Tool::Graphic { kind: DrawKind::PhaseLine, .. })
+        {
+            let rows = [
+                ("ORDERS", self.scope_lines(false)),
+                ("POSTURE", self.scope_lines(true)),
+                ("FIRES", ["STAFF".into(), String::new()]),
+            ];
+            for (k, (label, [head, tail])) in rows.iter().enumerate() {
+                let r = hud::card_cell(screen, k * hud::CARD_COLS);
+                f.text(label, cr.x + 8.0, r.y + 4.0, style::FONT, style::TEXT);
+                f.text(head, cr.x + 8.0, r.y + 18.0, style::FONT, style::TEXT_DIM);
+                f.text(tail, cr.x + 8.0, r.y + 30.0, style::FONT, style::TEXT_DIM);
+            }
+        }
     }
 
     /// Own units, contacts and routes on the minimap.

@@ -48,7 +48,6 @@ pub enum MenuAct {
     SelectPlatoon(PlatoonId),
     SelectUnit(EntityId),
     VehicleData,
-    React(PlatoonId, ContactReaction),
     Engage(ContactId),
     LosTo,
     RemoveGraphic(u32),
@@ -141,6 +140,7 @@ impl Game {
             self.posture_item(Posture::Technique, "T"),
             self.posture_item(Posture::Speed, "S"),
             self.posture_item(Posture::Weapons, "W"),
+            self.posture_item(Posture::OnContact, "C"),
             item("SMOKE SCREEN", "Z", Cmd::Smoke, sel),
             item("ENGINE SMOKE", "E", Cmd::EngineSmoke, sel),
             item("REVERSE 100 M", "D", Cmd::Reverse, sel),
@@ -234,24 +234,6 @@ impl Game {
                         v.push(MenuItem::new("CLEAR PLAN", MenuAct::Plan(PlanEdit::Clear)));
                     }
                 }
-                if let Some(p) = u.platoon
-                    && let Some(view) = self.picture().platoon(p)
-                {
-                    v.push(MenuItem::submenu(
-                        "ON CONTACT",
-                        [
-                            ContactReaction::Drill,
-                            ContactReaction::Continue,
-                            ContactReaction::HastyPosition,
-                            ContactReaction::BreakContact,
-                        ]
-                        .into_iter()
-                        .map(|r| {
-                            MenuItem::new(reaction_name(r), MenuAct::React(p, r)).checked(view.contact_reaction == r)
-                        })
-                        .collect(),
-                    ));
-                }
                 v.push(MenuItem::submenu("ORDERS", self.orders_submenu()));
                 (u.callsign.clone(), v)
             }
@@ -341,11 +323,6 @@ impl Game {
                     self.sel_unit = Some(u);
                 }
                 self.act(GameAction::VehicleData, fx);
-            }
-            MenuAct::React(p, r) => {
-                self.order(Command::SetContactReaction { platoon: p, reaction: r });
-                let cs = self.platoon_cs(p);
-                self.radio(format!("TO {cs}: ON CONTACT, {}.", reaction_name(r)));
             }
             MenuAct::Engage(c) => {
                 if let Some(u) = self.sel_unit {

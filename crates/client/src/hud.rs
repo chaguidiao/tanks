@@ -15,11 +15,12 @@ pub const STATUS_H: f32 = 24.0;
 /// Height of the bottom band (minimap, radio log, command card).
 pub const BAND_H: f32 = 190.0;
 
-/// Command card: 7 columns × 3 rows of cells.
-/// Command card columns: a 7 × 3 block (cells 0–20, row-major) and a plan column (21–23).
+/// Command card: 8 columns × 3 rows of cells (cells 0–23, row-major), one row per group
+/// (ORDERS, POSTURE, FIRES / STAFF), with the row labels in a gutter on the left.
 pub const CARD_COLS: usize = 8;
+pub const CARD_LABEL_W: f32 = 62.0;
 pub const CELL_W: f32 = 76.0;
-pub const CELL_H: f32 = 52.0;
+pub const CELL_H: f32 = 50.0;
 pub const CELL_GAP: f32 = 4.0;
 
 pub fn band_y(screen: P2) -> f32 {
@@ -33,17 +34,17 @@ pub fn minimap_frame(screen: P2) -> Rect {
 
 /// Command card frame, bottom right.
 pub fn card_frame(screen: P2) -> Rect {
-    let w = CARD_COLS as f32 * (CELL_W + CELL_GAP) - CELL_GAP + 12.0;
+    let w = CARD_LABEL_W + CARD_COLS as f32 * (CELL_W + CELL_GAP) - CELL_GAP + 12.0;
     Rect::new(screen[0] - w - 6.0, band_y(screen) + 4.0, w, BAND_H - 8.0)
 }
 
-/// Cell `i` of the command card: 0–20 row-major in the first seven columns, 21–23 down the last.
+/// Cell `i` of the command card (row-major).
 pub fn card_cell(screen: P2, i: usize) -> Rect {
     let c = card_frame(screen);
-    let (col, row) = if i < 21 { (i % 7, i / 7) } else { (CARD_COLS - 1, i - 21) };
+    let (col, row) = (i % CARD_COLS, i / CARD_COLS);
     Rect::new(
-        c.x + 6.0 + col as f32 * (CELL_W + CELL_GAP),
-        c.y + 22.0 + row as f32 * (CELL_H + CELL_GAP),
+        c.x + 6.0 + CARD_LABEL_W + col as f32 * (CELL_W + CELL_GAP),
+        c.y + 20.0 + row as f32 * (CELL_H + CELL_GAP),
         CELL_W,
         CELL_H,
     )

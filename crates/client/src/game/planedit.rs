@@ -225,7 +225,7 @@ fn speed_text(s: SpeedSetting) -> String {
     }
 }
 
-fn reaction_short(r: ContactReaction) -> &'static str {
+pub(super) fn reaction_short(r: ContactReaction) -> &'static str {
     match r {
         ContactReaction::Drill => "DRILL",
         ContactReaction::Continue => "CONTINUE",
@@ -1755,5 +1755,54 @@ mod tests {
         g.press(Cmd::Cancel);
         assert_eq!(g.tool, Tool::None);
         assert!(g.plan.is_some() && g.sel_platoon == Some(a));
+    }
+
+    #[test]
+    fn every_card_cell_has_its_own_hotkey() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        let cells = g.card();
+        let mut keys: Vec<&str> = cells.iter().map(|(_, b)| b.key).collect();
+        assert!(keys.iter().all(|k| !k.is_empty()), "a card cell has no hotkey");
+        let mut at: Vec<usize> = cells.iter().map(|(i, _)| *i).collect();
+        keys.sort_unstable();
+        at.sort_unstable();
+        assert!(keys.windows(2).all(|w| w[0] != w[1]), "duplicate hotkeys: {keys:?}");
+        assert!(at.windows(2).all(|w| w[0] != w[1]), "two buttons share a cell");
+        assert!(at.iter().all(|i| *i < hud::CARD_COLS * 3));
+        assert!(cells.iter().all(|(_, b)| !b.tip.is_empty()));
+    }
+
+    #[test]
+    fn on_contact_now_orders_the_platoon_and_on_a_leg_edits_the_plan() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        let scope = g.posture_scope(Posture::OnContact).unwrap();
+        assert_eq!(scope, posture::Scope::Now(Addressee::Platoon(a)));
+        g.apply_posture(scope, posture::PostureVal::OnContact(ContactReaction::Continue));
+        g.advance_ticks(2000);
+        assert_eq!(g.picture().platoon(a).unwrap().contact_reaction, ContactReaction::Continue);
+        assert_eq!(g.posture_value(Posture::OnContact), "CONTINUE");
+
+        g.plan_add_cp([700.0, 800.0]);
+        g.sync_drafts();
+        let id = g.plan.as_ref().unwrap().plan.steps[0].id;
+        g.select_cp(id);
+        let scope = g.posture_scope(Posture::OnContact).unwrap();
+        assert_eq!(scope, posture::Scope::Leg(a, id));
+        g.apply_posture(scope, posture::PostureVal::OnContact(ContactReaction::HastyPosition));
+        let leg = &g.plan.as_ref().unwrap().plan.steps[0].leg;
+        assert_eq!(leg.on_contact, Some(ContactReaction::HastyPosition));
+    }
+
+    #[test]
+    fn g_opens_the_graphics_list_and_a_pick_arms_the_tool() {
+        let mut g = game();
+        g.press(Cmd::Graphics);
+        assert!(g.graphics_request);
+        g.press(Cmd::Trp);
+        assert!(matches!(g.tool, Tool::Graphic { kind: DrawKind::Trp, .. }));
     }
 }

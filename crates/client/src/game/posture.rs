@@ -1,13 +1,13 @@
-//! Posture orders (docs/plans/CONTROL-UX.md §5.3, §7): FORMATION, TECHNIQUE, SPEED, WEAPONS and
-//! AMMO. Each is a value list: one pick is one radio order. With a checkpoint selected the pick
+//! Posture orders (docs/plans/CONTROL-UX.md §5.3, §7): FORMATION, TECHNIQUE, SPEED, WEAPONS,
+//! ON CONTACT and AMMO. Each is a value list: one pick is one radio order. With a checkpoint selected the pick
 //! edits that leg of the plan, otherwise it goes to the selection now (and the sim writes it into
 //! the leg in progress, see `sim::plan::PlanState::rewrite_leg`).
 
-use super::ctx::MenuAct;
-use super::planedit::PlanEdit;
+use super::ctx::{MenuAct, reaction_name};
+use super::planedit::{PlanEdit, reaction_short};
 use super::*;
 use crate::hud::{MenuItem, PopupMenu};
-use ai::picture::SpeedSetting;
+use ai::picture::{ContactReaction, SpeedSetting};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Posture {
@@ -15,6 +15,7 @@ pub enum Posture {
     Technique,
     Speed,
     Weapons,
+    OnContact,
     Ammo,
 }
 
@@ -24,6 +25,7 @@ pub enum PostureVal {
     Technique(Technique),
     Speed(Option<f64>),
     Weapons(WeaponsStatus),
+    OnContact(ContactReaction),
     Ammo(Option<AmmoKind>),
     /// Leg scope: the leg does not set this; the platoon keeps what it has.
     Keep(Posture),
@@ -45,6 +47,7 @@ impl Posture {
             Posture::Technique => "TECHNIQUE",
             Posture::Speed => "SPEED",
             Posture::Weapons => "WEAPONS",
+            Posture::OnContact => "ON CONTACT",
             Posture::Ammo => "AMMUNITION",
         }
     }
@@ -52,16 +55,17 @@ impl Posture {
     /// Command card cell of the button (the list opens at its corner).
     fn cell(self) -> usize {
         match self {
-            Posture::Formation => 5,
-            Posture::Technique => 6,
-            Posture::Weapons => 7,
-            Posture::Speed => 9,
-            Posture::Ammo => 12,
+            Posture::Formation => 8,
+            Posture::Technique => 9,
+            Posture::Speed => 10,
+            Posture::Weapons => 11,
+            Posture::OnContact => 12,
+            Posture::Ammo => 13,
         }
     }
 
     fn needs_platoon(self) -> bool {
-        matches!(self, Posture::Formation | Posture::Technique)
+        matches!(self, Posture::Formation | Posture::Technique | Posture::OnContact)
     }
 }
 
@@ -129,6 +133,10 @@ impl Game {
                 }
                 Posture::Speed => self.shown_speed(to).map(PostureVal::Speed),
                 Posture::Weapons => self.shown_weapons(to).map(PostureVal::Weapons),
+                Posture::OnContact => {
+                    let Addressee::Platoon(p) = to else { return None };
+                    self.picture().platoon(p).map(|v| PostureVal::OnContact(v.contact_reaction))
+                }
                 Posture::Ammo => self.ammo_choice(to).map(|(c, _)| PostureVal::Ammo(c)),
             },
             Scope::Leg(p, id) => {
@@ -143,6 +151,7 @@ impl Game {
                         })
                     }),
                     Posture::Weapons => leg.weapons.map(PostureVal::Weapons),
+                    Posture::OnContact => leg.on_contact.map(PostureVal::OnContact),
                     Posture::Ammo => None,
                 }
             }
@@ -155,6 +164,7 @@ impl Game {
             PostureVal::Technique(t) => format_technique(t).into(),
             PostureVal::Speed(s) => speed_short(s),
             PostureVal::Weapons(w) => weapons_str(w).into(),
+            PostureVal::OnContact(r) => reaction_name(r).into(),
             PostureVal::Ammo(k) => k.map_or("AUTO", |k| k.label()).into(),
             PostureVal::Keep(_) => "KEEP".into(),
         }
@@ -166,6 +176,7 @@ impl Game {
         match self.posture_current(k, scope) {
             Some(v) => match (k, v) {
                 (Posture::Technique, PostureVal::Technique(t)) => short_technique(t).into(),
+                (Posture::OnContact, PostureVal::OnContact(r)) => reaction_short(r).into(),
                 _ => self.posture_label(v),
             },
             None if matches!(scope, Scope::Leg(..)) => "KEEP".into(),
@@ -185,6 +196,15 @@ impl Game {
                 .into_iter()
                 .map(PostureVal::Weapons)
                 .collect(),
+            Posture::OnContact => [
+                ContactReaction::Drill,
+                ContactReaction::Continue,
+                ContactReaction::HastyPosition,
+                ContactReaction::BreakContact,
+            ]
+            .into_iter()
+            .map(PostureVal::OnContact)
+            .collect(),
             Posture::Ammo => {
                 let kinds = match scope {
                     Scope::Now(to) => self.ammo_choice(to).map(|(_, k)| k).unwrap_or_default(),
@@ -234,6 +254,21 @@ impl Game {
         self.menu_world = [0.0, 0.0];
     }
 
+    pub(super) fn open_graphics_menu(&mut self, inp: &Input) {
+        if !std::mem::take(&mut self.graphics_request) {
+            return;
+        }
+        let gfx = |k: DrawKind| matches!(&self.tool, Tool::Graphic { kind, .. } if *kind == k);
+        let items = vec![
+            MenuItem::new("PHASE LINE", MenuAct::Cmd(Cmd::PhaseLine)).key("P").checked(gfx(DrawKind::PhaseLine)),
+            MenuItem::new("OBJECTIVE", MenuAct::Cmd(Cmd::Objective)).key("O").checked(gfx(DrawKind::Objective)),
+            MenuItem::new("TRP", MenuAct::Cmd(Cmd::Trp)).key("T").checked(gfx(DrawKind::Trp)),
+        ];
+        let r = hud::card_cell(inp.screen, 20);
+        self.menu = Some(PopupMenu::new([r.x, r.y], "GRAPHICS · CONTROL MEASURES", items));
+        self.menu_world = [0.0, 0.0];
+    }
+
     pub(super) fn apply_posture(&mut self, scope: Scope, val: PostureVal) {
         match scope {
             Scope::Leg(_, id) => {
@@ -242,10 +277,12 @@ impl Game {
                     PostureVal::Technique(t) => PlanEdit::Technique(id, Some(t)),
                     PostureVal::Speed(s) => PlanEdit::Speed(id, Some(s.map_or(SpeedSetting::Max, SpeedSetting::Limit))),
                     PostureVal::Weapons(w) => PlanEdit::Weapons(id, Some(w)),
+                    PostureVal::OnContact(r) => PlanEdit::OnContact(id, Some(r)),
                     PostureVal::Keep(Posture::Formation) => PlanEdit::Formation(id, None),
                     PostureVal::Keep(Posture::Technique) => PlanEdit::Technique(id, None),
                     PostureVal::Keep(Posture::Speed) => PlanEdit::Speed(id, None),
                     PostureVal::Keep(Posture::Weapons) => PlanEdit::Weapons(id, None),
+                    PostureVal::Keep(Posture::OnContact) => PlanEdit::OnContact(id, None),
                     PostureVal::Ammo(_) | PostureVal::Keep(Posture::Ammo) => return,
                 };
                 self.run_plan_edit(e, [0.0, 0.0]);
@@ -291,6 +328,10 @@ impl Game {
                 }
                 self.order(Command::WeaponsControl { to, status });
                 self.radio(format!("TO {cs}: WEAPONS {}.", weapons_str(status)));
+            }
+            (PostureVal::OnContact(reaction), Addressee::Platoon(platoon)) => {
+                self.order(Command::SetContactReaction { platoon, reaction });
+                self.radio(format!("TO {cs}: ON CONTACT, {}.", reaction_name(reaction)));
             }
             (PostureVal::Ammo(kind), _) => {
                 self.order(Command::SelectAmmo { to, kind });
