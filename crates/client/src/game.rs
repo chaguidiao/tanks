@@ -3,7 +3,7 @@
 //! Only `PerceivedWorld` is read for display, selection and orders (CLAUDE.md rule 3).
 //! Ground truth is drawn only with the `debug-truth` feature.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
 use sim::view::{
@@ -28,6 +28,7 @@ use crate::view::{Camera, Minimap};
 
 mod codewords;
 mod ctx;
+mod feedback;
 mod planedit;
 use ctx::{MenuTarget, Rmb};
 use planedit::{EtaCache, Pick, PlanDraft};
@@ -92,7 +93,7 @@ pub enum DrawKind {
     Trp,
 }
 
-/// How the next order is issued (DESIGN.md §8.2 contingency orders).
+/// How the next order is issued (DESIGN.md §8.2 contingency orders). One-shot: resets to `Now` after that order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrderMode {
     Now,
@@ -100,8 +101,6 @@ pub enum OrderMode {
     OnEnemyCrossing,
     /// Execute five minutes from now.
     InFiveMinutes,
-    /// Queue the next order: it starts when the platoon has finished its current task.
-    Queue,
 }
 
 /// Commands on the command card; each also has a hotkey.
@@ -146,6 +145,9 @@ pub enum Cmd {
     PlanMenu,
     PlanDelete,
     PlanRevert,
+    /// Ctrl+Z / Ctrl+Y: draft edit history.
+    Undo,
+    Redo,
 }
 
 /// What a HUD click or hotkey asks the game to do.
@@ -242,8 +244,7 @@ pub struct Game {
     menu: Option<hud::PopupMenu<ctx::MenuAct>>,
     menu_world: [f64; 2],
     menu_target_id: MenuTarget,
-    /// Options: a plain right click opens the menu; the clock stops while it is open.
-    pub rclick_menu: bool,
+    /// Option: the clock stops while a context menu is open or a plan is edited.
     pub pause_on_menu: bool,
     /// Option: the clock stops when every platoon waiting on a code word reports set.
     pub pause_on_ready: bool,
@@ -268,6 +269,16 @@ pub struct Game {
     pending_held: Vec<(Addressee, bool, f64)>,
     /// Plan being edited (sent with SEND; drawn dashed until then).
     pub plan: Option<PlanDraft>,
+    /// Drafts of the other platoons (they survive selection changes).
+    parked: BTreeMap<PlatoonId, PlanDraft>,
+    /// What the last replace order overwrote, per platoon: Ctrl+Z brings it back as a draft.
+    replaced: BTreeMap<PlatoonId, PlanDraft>,
+    /// Checkpoint selected without a draft (selecting never starts one).
+    sel_cp: Option<(PlatoonId, u16)>,
+    /// Mouse hint line (what the next click does), refreshed every frame.
+    hint: String,
+    /// REVERT was pressed once and waits for a second press.
+    revert_armed: bool,
     /// Left press on a checkpoint: (id, press position, dragging).
     plan_drag: Option<(u16, P2, bool)>,
     /// A menu to open once the camera is known: target, submenu path to open, screen position.
@@ -303,7 +314,6 @@ impl Game {
             menu: None,
             menu_world: [0.0, 0.0],
             menu_target_id: MenuTarget::Ground,
-            rclick_menu: false,
             pause_on_menu: true,
             pause_on_ready: false,
             ready_words: Vec::new(),
@@ -321,6 +331,11 @@ impl Game {
             pending_weapons: Vec::new(),
             pending_held: Vec::new(),
             plan: None,
+            parked: BTreeMap::new(),
+            replaced: BTreeMap::new(),
+            revert_armed: false,
+            hint: String::new(),
+            sel_cp: None,
             plan_drag: None,
             menu_request: None,
             eta: Default::default(),
@@ -397,6 +412,11 @@ impl Game {
 
     /// Move the selection to `dest` through checkpoints `via` (route with checkpoints).
     pub fn issue_move(&mut self, via: Vec<[f64; 2]>, dest: [f64; 2]) {
+        self.issue_move_at(via, dest, self.move_speed);
+    }
+
+    /// As `issue_move`, with this order's own speed limit (the sticky `move_speed` is not touched).
+    pub fn issue_move_at(&mut self, via: Vec<[f64; 2]>, dest: [f64; 2], speed_limit_mps: Option<f64>) {
         let start = self.selection_centre();
         let cps: Vec<String> =
             via.iter().enumerate().map(|(i, p)| format!("CP {} GRID {}", i + 1, format::grid(*p))).collect();
@@ -407,7 +427,7 @@ impl Game {
         match (self.sel_platoon, self.sel_unit) {
             (Some(p), _) => {
                 let technique = self.technique;
-                let speed_limit_mps = self.move_speed;
+                self.remember_replaced(p);
                 self.graphics.retain(|g| g.platoon != Some(p));
                 self.graphics.push(OrderGraphic {
                     platoon: Some(p),
@@ -439,12 +459,12 @@ impl Game {
                     kind: GraphicKind::Route { points },
                     acknowledged: false,
                 });
-                if !cps.is_empty() || self.move_speed.is_some() {
+                if !cps.is_empty() || speed_limit_mps.is_some() {
                     let cs = self.picture().unit(u).map_or("?".into(), |x| x.callsign.clone());
-                    let sp = speed_radio(self.move_speed);
+                    let sp = speed_radio(speed_limit_mps);
                     self.radio(format!("TO {cs}: MOVE{route_txt} TO GRID {}{sp}.", format::grid(dest)));
                 }
-                self.order(Command::Move { unit: u, destination: dest, via, speed_limit_mps: self.move_speed });
+                self.order(Command::Move { unit: u, destination: dest, via, speed_limit_mps });
             }
             _ => {}
         }
@@ -554,32 +574,6 @@ impl Game {
                     self.sim.submit(self.side, cmd);
                 }
             },
-            OrderMode::Queue => {
-                let queueable = matches!(
-                    cmd,
-                    Command::PlatoonMove { .. }
-                        | Command::OccupyPosition { .. }
-                        | Command::SetPlan { .. }
-                        | Command::BreakContact { .. }
-                        | Command::Reverse { to: Addressee::Platoon(_), .. }
-                );
-                let platoon = match &cmd {
-                    Command::PlatoonMove { platoon, .. }
-                    | Command::OccupyPosition { platoon, .. }
-                    | Command::SetPlan { platoon, .. }
-                    | Command::BreakContact { platoon } => Some(*platoon),
-                    Command::Reverse { to: Addressee::Platoon(p), .. } => Some(*p),
-                    _ => None,
-                };
-                match platoon {
-                    Some(platoon) if queueable => {
-                        self.sim.submit(self.side, Command::QueueOrder { platoon, then: Box::new(cmd) });
-                        let cs = self.platoon_cs(platoon);
-                        self.radio(format!("TO {cs}: ON COMPLETION OF CURRENT TASK, NEXT ORDER FOLLOWS."));
-                    }
-                    _ => self.sim.submit(self.side, cmd),
-                }
-            }
             OrderMode::InFiveMinutes => {
                 let t = self.sim.time_s() + 300.0;
                 self.sim.submit_immediate(
@@ -646,6 +640,14 @@ impl Game {
                 a.push(GameAction::Execute);
             }
         }
+        if inp.ctrl {
+            if inp.hit(Key::Char('z')) {
+                a.push(GameAction::Cmd(if inp.shift { C::Redo } else { C::Undo }));
+            }
+            if inp.hit(Key::Char('y')) {
+                a.push(GameAction::Cmd(C::Redo));
+            }
+        }
         for (k, c) in [
             (Key::Char('k'), C::Contingency),
             (Key::Char('v'), C::Viewshed),
@@ -677,7 +679,7 @@ impl Game {
             (Key::Char('c'), C::PlanMenu),
             (Key::Delete, C::PlanDelete),
         ] {
-            if inp.hit(k) {
+            if inp.hit(k) && !(inp.ctrl && matches!(k, Key::Char(_))) {
                 a.push(GameAction::Cmd(c));
             }
         }
@@ -748,9 +750,7 @@ impl Game {
             self.act(a, &mut fx);
         }
 
-        if self.plan.as_ref().is_some_and(|d| Some(d.platoon) != self.sel_platoon) {
-            self.plan_revert();
-        }
+        self.sync_drafts();
         self.open_requested_menu(cam, inp);
         let world = cam.to_world(inp.mouse);
         let swallowed = self.rmb_update(inp, cam, over_ui, &mut fx) || menu_was_open;
@@ -864,6 +864,7 @@ impl Game {
             self.send_route();
         }
         let editing = self.menu.is_some() || self.plan.is_some();
+        self.hint = self.compute_hint(inp, cam, over_ui);
         if !self.paused && !self.planning && !(editing && self.pause_on_menu) {
             self.acc += inp.frame_time as f64 * SPEEDS[self.speed] as f64;
             let n = ((self.acc / sim::DT) as u32).min(MAX_TICKS_PER_FRAME);
@@ -922,18 +923,10 @@ impl Game {
             }
             GameAction::Cmd(c) => self.command(c, fx),
             GameAction::PlanSelect(id) => {
-                if let Some(d) = &mut self.plan {
-                    d.sel = Some(id);
-                } else if let Some(p) = self.sel_platoon {
-                    self.plan_start(p);
-                    if let Some(d) = &mut self.plan {
-                        d.sel = Some(id);
-                    }
-                    self.tool = Tool::None;
-                }
+                self.select_cp(id);
             }
             GameAction::PlanRow(k) => {
-                if let Some(id) = self.plan.as_ref().and_then(|d| d.sel) {
+                if let Some(id) = self.selected_cp() {
                     self.menu_request = Some((MenuTarget::PlanCp(id), planedit::row_path(k), None));
                 }
             }
@@ -958,7 +951,7 @@ impl Game {
     /// Put `plan` in a draft for platoon `p`, and send it (scripted checks: `--plan`).
     pub fn edit_plan(&mut self, p: PlatoonId, plan: sim::view::Plan, send: bool) {
         let sel = plan.steps.first().map(|s| s.id);
-        self.plan = Some(PlanDraft { platoon: p, plan, sel, running: None, passed: Vec::new(), start: None });
+        self.plan = Some(PlanDraft::new(p, plan, sel, None, Vec::new()));
         if send {
             self.send_plan();
         }
@@ -971,6 +964,9 @@ impl Game {
     }
 
     fn command(&mut self, c: Cmd, fx: &mut GameFx) {
+        if c != Cmd::PlanRevert {
+            self.revert_armed = false;
+        }
         let selected = self.addressee().is_some();
         if self.tool == Tool::Viewshed && !matches!(c, Cmd::Viewshed) {
             fx.clear_overlay = true;
@@ -1093,6 +1089,7 @@ impl Game {
             Cmd::BreakContact => {
                 if let Some(p) = self.sel_platoon {
                     let cs = self.platoon_cs(p);
+                    self.remember_replaced(p);
                     self.order(Command::BreakContact { platoon: p });
                     self.radio(format!("TO {cs}: BREAK CONTACT."));
                 }
@@ -1101,8 +1098,7 @@ impl Game {
                 self.order_mode = match self.order_mode {
                     OrderMode::Now => OrderMode::OnEnemyCrossing,
                     OrderMode::OnEnemyCrossing => OrderMode::InFiveMinutes,
-                    OrderMode::InFiveMinutes => OrderMode::Queue,
-                    OrderMode::Queue => OrderMode::Now,
+                    OrderMode::InFiveMinutes => OrderMode::Now,
                 };
             }
             Cmd::Reverse => {
@@ -1163,24 +1159,27 @@ impl Game {
             },
             Cmd::PlanPrev | Cmd::PlanNext => self.plan_step_sel(c == Cmd::PlanNext),
             Cmd::PlanMenu => {
-                if let Some(id) = self.plan.as_ref().and_then(|d| d.sel) {
+                if let Some(id) = self.selected_cp() {
                     self.menu_request = Some((MenuTarget::PlanCp(id), Vec::new(), None));
                 }
             }
             Cmd::PlanDelete => {
-                if let Some(id) = self.plan.as_ref().and_then(|d| d.sel) {
+                if let Some(id) = self.selected_cp()
+                    && self.ensure_draft()
+                {
                     self.plan_delete(id);
                 }
             }
-            Cmd::PlanRevert => self.plan_revert(),
-            Cmd::Cancel if matches!(self.tool, Tool::PlanCp | Tool::PlanPick { .. }) => self.tool = Tool::None,
-            Cmd::Cancel if self.plan.is_some() && self.tool == Tool::None && self.draft.is_empty() => {
-                self.plan_revert();
-            }
+            Cmd::PlanRevert => self.plan_revert_asked(),
+            Cmd::Undo => self.plan_undo(),
+            Cmd::Redo => self.plan_redo(),
+            // Esc steps back one level and never discards a draft (it waits parked).
             Cmd::Cancel => {
                 if self.tool != Tool::None || !self.draft.is_empty() {
                     self.tool = Tool::None;
                     self.draft.clear();
+                } else if self.order_mode != OrderMode::Now {
+                    self.order_mode = OrderMode::Now;
                 } else {
                     self.sel_platoon = None;
                     self.sel_unit = None;
@@ -1446,6 +1445,7 @@ impl Game {
     pub fn issue_bp(&mut self, centre: [f64; 2], facing: f64) {
         let Some(p) = self.sel_platoon else { return };
         self.draft.clear();
+        self.remember_replaced(p);
         self.order(Command::OccupyPosition {
             platoon: p,
             centre,
@@ -1822,6 +1822,7 @@ impl Game {
     }
 
     fn draw_tool(&self, f: &mut Frame, cam: &Camera, mouse: P2) {
+        self.draw_hold_ring(f);
         if let Some(a) = self.drag
             && self.tool == Tool::None
             && (a[0] - mouse[0]).abs().max((a[1] - mouse[1]).abs()) > BOX_MIN_PX
@@ -1961,6 +1962,8 @@ impl Game {
             ("PLANNING".into(), style::AMBER)
         } else if self.paused {
             ("PAUSED".into(), style::AMBER)
+        } else if let Some(why) = self.hold_reason() {
+            (format!("PAUSED · {why}"), style::AMBER)
         } else {
             (format!("RUNNING X{}", SPEEDS[self.speed]), style::TEXT)
         }
@@ -2045,7 +2048,10 @@ impl Game {
         for pv in &pic.platoons {
             let alive = pv.members.iter().filter_map(|m| pic.unit(*m)).filter(|u| u.condition != Condition::Destroyed);
             let n = alive.count();
-            let task = pv.task.replace("BATTLE POSITION", "BP");
+            let mut task = pv.task.replace("BATTLE POSITION", "BP");
+            if self.has_draft(pv.id) {
+                task = format!("DRAFT · {task}");
+            }
             rows.push((
                 format!("{} PLT  {}/{}", pv.callsign, n, pv.members.len()),
                 task,
@@ -2078,7 +2084,6 @@ impl Game {
                 format!("ON {}", self.last_phase_line().map_or("PL ?".into(), |g| g.label.clone()))
             }
             OrderMode::InFiveMinutes => "AT +5 MIN".into(),
-            OrderMode::Queue => "QUEUE".into(),
         };
         let technique = || {
             b("TECHNIQUE", Cmd::Technique)
@@ -2088,7 +2093,7 @@ impl Game {
         };
         let contingency = || {
             b("TIMING", Cmd::Contingency).key("K").value(timing.clone()).active(self.order_mode != OrderMode::Now).tip(
-                "NEXT ORDER: NOW / WHEN ENEMY CROSSES THE LAST PHASE LINE / IN 5 MIN / QUEUED AFTER THE CURRENT TASK",
+                "NEXT ORDER ONLY: NOW / WHEN ENEMY CROSSES THE LAST PHASE LINE / IN 5 MIN (RESETS TO NOW AFTER THAT ORDER)",
             )
         };
         if self.plan.is_some() && self.draft.is_empty() {
@@ -2611,6 +2616,7 @@ impl Game {
             a.draw_ui(f, screen, &self.recorder, self.sim.side_names(), self.scenario.start_time_s as f64);
             return;
         }
+        self.draw_hint(f, screen);
         let side = &self.sim.side_names()[self.side.0 as usize];
         f.text(&format!("{side}  /  {}", self.scenario.name), 470.0, 10.0, style::FONT_S, style::TEXT_DIM);
         let w = &self.sim.perceived(self.side).weather;
@@ -2637,7 +2643,6 @@ impl Game {
                 self.last_phase_line().map_or("(NO PHASE LINE)".into(), |g| g.label.clone())
             ),
             OrderMode::InFiveMinutes => "NEXT ORDER AT +5 MIN".into(),
-            OrderMode::Queue => "NEXT ORDER QUEUED AFTER CURRENT TASK".into(),
         };
         let mut py = TOP_H + 6.0;
         // (The end-of-mission panel is the app's: it carries menu buttons.)

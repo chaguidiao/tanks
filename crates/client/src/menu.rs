@@ -22,7 +22,6 @@ pub enum Opt {
     EdgePan,
     Contours,
     Grid,
-    RightClick,
     PauseOnMenu,
     PauseOnReady,
 }
@@ -585,9 +584,9 @@ pub fn draw_loading(
 // ---------------------------------------------------------------- overlays
 
 pub fn options_buttons(screen: P2, s: &Settings) -> Vec<Button<MenuAction>> {
-    let r = modal(screen, 600.0, 655.0);
+    let r = modal(screen, 600.0, 611.0);
     let on = |b: bool| if b { "ON" } else { "OFF" }.to_owned();
-    let rows: [(&str, String, Opt, &str); 10] = [
+    let rows: [(&str, String, Opt, &str); 9] = [
         (
             "DISPLAY",
             if s.fullscreen { "FULLSCREEN".into() } else { "WINDOW".into() },
@@ -605,12 +604,6 @@ pub fn options_buttons(screen: P2, s: &Settings) -> Vec<Button<MenuAction>> {
         ("EDGE PAN", on(s.edge_pan), Opt::EdgePan, "PAN THE MAP WHEN THE MOUSE TOUCHES A SCREEN EDGE"),
         ("CONTOURS", on(s.contours), Opt::Contours, "CONTOUR LINES WHEN A MAP OPENS (F5 TOGGLES)"),
         ("GRID", on(s.grid), Opt::Grid, "1 KM GRID WHEN A MAP OPENS (F6 TOGGLES)"),
-        (
-            "RIGHT CLICK",
-            if s.right_click_menu { "MENU" } else { "MOVE" }.into(),
-            Opt::RightClick,
-            "MOVE: RMB MOVES, HOLD FOR THE MENU.  MENU: RMB OPENS THE MENU (MOVE HERE FIRST)",
-        ),
         (
             "PAUSE ON MENU",
             on(s.pause_on_menu),
@@ -645,7 +638,7 @@ pub fn options_buttons(screen: P2, s: &Settings) -> Vec<Button<MenuAction>> {
 }
 
 pub fn draw_options(f: &mut Frame, screen: P2, note: &str) {
-    let r = modal(screen, 600.0, 655.0);
+    let r = modal(screen, 600.0, 611.0);
     f.rect(0.0, 0.0, screen[0], screen[1], Rgba(0, 0, 0, 120));
     panel(f, r);
     f.text("OPTIONS", r.x + 20.0, r.y + 20.0, style::FONT_L, style::AMBER);

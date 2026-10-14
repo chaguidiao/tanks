@@ -74,6 +74,11 @@ impl Game {
 
     /// What is under the cursor: plan checkpoint, own unit, contact, graphic, plan leg, else the
     /// ground.
+    /// While the right button is held on the map: where, and how far through the hold time.
+    pub(super) fn rmb_hold(&self) -> Option<(P2, f32)> {
+        self.rmb.filter(|r| r.held > 0.0).map(|r| (r.at, (r.held / HOLD_S).min(1.0)))
+    }
+
     pub(super) fn menu_target(&self, cam: &Camera, s: P2) -> MenuTarget {
         if let Some(id) = self.plan_cp_at(cam, s) {
             return MenuTarget::PlanCp(id);
@@ -205,7 +210,6 @@ impl Game {
                         ("NOW", OrderMode::Now),
                         ("ON ENEMY CROSSING", OrderMode::OnEnemyCrossing),
                         ("IN 5 MIN", OrderMode::InFiveMinutes),
-                        ("AFTER CURRENT TASK", OrderMode::Queue),
                     ]
                     .into_iter()
                     .map(|(l, m)| MenuItem::new(l, MenuAct::NextOrder(m)).checked(self.order_mode == m))
@@ -301,9 +305,8 @@ impl Game {
         let at = self.menu_point(at);
         match a {
             MenuAct::MoveHere(speed) => {
-                self.move_speed = speed;
                 self.draft.clear();
-                self.issue_move(Vec::new(), at);
+                self.issue_move_at(Vec::new(), at, speed);
             }
             MenuAct::RouteVia => {
                 self.tool = Tool::Route;
@@ -402,7 +405,7 @@ impl Game {
                 let r = self.rmb.take().expect("armed");
                 if !over_ui {
                     let target = self.menu_target(cam, r.at);
-                    if self.rclick_menu || self.addressee().is_none() || target != MenuTarget::Ground {
+                    if self.addressee().is_none() || target != MenuTarget::Ground {
                         self.open_menu(cam, r.at);
                     } else {
                         self.draft.clear();

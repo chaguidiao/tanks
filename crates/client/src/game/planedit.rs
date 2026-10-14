@@ -33,9 +33,68 @@ pub struct PlanDraft {
     pub passed: Vec<u16>,
     /// START HERE: the step the sent plan begins with.
     pub start: Option<u16>,
+    /// Undo and redo stacks of (plan, start), and the last state they were committed at.
+    undo: Vec<Snap>,
+    redo: Vec<Snap>,
+    base: Snap,
 }
 
+/// A draft's undoable state.
+type Snap = (Plan, Option<u16>);
+
 impl PlanDraft {
+    pub fn new(platoon: PlatoonId, plan: Plan, sel: Option<u16>, running: Option<u16>, passed: Vec<u16>) -> Self {
+        let base = (plan.clone(), None);
+        Self { platoon, plan, sel, running, passed, start: None, undo: Vec::new(), redo: Vec::new(), base }
+    }
+
+    /// Number of edits made since the draft was started (undoable ones).
+    pub fn changes(&self) -> usize {
+        self.undo.len()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    /// Record the edits since the last call as one undo step.
+    pub fn commit(&mut self) {
+        if self.plan == self.base.0 && self.start == self.base.1 {
+            return;
+        }
+        let prev = std::mem::replace(&mut self.base, (self.plan.clone(), self.start));
+        self.undo.push(prev);
+        if self.undo.len() > 100 {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
+    fn restore(&mut self, s: Snap) {
+        self.plan = s.0.clone();
+        self.start = s.1;
+        self.base = s;
+        if self.sel.is_none_or(|id| self.plan.index_of(id).is_none()) {
+            self.sel = self.plan.steps.last().map(|st| st.id);
+        }
+    }
+
+    /// Step back one edit. False = nothing to undo.
+    pub fn undo(&mut self) -> bool {
+        self.commit();
+        let Some(prev) = self.undo.pop() else { return false };
+        self.redo.push(self.base.clone());
+        self.restore(prev);
+        true
+    }
+
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.redo.pop() else { return false };
+        self.undo.push(self.base.clone());
+        self.restore(next);
+        true
+    }
+
     fn next_id(&self) -> u16 {
         self.plan.steps.iter().map(|s| s.id).max().map_or(1, |m| m + 1)
     }
@@ -200,40 +259,151 @@ impl Game {
     pub(super) fn plan_start(&mut self, p: PlatoonId) {
         if let Some(plan) = self.pending_plan(p).cloned() {
             let sel = plan.steps.first().map(|s| s.id);
-            self.plan = Some(PlanDraft { platoon: p, plan, sel, running: None, passed: Vec::new(), start: None });
+            self.plan = Some(PlanDraft::new(p, plan, sel, None, Vec::new()));
             return;
         }
-        let Some(v) = self.picture().platoon(p) else { return };
-        let d = match &v.plan {
-            Some(pv) => PlanDraft {
-                platoon: p,
-                plan: pv.plan.clone(),
-                sel: Some(pv.cursor_id),
-                running: Some(pv.cursor_id),
-                passed: pv.passed.clone(),
-                start: None,
-            },
+        self.plan = self.draft_from_picture(p);
+    }
+
+    /// A draft of the plan platoon `p` executes, else of its route.
+    fn draft_from_picture(&self, p: PlatoonId) -> Option<PlanDraft> {
+        let v = self.picture().platoon(p)?;
+        Some(match &v.plan {
+            Some(pv) => PlanDraft::new(p, pv.plan.clone(), Some(pv.cursor_id), Some(pv.cursor_id), pv.passed.clone()),
             None => {
                 let steps: Vec<PlanStep> =
                     v.waypoints.iter().enumerate().map(|(i, &at)| PlanStep::new(i as u16 + 1, at)).collect();
                 let sel = steps.last().map(|s| s.id);
-                PlanDraft { platoon: p, plan: Plan { steps }, sel, running: None, passed: Vec::new(), start: None }
+                PlanDraft::new(p, Plan { steps }, sel, None, Vec::new())
             }
+        })
+    }
+
+    /// Before a replace order for platoon `p`: keep what it replaces (its draft, else its sent
+    /// or running plan, else its route) so Ctrl+Z can bring it back as a draft.
+    pub(super) fn remember_replaced(&mut self, p: PlatoonId) {
+        // A contingency does not replace anything yet.
+        if self.order_mode != OrderMode::Now {
+            return;
+        }
+        let old = if self.plan.as_ref().is_some_and(|d| d.platoon == p) {
+            self.plan.take()
+        } else if let Some(d) = self.parked.remove(&p) {
+            Some(d)
+        } else if let Some(plan) = self.pending_plan(p).cloned() {
+            let sel = plan.steps.first().map(|s| s.id);
+            Some(PlanDraft::new(p, plan, sel, None, Vec::new()))
+        } else {
+            self.draft_from_picture(p)
         };
-        self.plan = Some(d);
+        if let Some(d) = old.filter(|d| !d.plan.steps.is_empty()) {
+            self.replaced.insert(p, d);
+        }
+        self.plan_drag = None;
+        if matches!(self.tool, Tool::PlanCp | Tool::PlanPick { .. }) {
+            self.tool = Tool::None;
+        }
+    }
+
+    /// Keep each platoon's draft across selection changes: the selected platoon's draft is
+    /// `self.plan`, the others wait in `self.parked`.
+    pub(super) fn sync_drafts(&mut self) {
+        if self.plan.as_ref().is_some_and(|d| Some(d.platoon) != self.sel_platoon)
+            && let Some(d) = self.plan.take()
+        {
+            self.parked.insert(d.platoon, d);
+            self.plan_drag = None;
+            self.revert_armed = false;
+            if matches!(self.tool, Tool::PlanCp | Tool::PlanPick { .. }) {
+                self.tool = Tool::None;
+            }
+        }
+        if self.plan.is_none()
+            && let Some(p) = self.sel_platoon
+        {
+            self.plan = self.parked.remove(&p);
+        }
+        if !self.plan_drag.is_some_and(|d| d.2)
+            && let Some(d) = &mut self.plan
+        {
+            d.commit();
+        }
+    }
+
+    /// Does platoon `p` have a draft (shown or parked)?
+    pub fn has_draft(&self, p: PlatoonId) -> bool {
+        self.parked.contains_key(&p) || self.plan.as_ref().is_some_and(|d| d.platoon == p)
+    }
+
+    /// Ctrl+Z: undo a draft edit, else bring back the plan a replace order overwrote.
+    pub(super) fn plan_undo(&mut self) {
+        if self.plan.as_mut().is_some_and(|d| d.undo()) {
+            self.plan_drag = None;
+            return;
+        }
+        let Some(p) = self.sel_platoon else { return };
+        if self.plan.is_none()
+            && let Some(d) = self.replaced.remove(&p)
+        {
+            self.plan = Some(d);
+            let cs = self.platoon_cs(p);
+            self.radio(format!("{cs}: PREVIOUS PLAN RESTORED AS DRAFT. SEND TO ISSUE."));
+        }
+    }
+
+    pub(super) fn plan_redo(&mut self) {
+        if self.plan.as_mut().is_some_and(|d| d.redo()) {
+            self.plan_drag = None;
+        }
     }
 
     /// Make sure a draft exists for the selected platoon.
-    fn ensure_draft(&mut self) -> bool {
+    pub(super) fn ensure_draft(&mut self) -> bool {
         if self.plan.is_none()
             && let Some(p) = self.sel_platoon
         {
             self.plan_start(p);
+            if let Some(id) = self.selected_cp()
+                && let Some(d) = &mut self.plan
+                && d.plan.index_of(id).is_some()
+            {
+                d.sel = Some(id);
+            }
         }
         self.plan.is_some()
     }
 
+    /// The selected checkpoint: the draft's, else one selected on the running plan.
+    pub(super) fn selected_cp(&self) -> Option<u16> {
+        if let Some(d) = &self.plan {
+            return d.sel;
+        }
+        self.sel_cp.filter(|(p, _)| Some(*p) == self.sel_platoon).map(|(_, id)| id)
+    }
+
+    /// Select a checkpoint. This never starts a draft.
+    pub(super) fn select_cp(&mut self, id: u16) {
+        match (&mut self.plan, self.sel_platoon) {
+            (Some(d), _) => d.sel = Some(id),
+            (None, Some(p)) => self.sel_cp = Some((p, id)),
+            _ => {}
+        }
+    }
+
+    /// REVERT: drop the selected platoon's draft. A draft with more than one edit asks first
+    /// (a second REVERT confirms); Ctrl+Z / Esc never get here.
+    pub(super) fn plan_revert_asked(&mut self) {
+        let edits = self.plan.as_ref().map_or(0, |d| d.changes());
+        if edits > 1 && !self.revert_armed {
+            self.revert_armed = true;
+            self.radio(format!("REVERT DROPS {edits} EDITS. PRESS REVERT AGAIN TO CONFIRM."));
+            return;
+        }
+        self.plan_revert();
+    }
+
     pub(super) fn plan_revert(&mut self) {
+        self.revert_armed = false;
         self.plan = None;
         self.plan_drag = None;
         if matches!(self.tool, Tool::PlanCp | Tool::PlanPick { .. }) {
@@ -356,6 +526,7 @@ impl Game {
         let words = if words.is_empty() { String::new() } else { format!(", CODE WORD {}", words.join(", ")) };
         let from = if k > 1 { format!(", FROM CP {k}") } else { String::new() };
         self.radio(format!("TO {cs}: PLAN, {n} CP{from}, LAST CP GRID {last}{words}."));
+        self.remember_replaced(p);
         self.graphics.retain(|g| g.platoon != Some(p));
         self.graphics.push(OrderGraphic {
             platoon: Some(p),
@@ -443,11 +614,7 @@ impl Game {
             return false;
         }
         let Some(id) = self.plan_cp_at(cam, inp.mouse) else { return false };
-        if self.ensure_draft()
-            && let Some(d) = &mut self.plan
-        {
-            d.sel = Some(id);
-        }
+        self.select_cp(id);
         self.plan_drag = Some((id, inp.mouse, false));
         true
     }
@@ -728,6 +895,7 @@ impl Game {
             self.sel_platoon = Some(p);
             self.sel_unit = self.picture().platoon(p).and_then(|v| v.members.first().copied());
             self.draft.clear();
+            self.sync_drafts();
             if self.plan.as_ref().is_none_or(|d| d.platoon != p) {
                 self.plan_start(p);
             }
@@ -736,6 +904,7 @@ impl Game {
         }
         if e == PlanEdit::Clear {
             let Some(p) = self.plan_platoon() else { return };
+            self.remember_replaced(p);
             self.plan_revert();
             let cs = self.platoon_cs(p);
             self.radio(format!("TO {cs}: CANCEL PLAN."));
@@ -1013,7 +1182,7 @@ impl Game {
     /// The selected platoon's plan: the draft, a sent one not yet received, or the executing one.
     pub(super) fn draw_selected_plan(&self, f: &mut Frame, cam: &Camera) {
         let Some((p, plan, running, passed, look)) = self.shown_plan() else { return };
-        let sel = self.plan.as_ref().and_then(|d| d.sel);
+        let sel = self.selected_cp();
         let eta = self.plan_etas(p, plan, running, passed);
         self.draw_plan_look(f, cam, p, plan, running, passed, look, sel, &eta);
     }
@@ -1190,7 +1359,22 @@ impl Game {
             ),
             (5, b("DELETE CP", Cmd::PlanDelete).key("DEL").enabled(k.is_some()).tip("REMOVE THE SELECTED CHECKPOINT")),
             (6, contingency),
-            (14, b("REVERT", Cmd::PlanRevert).key("ESC").tip("DROP THE CHANGES (THE PLATOON KEEPS ITS ORDERS)")),
+            (
+                7,
+                b("UNDO", Cmd::Undo)
+                    .key("CTRL+Z")
+                    .value(format!("{}", d.changes()))
+                    .enabled(d.changes() > 0)
+                    .tip("UNDO THE LAST DRAFT EDIT"),
+            ),
+            (8, b("REDO", Cmd::Redo).key("CTRL+Y").enabled(d.can_redo()).tip("REDO THE EDIT UNDONE LAST")),
+            (
+                14,
+                b("REVERT", Cmd::PlanRevert)
+                    .value(if self.revert_armed { "CONFIRM".to_owned() } else { String::new() })
+                    .active(self.revert_armed)
+                    .tip("DROP THE WHOLE DRAFT (THE PLATOON KEEPS ITS ORDERS); ASKS AGAIN AFTER SEVERAL EDITS. ESC NEVER DROPS A DRAFT"),
+            ),
         ]
     }
 
@@ -1204,7 +1388,7 @@ impl Game {
         }
         let eta = self.plan_etas(p, plan, running, passed);
         let cursor = running.and_then(|id| plan.index_of(id));
-        let sel = self.plan.as_ref().and_then(|d| d.sel);
+        let sel = self.selected_cp();
         for (i, st) in plan.steps.iter().enumerate().take(10) {
             let gone = passed.contains(&st.id) && cursor.is_none_or(|k| i < k);
             let mut what = Vec::new();
@@ -1309,4 +1493,148 @@ fn plan_legs(plan: &Plan, running: Option<u16>, passed: &[u16], from: Option<[f6
         prev = Some(s.at);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use sim_data::{MapRef, SideDef, UnitDef};
+    use terrain::mobility::MobilityClass;
+    use terrain::{AuthoringPackage, MapManifest, bake};
+
+    use super::*;
+
+    fn unit(cs: &str, x: f64, platoon: &str) -> UnitDef {
+        UnitDef {
+            callsign: cs.into(),
+            vehicle: "bulwark_a1".into(),
+            position: [x, 400.0],
+            heading_deg: 0.0,
+            platoon: Some(platoon.into()),
+        }
+    }
+
+    /// Two own platoons on a flat synthetic map, the planning phase over.
+    fn game() -> Game {
+        let ds = Arc::new(DataSet::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data")).unwrap());
+        let manifest = MapManifest {
+            id: "synthetic".into(),
+            name: "synthetic".into(),
+            width_cells: 400,
+            height_cells: 400,
+            cell_size_m: 4.0,
+            seed: 1,
+            recipe: None,
+        };
+        let mut pkg = AuthoringPackage::new_flat(manifest, 100.0);
+        pkg.landcover.data.fill(ds.terrain.landcover_id("cropland").unwrap());
+        let classes: Vec<MobilityClass> = ds.vehicles.iter().map(MobilityClass::from).collect();
+        let map = Arc::new(bake(&pkg, &ds.terrain, &classes));
+        let side = |name: &str, doctrine: &str, units: Vec<UnitDef>| SideDef {
+            name: name.into(),
+            doctrine: doctrine.into(),
+            tech_year: None,
+            units,
+            ai: None,
+            fire_support: vec![],
+        };
+        let sc = ScenarioDef {
+            id: "t".into(),
+            name: "t".into(),
+            date: (1990, 6, 1),
+            start_time_s: 10 * 3600,
+            map: MapRef { id: "synthetic".into(), recipe: "mixed-test".into(), seed: 1, size_m: 0.0 },
+            seed: 7,
+            sides: vec![
+                side("BLUE", "western-combined", vec![unit("1-1", 700.0, "1"), unit("2-1", 900.0, "2")]),
+                side("RED", "generic-opfor", vec![UnitDef { position: [800.0, 1500.0], ..unit("211", 0.0, "21") }]),
+            ],
+            objectives: vec![],
+            victory: None,
+            weather: Default::default(),
+            briefing: None,
+        };
+        let mut g = Game::new(sc, ds, map).unwrap();
+        g.execute();
+        g
+    }
+
+    fn platoons(g: &Game) -> (PlatoonId, PlatoonId) {
+        let ids: Vec<PlatoonId> = g.picture().platoons.iter().map(|p| p.id).collect();
+        (ids[0], ids[1])
+    }
+
+    fn select(g: &mut Game, p: Option<PlatoonId>) {
+        g.sel_platoon = p;
+        g.sync_drafts();
+    }
+
+    #[test]
+    fn draft_survives_selection_change_and_esc() {
+        let mut g = game();
+        let (a, b) = platoons(&g);
+        select(&mut g, Some(a));
+        g.plan_add_cp([700.0, 800.0]);
+        g.plan_add_cp([700.0, 1000.0]);
+        g.sync_drafts();
+        assert_eq!(g.plan.as_ref().map(|d| d.plan.steps.len()), Some(2));
+
+        select(&mut g, Some(b));
+        assert!(g.plan.is_none() && g.has_draft(a), "the draft waits, it is not reverted");
+        select(&mut g, Some(a));
+        assert_eq!(g.plan.as_ref().map(|d| d.plan.steps.len()), Some(2));
+
+        // Esc steps back (here: deselects) and never discards the draft.
+        g.press(Cmd::Cancel);
+        g.sync_drafts();
+        assert!(g.sel_platoon.is_none());
+        assert!(g.has_draft(a));
+        select(&mut g, Some(a));
+        assert_eq!(g.plan.as_ref().map(|d| d.plan.steps.len()), Some(2));
+    }
+
+    #[test]
+    fn undo_redo_and_confirmed_revert() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        g.plan_add_cp([700.0, 800.0]);
+        g.sync_drafts();
+        g.plan_add_cp([700.0, 1000.0]);
+        g.sync_drafts();
+        g.press(Cmd::Undo);
+        assert_eq!(g.plan.as_ref().map(|d| d.plan.steps.len()), Some(1));
+        g.press(Cmd::Redo);
+        assert_eq!(g.plan.as_ref().map(|d| d.plan.steps.len()), Some(2));
+
+        g.press(Cmd::PlanRevert);
+        assert!(g.plan.is_some() && g.revert_armed, "two edits: the first REVERT only asks");
+        g.press(Cmd::PlanRevert);
+        assert!(g.plan.is_none());
+    }
+
+    #[test]
+    fn selecting_a_checkpoint_starts_no_draft() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        g.select_cp(1);
+        assert!(g.plan.is_none());
+        assert_eq!(g.selected_cp(), Some(1));
+    }
+
+    #[test]
+    fn quick_order_keeps_the_replaced_draft_for_ctrl_z() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        g.plan_add_cp([700.0, 800.0]);
+        g.plan_add_cp([700.0, 1000.0]);
+        g.sync_drafts();
+        g.issue_move(Vec::new(), [1200.0, 1200.0]);
+        assert!(g.plan.is_none(), "the move replaced the draft");
+        g.press(Cmd::Undo);
+        assert_eq!(g.plan.as_ref().map(|d| d.plan.steps.len()), Some(2), "Ctrl+Z restores it as a draft");
+    }
 }

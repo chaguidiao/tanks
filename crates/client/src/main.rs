@@ -507,7 +507,6 @@ impl App {
             Opt::EdgePan => s.edge_pan = !s.edge_pan,
             Opt::Contours => s.contours = !s.contours,
             Opt::Grid => s.grid = !s.grid,
-            Opt::RightClick => s.right_click_menu = !s.right_click_menu,
             Opt::PauseOnMenu => s.pause_on_menu = !s.pause_on_menu,
             Opt::PauseOnReady => s.pause_on_ready = !s.pause_on_ready,
         }

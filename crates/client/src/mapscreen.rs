@@ -481,7 +481,6 @@ impl MapScreen {
         let (mut screen_buttons, mut game_buttons) = self.buttons(inp.screen);
         // Buttons under an open context menu are not reachable.
         if let Mode::Game { game, .. } = &mut self.mode {
-            game.rclick_menu = ctx.settings.right_click_menu;
             game.pause_on_menu = ctx.settings.pause_on_menu;
             game.pause_on_ready = ctx.settings.pause_on_ready;
             if game.menu_frames(inp.screen).iter().any(|r| r.contains(inp.mouse)) {
