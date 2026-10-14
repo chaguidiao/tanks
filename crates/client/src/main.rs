@@ -5,11 +5,13 @@
 //! client [--screen title|main|play|edit-scenario|edit-terrain|database|options]
 //! client [--scenario <id>] [--map <id>] [--edit] [--scenario-editor] [--pause]
 //!        [--screenshot <png> [--frames <n>] [--order <unit-or-platoon>:<x>,<y>[,<x>,<y>..]] [--bp <platoon>:<x>,<y>,<deg>]
-//!         [--pl -:<x>,<y>,<x>,<y>..] [--advance <s>] [--aar] [--save-replay <ron>]
+//!         [--pl -:<x>,<y>,<x>,<y>..] [--plan <platoon>:<x>,<y>,..|@<plan.ron> [--plan-draft]]
+//!         [--advance <s>] [--code-word <name>] [--advance <s>].. [--aar] [--save-replay <ron>]
 //!         [--zoom <m-per-px>] [--center <x>,<y>] [--layer relief|slope|traffic|cover]]
 //! ```
 //! Any game or editor option starts that screen directly (scripted checks); `--pause` opens
 //! its menu. `--keys enter,wait30,down,esc` injects one key per frame (menu-flow checks).
+//! `--advance` and `--code-word` run in the order given (a plan released by a code word).
 //! Screenshot runs use default options and never write the options file.
 
 mod aar;
@@ -54,7 +56,12 @@ struct Opts {
     frames: u32,
     /// ("--order" | "--bp", callsign, numbers)
     orders: Vec<(String, String, Vec<f64>)>,
-    advance_s: f64,
+    /// `--plan <platoon>:<x>,<y>,..` or `--plan <platoon>:@<file.ron>` (a `Plan` in RON).
+    plans: Vec<(String, String)>,
+    /// Leave `--plan` as a draft on the map instead of sending it.
+    plan_draft: bool,
+    /// `--advance <s>` and `--code-word <name>`, in argument order.
+    timeline: Vec<Step>,
     zoom: Option<f64>,
     center: Option<[f64; 2]>,
     layer: Option<String>,
@@ -76,7 +83,8 @@ impl Opts {
             || self.pause
             || self.save_replay.is_some()
             || !self.orders.is_empty()
-            || self.advance_s > 0.0
+            || !self.timeline.is_empty()
+            || !self.plans.is_empty()
             || self.select.is_some()
             || self.press.is_some()
             || self.zoom.is_some()
@@ -84,6 +92,11 @@ impl Opts {
             || self.layer.is_some()
             || self.rclick.is_some()
     }
+}
+
+enum Step {
+    Advance(f64),
+    CodeWord(String),
 }
 
 fn parse_xy(s: &str) -> Option<[f64; 2]> {
@@ -95,7 +108,19 @@ fn opts() -> Result<Opts, String> {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let get = |k: &str| a.iter().position(|x| x == k).and_then(|i| a.get(i + 1)).cloned();
     let mut orders = Vec::new();
+    let mut plans = Vec::new();
+    let mut timeline = Vec::new();
     for (i, x) in a.iter().enumerate() {
+        let next = a.get(i + 1);
+        match (x.as_str(), next) {
+            ("--plan", Some(v)) => {
+                let (cs, rest) = v.split_once(':').ok_or("--plan needs <platoon>:<points or @file>")?;
+                plans.push((cs.to_owned(), rest.to_owned()));
+            }
+            ("--advance", Some(v)) => timeline.push(Step::Advance(v.parse().map_err(|_| "bad --advance")?)),
+            ("--code-word", Some(v)) => timeline.push(Step::CodeWord(v.to_uppercase())),
+            _ => {}
+        }
         if x == "--order" || x == "--bp" || x == "--pl" {
             let v = a.get(i + 1).ok_or("--order/--bp needs <callsign>:<numbers>")?;
             let (cs, nums) = v.split_once(':').ok_or("--order/--bp needs <callsign>:<numbers>")?;
@@ -116,7 +141,9 @@ fn opts() -> Result<Opts, String> {
         screenshot: get("--screenshot"),
         frames: get("--frames").and_then(|v| v.parse().ok()).unwrap_or(6),
         orders,
-        advance_s: get("--advance").and_then(|v| v.parse().ok()).unwrap_or(0.0),
+        plans,
+        plan_draft: a.iter().any(|x| x == "--plan-draft"),
+        timeline,
         zoom: get("--zoom").and_then(|v| v.parse().ok()),
         center: get("--center").and_then(|v| parse_xy(&v)),
         layer: get("--layer"),
@@ -878,7 +905,8 @@ const DATABASE_HELP: &[&str] = &[
 const MENU_HELP: &[&str] =
     &["MENUS    UP / DOWN SELECT   ENTER OPEN   ESC BACK   MOUSE: HOVER AND CLICK", "ANYWHERE F11 FULLSCREEN"];
 
-/// `--order`, `--bp`, `--pl`, `--select`/`--press`, `--advance`, `--save-replay`, `--aar`.
+/// `--order`, `--bp`, `--pl`, `--plan`, `--select`/`--press`, `--advance`/`--code-word`,
+/// `--save-replay`, `--aar`.
 fn script(g: &mut Game, o: &Opts) -> Result<(), String> {
     for (kind, cs, n) in &o.orders {
         let platoon = g.picture().platoons.iter().find(|p| &p.callsign == cs).map(|p| p.id);
@@ -930,9 +958,42 @@ fn script(g: &mut Game, o: &Opts) -> Result<(), String> {
             }
         }
     }
-    if o.advance_s > 0.0 {
-        g.execute();
-        g.advance_ticks((o.advance_s * sim::TICK_HZ as f64) as u32);
+    for (cs, spec) in &o.plans {
+        let p =
+            g.picture().platoons.iter().find(|p| &p.callsign == cs).map(|p| p.id).ok_or(format!("no platoon {cs}"))?;
+        let plan = match spec.strip_prefix('@') {
+            Some(path) => {
+                let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+                sim_data::ron_options().from_str::<sim::view::Plan>(&text).map_err(|e| format!("{path}: {e}"))?
+            }
+            None => {
+                let n: Vec<f64> = spec
+                    .split(',')
+                    .map(|x| x.trim().parse::<f64>().map_err(|_| format!("bad --plan {spec}")))
+                    .collect::<Result<_, _>>()?;
+                if n.is_empty() || !n.len().is_multiple_of(2) {
+                    return Err(format!("bad --plan {spec}"));
+                }
+                let steps = n.chunks(2).enumerate().map(|(i, c)| sim::view::PlanStep::new(i as u16 + 1, [c[0], c[1]]));
+                sim::view::Plan { steps: steps.collect() }
+            }
+        };
+        g.sel_platoon = Some(p);
+        g.sel_unit = g.picture().platoon(p).and_then(|v| v.members.first().copied());
+        g.edit_plan(p, plan, !o.plan_draft);
+    }
+    for step in &o.timeline {
+        match step {
+            Step::Advance(s) => {
+                g.execute();
+                g.advance_ticks((s * sim::TICK_HZ as f64) as u32);
+            }
+            Step::CodeWord(name) => {
+                let w = g.code_word_index(name).ok_or(format!("no code word {name}"))?;
+                g.execute();
+                g.act_now(game::GameAction::CodeWord(w));
+            }
+        }
     }
     if let Some(path) = &o.save_replay {
         std::fs::write(path, sim::Replay::record(&g.sim).to_ron()).map_err(|e| format!("{path}: {e}"))?;

@@ -27,7 +27,9 @@ use crate::symbols;
 use crate::view::{Camera, Minimap};
 
 mod ctx;
+mod planedit;
 use ctx::{MenuTarget, Rmb};
+use planedit::{EtaCache, Pick, PlanDraft};
 
 /// Time compression steps (DESIGN.md §2.1).
 pub const SPEEDS: [u32; 4] = [1, 2, 4, 8];
@@ -63,6 +65,15 @@ pub enum Tool {
     Graphic {
         kind: DrawKind,
         points: Vec<[f64; 2]>,
+    },
+    /// Plan draft: left clicks add checkpoints at the end of the plan.
+    PlanCp,
+    /// Plan draft: the next left click gives a point for checkpoint `id` (a bearing, a target or
+    /// its new position); `release` = the action goes to the on-release list.
+    PlanPick {
+        id: u16,
+        release: bool,
+        pick: Pick,
     },
 }
 
@@ -114,6 +125,14 @@ pub enum Cmd {
     Cancel,
     RadiusDown,
     RadiusUp,
+    /// Start or continue a plan draft for the selected platoon (adds checkpoints).
+    Plan,
+    PlanPrev,
+    PlanNext,
+    /// Context menu of the selected checkpoint (keyboard path into every plan setting).
+    PlanMenu,
+    PlanDelete,
+    PlanRevert,
 }
 
 /// What a HUD click or hotkey asks the game to do.
@@ -128,6 +147,12 @@ pub enum GameAction {
     /// DATABASE on the selected vehicle's type.
     VehicleData,
     Cmd(Cmd),
+    /// Plan step list: select checkpoint `id`.
+    PlanSelect(u16),
+    /// Plan step list: open the selected checkpoint's menu at setting row `k`.
+    PlanRow(u8),
+    /// Send code word `word` (the doctrine pack's list index).
+    CodeWord(u8),
 }
 
 const PL_NAMES: [&str; 8] = ["RED", "BLUE", "GREEN", "AMBER", "BLACK", "WHITE", "GOLD", "SILVER"];
@@ -152,6 +177,10 @@ pub enum GraphicKind {
     /// Route sent but not yet received: start, checkpoints, destination.
     Route {
         points: Vec<[f64; 2]>,
+    },
+    /// Plan sent but not yet received.
+    Plan {
+        plan: sim::view::Plan,
     },
 }
 
@@ -212,6 +241,13 @@ pub struct Game {
     pending_weapons: Vec<(Addressee, WeaponsStatus, f64)>,
     /// HALT (true) / RESUME (false) sent but not yet received.
     pending_held: Vec<(Addressee, bool, f64)>,
+    /// Plan being edited (sent with SEND; drawn dashed until then).
+    pub plan: Option<PlanDraft>,
+    /// Left press on a checkpoint: (id, press position, dragging).
+    plan_drag: Option<(u16, P2, bool)>,
+    /// A menu to open once the camera is known: target, submenu path to open, screen position.
+    menu_request: Option<(MenuTarget, Vec<usize>, Option<P2>)>,
+    eta: std::cell::RefCell<EtaCache>,
 }
 
 impl Game {
@@ -253,6 +289,10 @@ impl Game {
             pending_formation: Vec::new(),
             pending_weapons: Vec::new(),
             pending_held: Vec::new(),
+            plan: None,
+            plan_drag: None,
+            menu_request: None,
+            eta: Default::default(),
         };
         if let Some((id, p)) = g.picture().own.first().map(|u| (u.id, u.platoon)) {
             g.sel_unit = Some(id);
@@ -268,7 +308,7 @@ impl Game {
 
     /// Esc would cancel a tool or a drafted route (otherwise the app opens its menu).
     pub fn esc_in_use(&self) -> bool {
-        self.tool != Tool::None || !self.draft.is_empty() || self.menu.is_some()
+        self.tool != Tool::None || !self.draft.is_empty() || self.menu.is_some() || self.plan.is_some()
     }
 
     pub fn picture(&self) -> &PerceivedWorld {
@@ -449,7 +489,9 @@ impl Game {
                     g.acknowledged = true;
                 }
                 // The platoon now shows its own planned route.
-                self.graphics.retain(|g| !(g.platoon == Some(*p) && matches!(g.kind, GraphicKind::Route { .. })));
+                self.graphics.retain(|g| {
+                    !(g.platoon == Some(*p) && matches!(g.kind, GraphicKind::Route { .. } | GraphicKind::Plan { .. }))
+                });
             }
             Event::RoutePlanned { unit, .. } | Event::NoRoute { unit } => {
                 self.graphics.retain(|g| g.unit != Some(*unit));
@@ -472,7 +514,7 @@ impl Game {
         let drawing_line =
             matches!(&self.tool, Tool::Graphic { kind: DrawKind::PhaseLine, points } if !points.is_empty());
         if inp.hit(Key::Enter) {
-            if drawing_line || !self.draft.is_empty() {
+            if drawing_line || !self.draft.is_empty() || self.plan.is_some() {
                 a.push(GameAction::Cmd(C::Send));
             } else if self.planning {
                 a.push(GameAction::Execute);
@@ -501,6 +543,11 @@ impl Game {
             (Key::Tab, C::NextPlatoon),
             (Key::Escape, C::Cancel),
             (Key::Backspace, C::UndoPoint),
+            (Key::Char('p'), C::Plan),
+            (Key::Char(','), C::PlanPrev),
+            (Key::Char('.'), C::PlanNext),
+            (Key::Char('c'), C::PlanMenu),
+            (Key::Delete, C::PlanDelete),
         ] {
             if inp.hit(k) {
                 a.push(GameAction::Cmd(c));
@@ -525,8 +572,14 @@ impl Game {
             a.push(GameAction::VehicleData);
         }
         for k in 0..SPEEDS.len() {
-            if inp.hit(Key::Num(k as u8 + 1)) {
+            if inp.hit(Key::Num(k as u8 + 1)) && !inp.ctrl {
                 a.push(GameAction::Speed(k));
+            }
+        }
+        // Ctrl+1..9: code words in the doctrine pack's order.
+        for k in 1..=9u8 {
+            if inp.ctrl && inp.hit(Key::Num(k)) {
+                a.push(GameAction::CodeWord(k - 1));
             }
         }
         a
@@ -556,12 +609,22 @@ impl Game {
             self.act(a, &mut fx);
         }
 
+        if self.plan.as_ref().is_some_and(|d| Some(d.platoon) != self.sel_platoon) {
+            self.plan_revert();
+        }
+        self.open_requested_menu(cam, inp);
         let world = cam.to_world(inp.mouse);
         let swallowed = self.rmb_update(inp, cam, over_ui, &mut fx) || menu_was_open;
         let over_ui = over_ui || swallowed;
-        if !over_ui && inp.left_pressed {
+        if self.plan_mouse(inp, cam, over_ui) {
+        } else if !over_ui && inp.left_pressed {
             match self.tool.clone() {
                 Tool::None => self.select(cam, inp.mouse, inp.ctrl),
+                Tool::PlanCp => self.plan_add_cp(world),
+                Tool::PlanPick { id, release, pick } => {
+                    self.plan_pick(id, release, pick, world);
+                    self.tool = Tool::None;
+                }
                 Tool::Move => {
                     self.issue_move(Vec::new(), world);
                     self.tool = Tool::None;
@@ -628,7 +691,9 @@ impl Game {
                 | Tool::SmokeRound
                 | Tool::CallFire
                 | Tool::BattlePosition { .. }
-                | Tool::Graphic { .. } => {
+                | Tool::Graphic { .. }
+                | Tool::PlanCp
+                | Tool::PlanPick { .. } => {
                     self.tool = Tool::None;
                 }
                 _ if inp.ctrl => self.engage_at(cam, inp.mouse),
@@ -651,7 +716,8 @@ impl Game {
         if !inp.shift && !self.draft.is_empty() && self.tool != Tool::Route {
             self.send_route();
         }
-        if !self.paused && !self.planning && !(self.menu.is_some() && self.pause_on_menu) {
+        let editing = self.menu.is_some() || self.plan.is_some();
+        if !self.paused && !self.planning && !(editing && self.pause_on_menu) {
             self.acc += inp.frame_time as f64 * SPEEDS[self.speed] as f64;
             let n = ((self.acc / sim::DT) as u32).min(MAX_TICKS_PER_FRAME);
             self.acc -= n as f64 * sim::DT;
@@ -708,6 +774,23 @@ impl Game {
                 fx.vehicle_data = self.sel_unit.and_then(|u| self.picture().unit(u)).map(|u| u.vehicle_id.clone());
             }
             GameAction::Cmd(c) => self.command(c, fx),
+            GameAction::PlanSelect(id) => {
+                if let Some(d) = &mut self.plan {
+                    d.sel = Some(id);
+                } else if let Some(p) = self.sel_platoon {
+                    self.plan_start(p);
+                    if let Some(d) = &mut self.plan {
+                        d.sel = Some(id);
+                    }
+                    self.tool = Tool::None;
+                }
+            }
+            GameAction::PlanRow(k) => {
+                if let Some(id) = self.plan.as_ref().and_then(|d| d.sel) {
+                    self.menu_request = Some((MenuTarget::PlanCp(id), planedit::row_path(k), None));
+                }
+            }
+            GameAction::CodeWord(w) => self.send_code_word(w),
         }
     }
 
@@ -718,6 +801,26 @@ impl Game {
     /// Run a command-card action outside the frame loop (scripted checks: `--press`).
     pub fn press(&mut self, c: Cmd) {
         self.command(c, &mut GameFx::default());
+    }
+
+    /// Run a HUD action outside the frame loop (scripted checks).
+    pub fn act_now(&mut self, a: GameAction) {
+        self.act(a, &mut GameFx::default());
+    }
+
+    /// Put `plan` in a draft for platoon `p`, and send it (scripted checks: `--plan`).
+    pub fn edit_plan(&mut self, p: PlatoonId, plan: sim::view::Plan, send: bool) {
+        let sel = plan.steps.first().map(|s| s.id);
+        self.plan = Some(PlanDraft { platoon: p, plan, sel, running: None, passed: Vec::new(), start: None });
+        if send {
+            self.send_plan();
+        }
+    }
+
+    /// Index of a code word of the side's doctrine pack, by name.
+    pub fn code_word_index(&self, name: &str) -> Option<u8> {
+        let d = self.sim.doctrine(self.side)?;
+        d.code_words.iter().position(|w| w.eq_ignore_ascii_case(name)).map(|i| i as u8)
     }
 
     fn command(&mut self, c: Cmd, fx: &mut GameFx) {
@@ -873,14 +976,44 @@ impl Game {
                     self.add_phase_line(points);
                     self.tool = Tool::Graphic { kind: DrawKind::PhaseLine, points: vec![] };
                 }
+                _ if self.plan.is_some() && self.draft.is_empty() => self.send_plan(),
                 _ => self.send_route(),
             },
             Cmd::UndoPoint => {
                 if let Tool::Graphic { points, .. } = &mut self.tool {
                     points.pop();
+                } else if self.tool == Tool::PlanCp {
+                    if let Some(id) = self.plan.as_ref().and_then(|d| d.plan.steps.last()).map(|s| s.id) {
+                        self.plan_delete(id);
+                    }
                 } else {
                     self.draft.pop();
                 }
+            }
+            Cmd::Plan => match self.sel_platoon {
+                Some(p) => {
+                    if self.plan.is_none() {
+                        self.plan_start(p);
+                    }
+                    self.toggle_tool(Tool::PlanCp);
+                }
+                None => self.radio("SELECT A PLATOON TO PLAN.".into()),
+            },
+            Cmd::PlanPrev | Cmd::PlanNext => self.plan_step_sel(c == Cmd::PlanNext),
+            Cmd::PlanMenu => {
+                if let Some(id) = self.plan.as_ref().and_then(|d| d.sel) {
+                    self.menu_request = Some((MenuTarget::PlanCp(id), Vec::new(), None));
+                }
+            }
+            Cmd::PlanDelete => {
+                if let Some(id) = self.plan.as_ref().and_then(|d| d.sel) {
+                    self.plan_delete(id);
+                }
+            }
+            Cmd::PlanRevert => self.plan_revert(),
+            Cmd::Cancel if matches!(self.tool, Tool::PlanCp | Tool::PlanPick { .. }) => self.tool = Tool::None,
+            Cmd::Cancel if self.plan.is_some() && self.tool == Tool::None && self.draft.is_empty() => {
+                self.plan_revert();
             }
             Cmd::Cancel => {
                 if self.tool != Tool::None || !self.draft.is_empty() {
@@ -1254,8 +1387,16 @@ impl Game {
                     let skip = usize::from(points.len() > 1);
                     checkpoints(f, cam, &points[skip..], style::ROUTE);
                 }
+                // The selected platoon's is drawn with its ETAs below.
+                GraphicKind::Plan { plan } => {
+                    if let Some(p) = g.platoon.filter(|p| self.sel_platoon != Some(*p)) {
+                        self.draw_sent_plan(f, cam, p, plan);
+                    }
+                }
             }
         }
+        // The selected platoon's plan: the draft being edited, else the plan it executes.
+        self.draw_selected_plan(f, cam);
         // Platoon routes with checkpoints: solid while executing (DESIGN.md §10.3).
         for pv in &pic.platoons {
             let sel = self.sel_platoon == Some(pv.id);
@@ -1530,6 +1671,11 @@ impl Game {
             }
             Tool::Graphic { kind: DrawKind::Objective, .. } => "OBJECTIVE: CLICK CENTRE, THEN EDGE".into(),
             Tool::Graphic { kind: DrawKind::Trp, .. } => "TARGET REFERENCE POINT: CLICK POINTS".into(),
+            Tool::PlanCp => {
+                "PLAN: CLICK TO ADD CPS   DRAG A CP TO MOVE   RMB A CP OR LEG: SETTINGS   ENTER SEND   ESC STOP ADDING"
+                    .into()
+            }
+            Tool::PlanPick { pick, .. } => format!("PLAN: {}   (RIGHT CLICK / ESC CANCEL)", pick.prompt()),
         }
     }
 
@@ -1666,6 +1812,9 @@ impl Game {
                 .active(self.order_mode != OrderMode::Now)
                 .tip("NEXT ORDER: NOW / WHEN ENEMY CROSSES THE LAST PHASE LINE / IN 5 MIN")
         };
+        if self.plan.is_some() && self.draft.is_empty() {
+            return self.plan_card(contingency());
+        }
         if self.tool == Tool::Route || !self.draft.is_empty() {
             let n = self.draft.len();
             return vec![
@@ -1857,6 +2006,25 @@ impl Game {
                     .tip("CALL FOR FIRE ON A POINT: ARTILLERY BATTERY, FDC DELAY, THEN SHOT / SPLASH / ROUNDS COMPLETE (Y AGAIN: HE / SMOKE)")
             }),
             (
+                21,
+                b("PLAN", Cmd::Plan)
+                    .key("P")
+                    .value(
+                        self.sel_platoon.and_then(|p| self.picture().platoon(p)?.plan.as_ref()).map_or(
+                            String::new(),
+                            |v| {
+                                format!(
+                                    "CP {}/{}",
+                                    v.plan.index_of(v.cursor_id).map_or(0, |i| i + 1),
+                                    v.plan.steps.len()
+                                )
+                            },
+                        ),
+                    )
+                    .enabled(plt)
+                    .tip("CHECKPOINT PLAN: CPS WITH LEG SETTINGS, ACTIONS, WAITS (CODE WORDS) AND BRANCHES"),
+            ),
+            (
                 19,
                 b("BREAK CONT", Cmd::BreakContact)
                     .key("X")
@@ -1940,6 +2108,10 @@ impl Game {
             );
         }
         let mut cy = y + 8.0 + head.len() as f32 * LINE + 4.0;
+        // While a plan is edited its step list takes the vehicle rows' place.
+        if self.plan.is_some() {
+            members.clear();
+        }
         for m in members {
             let label = format!("{:<5} {:>3} KM/H {:>3} RDS", m.callsign, format::kmh(m.speed), m.ammo);
             rows.push(
@@ -1951,6 +2123,9 @@ impl Game {
             );
             cy += 22.0;
         }
+        let (plan_rows, ny) = self.plan_rows(x, cy, W);
+        rows.extend(plan_rows);
+        cy = ny;
         if let Some((p, cs)) = back_to {
             rows.push(
                 Button::new(
@@ -1967,26 +2142,7 @@ impl Game {
         }
         let mut foot: Vec<(String, Rgba)> = Vec::new();
         for t in pic.triggers.iter().rev().take(3) {
-            let cond = match &t.condition {
-                TriggerCondition::EnemyCrosses { line } => {
-                    format!("ENEMY X {}", pic.graphic(*line).map_or("PL".into(), |g| g.label.clone()))
-                }
-                TriggerCondition::FriendlyCrosses { line, .. } => {
-                    format!("OWN X {}", pic.graphic(*line).map_or("PL".into(), |g| g.label.clone()))
-                }
-                TriggerCondition::AtTime { time_s } => {
-                    format!("AT {}", format::clock(self.scenario.start_time_s as f64 + time_s))
-                }
-                TriggerCondition::Elapsed { s } => format!("AFTER {s:.0} S"),
-                TriggerCondition::CodeWord { word } => format!("CODE WORD {}", self.code_word_name(*word)),
-                TriggerCondition::ContactWithin { range_m, .. } => format!("CONTACT < {:.0} M", range_m),
-                TriggerCondition::EnemyInArea { graphic } => {
-                    format!("ENEMY IN {}", pic.graphic(*graphic).map_or("AREA".into(), |g| g.label.clone()))
-                }
-                TriggerCondition::StrengthAtMost { remaining, .. } => format!("STRENGTH <= {remaining}"),
-                TriggerCondition::UnderFire { .. } => "UNDER FIRE".into(),
-                TriggerCondition::PlatoonAt { step, .. } => format!("PLT AT CP {}", step),
-            };
+            let cond = self.condition_text(&t.condition);
             foot.push((
                 format!("CW {}: {cond} -> {}{}", t.id, t.order, if t.fired { " (DONE)" } else { "" }),
                 style::TEXT_DIM,

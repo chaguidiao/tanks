@@ -5,6 +5,7 @@
 
 use ai::picture::{ContactId, ContactReaction};
 
+use super::planedit::PlanEdit;
 use super::*;
 use crate::hud::{MenuEvent, MenuItem, PopupMenu};
 
@@ -25,6 +26,10 @@ pub enum MenuTarget {
     Unit(EntityId),
     Contact(ContactId),
     Graphic(u32),
+    /// A checkpoint of the shown plan (draft or executing).
+    PlanCp(u16),
+    /// The leg that ends at checkpoint `id`.
+    PlanLeg(u16),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,9 +51,10 @@ pub enum MenuAct {
     Engage(ContactId),
     LosTo,
     RemoveGraphic(u32),
+    Plan(PlanEdit),
 }
 
-fn reaction_name(r: ContactReaction) -> &'static str {
+pub(super) fn reaction_name(r: ContactReaction) -> &'static str {
     match r {
         ContactReaction::Drill => "DRILL (HALT)",
         ContactReaction::Continue => "CONTINUE",
@@ -66,8 +72,12 @@ impl Game {
         self.menu.as_ref().map_or_else(Vec::new, |m| m.frames(screen))
     }
 
-    /// What is under the cursor: own unit, contact, graphic, else the ground.
-    fn menu_target(&self, cam: &Camera, s: P2) -> MenuTarget {
+    /// What is under the cursor: plan checkpoint, own unit, contact, graphic, plan leg, else the
+    /// ground.
+    pub(super) fn menu_target(&self, cam: &Camera, s: P2) -> MenuTarget {
+        if let Some(id) = self.plan_cp_at(cam, s) {
+            return MenuTarget::PlanCp(id);
+        }
         let near = |p: [f64; 2], r: f32| {
             let q = cam.to_screen(p);
             (q[0] - s[0]).powi(2) + (q[1] - s[1]).powi(2) < r * r
@@ -91,6 +101,9 @@ impl Game {
             if hit {
                 return MenuTarget::Graphic(g.id);
             }
+        }
+        if let Some(id) = self.plan_leg_at(cam, s) {
+            return MenuTarget::PlanLeg(id);
         }
         MenuTarget::Ground
     }
@@ -145,7 +158,7 @@ impl Game {
         vec![if he { a } else { a.disabled("NO HE ROUNDS") }, if sm { b } else { b.disabled("NO SMOKE ROUNDS") }]
     }
 
-    fn build_menu(&self, target: MenuTarget, world: [f64; 2]) -> (String, Vec<MenuItem<MenuAct>>) {
+    pub(super) fn build_menu(&self, target: MenuTarget, world: [f64; 2]) -> (String, Vec<MenuItem<MenuAct>>) {
         let sel = self.addressee();
         let no_unit = "NO UNIT SELECTED";
         let grid = format::grid(world);
@@ -168,6 +181,8 @@ impl Game {
                 v.push(at);
                 let r = MenuItem::new("ROUTE VIA HERE", MenuAct::RouteVia).key("R");
                 v.push(if sel.is_some() { r } else { r.disabled(no_unit) });
+                let cp = MenuItem::new("ADD CP TO PLAN", MenuAct::Plan(PlanEdit::AddCp)).key("P");
+                v.push(if self.sel_platoon.is_some() { cp } else { cp.disabled("NO PLATOON SELECTED") });
                 let bp = MenuItem::new("BATTLE POSITION HERE", MenuAct::BattlePositionHere).key("B");
                 v.push(if self.sel_platoon.is_some() { bp } else { bp.disabled("NO PLATOON SELECTED") });
                 let sm = MenuItem::new("SMOKE ROUNDS HERE", MenuAct::SmokeRoundAt).key("N");
@@ -207,6 +222,12 @@ impl Game {
                 }
                 v.push(MenuItem::new("SELECT VEHICLE", MenuAct::SelectUnit(id)));
                 v.push(MenuItem::new("DATA SHEET", MenuAct::VehicleData).key("I"));
+                if let Some(p) = u.platoon {
+                    v.push(MenuItem::new("EDIT PLAN", MenuAct::Plan(PlanEdit::Edit(p))).key("P"));
+                    if self.picture().platoon(p).is_some_and(|v| v.plan.is_some()) && self.sel_platoon == Some(p) {
+                        v.push(MenuItem::new("CLEAR PLAN", MenuAct::Plan(PlanEdit::Clear)));
+                    }
+                }
                 if let Some(p) = u.platoon
                     && let Some(view) = self.picture().platoon(p)
                 {
@@ -256,6 +277,8 @@ impl Game {
                 ];
                 (label, v)
             }
+            MenuTarget::PlanCp(id) => self.plan_cp_menu(id),
+            MenuTarget::PlanLeg(id) => self.plan_leg_menu(id),
         }
     }
 
@@ -332,6 +355,7 @@ impl Game {
                 self.sim.submit_immediate(self.side, Command::RemoveGraphic { id });
                 self.sim.settle();
             }
+            MenuAct::Plan(e) => self.run_plan_edit(e, at),
         }
     }
 
@@ -396,7 +420,7 @@ impl Game {
     }
 }
 
-fn seg_dist(p: P2, a: P2, b: P2) -> f32 {
+pub(super) fn seg_dist(p: P2, a: P2, b: P2) -> f32 {
     let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
     let l2 = dx * dx + dy * dy;
     let t = if l2 == 0.0 { 0.0 } else { (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0) };

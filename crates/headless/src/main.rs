@@ -206,7 +206,18 @@ fn replay(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), String> 
     let t = Instant::now();
     rep.play(&mut sim, |s, ev| {
         for e in ev {
-            if matches!(e, sim::Event::ScenarioEnd { .. } | sim::Event::TriggerFired { .. }) {
+            use sim::PlatoonReport as R;
+            let show = matches!(
+                e,
+                sim::Event::ScenarioEnd { .. } | sim::Event::TriggerFired { .. } | sim::Event::CodeWordSent { .. }
+            ) || matches!(
+                e,
+                sim::Event::PlatoonReport {
+                    report: R::AtCheckpoint { .. } | R::PlanBranch { .. } | R::PlanComplete | R::SetInPosition { .. },
+                    ..
+                }
+            );
+            if show {
                 println!("t={:7.1}s  {e:?}", s.time_s());
             }
         }

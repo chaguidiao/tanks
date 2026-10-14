@@ -1,0 +1,43 @@
+// The example plan of docs/plans/PLANS-AND-CONTEXT-MENU.md §1, for 1 PLT of scenario
+// m5-hold-the-village (demo map). Load it with
+//   client --scenario m5-hold-the-village --plan 1:@docs/plans/example-plan.ron
+//          --advance 240 --code-word HAMMER --advance 300 --save-replay out/plan.ron
+// CP 1 at MAX in column; CP 1 -> 2 at 15 km/h in wedge, traveling overwatch; at CP 2 occupy a
+// hull-down BP facing 045 deg and wait for HAMMER; on HAMMER pop smoke and move to CP 3. If
+// contact on the leg to CP 3 (or while holding there): fall back to CP 4 (just behind CP 2)
+// without halting to fight, then smoke and occupy a BP there (BREAK CONTACT as a reaction would
+// end the plan: it is the battle drill, not a plan step).
+// CP 3 holds for the next phase (ANVIL). Bearings are radians (0.785 = 045 deg); platoon ids
+// count from 1 in scenario order (1 PLT = (1)).
+(
+    steps: [
+        (
+            id: 1,
+            at: (4330.0, 3980.0),
+            leg: (speed: Max, formation: column),
+        ),
+        (
+            id: 2,
+            at: (4220.0, 4360.0),
+            // Red attacks early in this scenario: keep going into the BP rather than halt short of it.
+            leg: (speed: Limit(4.17), formation: wedge, technique: traveling_overwatch, on_contact: Continue),
+            actions: [OccupyBp(radius_m: 200.0, facing: 0.785, kind: HullDown)],
+            wait: (all: false, conditions: [CodeWord(word: 0)]),
+            on_release: [SmokeScreen],
+        ),
+        (
+            id: 3,
+            at: (4450.0, 4950.0),
+            leg: (speed: Limit(6.94), formation: line, on_contact: Continue),
+            actions: [OccupyBp(radius_m: 200.0, facing: 0.785, kind: HullDown)],
+            wait: (all: false, conditions: [CodeWord(word: 1)]),
+            branch: (when: (all: false, conditions: [ContactWithin(platoon: (1), range_m: 2000.0)]), goto: 4),
+        ),
+        (
+            id: 4,
+            at: (4150.0, 4270.0),
+            leg: (speed: Max, on_contact: Continue),
+            actions: [SmokeScreen, OccupyBp(radius_m: 200.0, facing: 0.785, kind: HullDown), Report],
+        ),
+    ],
+)

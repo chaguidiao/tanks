@@ -188,6 +188,10 @@ const KEYMAP: &[(KeyboardKey, Key)] = &[
     (KeyboardKey::KEY_W, Key::Char('w')),
     (KeyboardKey::KEY_Y, Key::Char('y')),
     (KeyboardKey::KEY_Z, Key::Char('z')),
+    (KeyboardKey::KEY_Q, Key::Char('q')),
+    (KeyboardKey::KEY_J, Key::Char('j')),
+    (KeyboardKey::KEY_COMMA, Key::Char(',')),
+    (KeyboardKey::KEY_PERIOD, Key::Char('.')),
 ];
 
 const HELD: &[(KeyboardKey, Key)] = &[

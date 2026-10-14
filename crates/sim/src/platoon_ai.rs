@@ -27,7 +27,7 @@ use crate::{DT, Event, Vec2, dist};
 
 /// Formation travel speed as a fraction of the slowest member's cross-country speed: room for
 /// vehicles to keep station over rough ground (estimate).
-const FORMATION_SPEED_FRACTION: f64 = 0.6;
+pub const FORMATION_SPEED_FRACTION: f64 = 0.6;
 /// Re-plan a member's route to its slot when the slot moved this far (m) or this often (s).
 const REPLAN_DISTANCE: f64 = 25.0;
 const REPLAN_EVERY_S: f64 = 4.0;
