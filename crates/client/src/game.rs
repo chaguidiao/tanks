@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
 use sim::view::{
-    Condition, ContactLevel, Graphic, GraphicKind as SimGraphic, GunActivity, OwnUnit, PerceivedWorld, PlatoonId, Task,
-    TriggerCondition, WeaponsStatus,
+    Condition, ContactLevel, Graphic, GraphicKind as SimGraphic, GunActivity, OwnUnit, PerceivedWorld, PlatoonId,
+    StepAction, Task, TriggerCondition, WeaponsStatus,
 };
 use sim::{
     Addressee, Command, DenyReason, EndReason, EntityId, Event, FireKind, FireReport, KillKind, PlatoonReport,
@@ -51,9 +51,6 @@ pub enum Tool {
     None,
     /// Move: the next left click is the destination.
     Move,
-    /// Route with checkpoints: left clicks add checkpoints (in `Game::draft`), right click or
-    /// Enter adds the destination and sends.
-    Route,
     /// Engage: the next left click picks a contact.
     Engage,
     /// Smoke round: the next left click is the aim point.
@@ -109,7 +106,6 @@ pub enum OrderMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cmd {
     Move,
-    Route,
     Halt,
     BattlePosition,
     Engage,
@@ -234,9 +230,18 @@ pub struct Game {
     /// Ammunition for the next call for fire.
     pub fire_kind: FireKind,
     pub graphics: Vec<OrderGraphic>,
-    /// Route being drafted: checkpoints (and, once sent, the destination). Built with
-    /// Shift+right click (sent when Shift is released) or with the ROUTE tool.
+    /// A single vehicle's queued route, built with Shift+right click and sent when Shift is
+    /// released. A platoon's added checkpoints go to its plan draft instead.
     pub draft: Vec<[f64; 2]>,
+    /// Platoon whose draft was started by Shift+right click or Shift + an order button: it is
+    /// sent when Shift is released.
+    quasi: Option<PlatoonId>,
+    /// Shift was held at the start of this frame.
+    shift_held: bool,
+    /// Ground point under the cursor when a right click would give an order (ghost order).
+    ghost: Option<[f64; 2]>,
+    /// The tool just started with Shift held: its result is appended to the platoon's orders.
+    append_tool: bool,
     /// A plain right press on the map: moves on release, opens the menu when held.
     rmb: Option<Rmb>,
     /// The open context menu, the map point it was opened at and what was under it.
@@ -311,6 +316,10 @@ impl Game {
             fire_kind: FireKind::He,
             graphics: Vec::new(),
             draft: Vec::new(),
+            quasi: None,
+            shift_held: false,
+            ghost: None,
+            append_tool: false,
             rmb: None,
             menu: None,
             menu_world: [0.0, 0.0],
@@ -479,9 +488,6 @@ impl Game {
         let mut pts = std::mem::take(&mut self.draft);
         if let Some(dest) = pts.pop() {
             self.issue_move(pts, dest);
-        }
-        if self.tool == Tool::Route {
-            self.tool = Tool::None;
         }
     }
 
@@ -691,9 +697,6 @@ impl Game {
                 a.push(GameAction::Cmd(c));
             }
         }
-        if inp.hit(Key::Char('r')) && !inp.ctrl {
-            a.push(GameAction::Cmd(C::Route));
-        }
         if inp.hit(Key::Char('g')) {
             // G cycles PL -> OBJ -> TRP -> off.
             a.push(GameAction::Cmd(match &self.tool {
@@ -725,6 +728,7 @@ impl Game {
 
     pub fn update(&mut self, inp: &Input, cam: &Camera, over_ui: bool, clicked: Option<GameAction>) -> GameFx {
         let mut fx = GameFx::default();
+        self.shift_held = inp.shift;
         if inp.hit(Key::F(8)) || clicked == Some(GameAction::Aar) {
             self.toggle_aar();
         }
@@ -777,10 +781,13 @@ impl Game {
                     self.tool = Tool::None;
                 }
                 Tool::Move => {
-                    self.issue_move(Vec::new(), world);
+                    if std::mem::take(&mut self.append_tool) {
+                        self.shift_append(world);
+                    } else {
+                        self.issue_move(Vec::new(), world);
+                    }
                     self.tool = Tool::None;
                 }
-                Tool::Route => self.draft.push(world),
                 Tool::Engage => {
                     self.engage_at(cam, inp.mouse);
                     self.tool = Tool::None;
@@ -834,13 +841,18 @@ impl Game {
             }
         }
         if !over_ui && inp.right_pressed {
-            match &self.tool {
-                // Right click finishes a route at the clicked destination.
-                Tool::Route => {
-                    self.draft.push(world);
-                    self.send_route();
+            match self.tool.clone() {
+                // Right click cancels the pending click first and leaves the tool at the second
+                // press; points already placed stay (CONTROL-UX.md §5.2).
+                Tool::BattlePosition { centre: Some(_) } => self.tool = Tool::BattlePosition { centre: None },
+                Tool::Los { a: Some(_), .. } => self.tool = Tool::Los { a: None, b: None, result: None },
+                Tool::Graphic { kind: DrawKind::PhaseLine, points } if points.len() >= 2 => {
+                    self.add_phase_line(points);
+                    self.tool = Tool::Graphic { kind: DrawKind::PhaseLine, points: vec![] };
                 }
-                // Right click cancels a targeting mode (RTS convention).
+                Tool::Graphic { kind: DrawKind::Objective, points } if !points.is_empty() => {
+                    self.tool = Tool::Graphic { kind: DrawKind::Objective, points: vec![] };
+                }
                 Tool::Move
                 | Tool::Engage
                 | Tool::SmokeRound
@@ -853,25 +865,16 @@ impl Game {
                     self.tool = Tool::None;
                 }
                 _ if inp.ctrl => self.engage_at(cam, inp.mouse),
-                _ if inp.shift => {
-                    // Shift+right click queues checkpoints, appended to the current route.
-                    if self.draft.is_empty()
-                        && let Some(v) = self.sel_platoon.and_then(|p| self.picture().platoon(p))
-                    {
-                        self.draft = v.waypoints.clone();
-                    }
-                    if self.sel_platoon.is_some() || self.sel_unit.is_some() {
-                        self.draft.push(world);
-                    }
-                }
+                _ if inp.shift => self.shift_append(world),
                 // A plain right click moves on release; held, or on an object, it opens the menu.
                 _ => self.arm_rmb(inp),
             }
         }
-        // Shift released: the queued route goes out as one order.
-        if !inp.shift && !self.draft.is_empty() && self.tool != Tool::Route {
-            self.send_route();
+        // Shift released: the checkpoints added with it go out as one order.
+        if !inp.shift {
+            self.flush_quasi();
         }
+        self.ghost = self.compute_ghost(inp, cam, over_ui);
         let editing = self.menu.is_some() || self.plan.is_some();
         self.hint = self.compute_hint(inp, cam, over_ui);
         if !self.paused && !self.planning && !(editing && self.pause_on_menu) {
@@ -981,10 +984,9 @@ impl Game {
             fx.clear_overlay = true;
         }
         match c {
-            Cmd::Move if selected => self.toggle_tool(Tool::Move),
-            Cmd::Route if selected => {
-                self.draft.clear();
-                self.toggle_tool(Tool::Route);
+            Cmd::Move if selected => {
+                self.toggle_tool(Tool::Move);
+                self.append_tool = self.shift_held && self.tool == Tool::Move && self.sel_platoon.is_some();
             }
             Cmd::Engage if self.sel_unit.is_some() => self.toggle_tool(Tool::Engage),
             Cmd::SmokeRound if self.smoke_rounds(self.addressee()) > 0 => self.toggle_tool(Tool::SmokeRound),
@@ -1007,6 +1009,7 @@ impl Game {
             Cmd::Ammo => self.request_posture(Posture::Ammo),
             Cmd::BattlePosition if self.sel_platoon.is_some() => {
                 self.toggle_tool(Tool::BattlePosition { centre: None });
+                self.append_tool = self.shift_held && matches!(self.tool, Tool::BattlePosition { .. });
             }
             // One toggle: HALT keeps the route (or BP order); pressed again it is RESUME.
             Cmd::Halt => {
@@ -1032,6 +1035,7 @@ impl Game {
             Cmd::Technique => self.request_posture(Posture::Technique),
             Cmd::Speed => self.request_posture(Posture::Speed),
             Cmd::Weapons => self.request_posture(Posture::Weapons),
+            Cmd::Smoke if self.shift_held && self.append_smoke() => {}
             Cmd::Smoke => {
                 if let Some(to) = self.addressee() {
                     let cs = self.addressee_cs(to);
@@ -1138,7 +1142,9 @@ impl Game {
             Cmd::Redo => self.plan_redo(),
             // Esc steps back one level and never discards a draft (it waits parked).
             Cmd::Cancel => {
-                if self.tool != Tool::None || !self.draft.is_empty() {
+                if let Some(t) = self.tool_one_back() {
+                    self.tool = t;
+                } else if self.tool != Tool::None || !self.draft.is_empty() {
                     self.tool = Tool::None;
                     self.draft.clear();
                 } else if self.order_mode != OrderMode::Now {
@@ -1150,9 +1156,22 @@ impl Game {
             }
             Cmd::RadiusDown => self.bp_radius = (self.bp_radius / 1.25).max(100.0),
             Cmd::RadiusUp => self.bp_radius = (self.bp_radius * 1.25).min(800.0),
-            Cmd::Move | Cmd::Route | Cmd::Engage | Cmd::BattlePosition | Cmd::SmokeRound => {
+            Cmd::Move | Cmd::Engage | Cmd::BattlePosition | Cmd::SmokeRound => {
                 self.radio("NO UNIT SELECTED.".into());
             }
+        }
+    }
+
+    /// The tool with its pending click cancelled, if it has one (Esc and right click first
+    /// cancel the click, then leave the tool).
+    fn tool_one_back(&self) -> Option<Tool> {
+        match &self.tool {
+            Tool::BattlePosition { centre: Some(_) } => Some(Tool::BattlePosition { centre: None }),
+            Tool::Los { a: Some(_), .. } => Some(Tool::Los { a: None, b: None, result: None }),
+            Tool::Graphic { kind: DrawKind::Objective, points } if !points.is_empty() => {
+                Some(Tool::Graphic { kind: DrawKind::Objective, points: vec![] })
+            }
+            _ => None,
         }
     }
 
@@ -1388,6 +1407,11 @@ impl Game {
 
     pub fn issue_bp(&mut self, centre: [f64; 2], facing: f64) {
         let Some(p) = self.sel_platoon else { return };
+        if std::mem::take(&mut self.append_tool) {
+            let act = StepAction::OccupyBp { radius_m: self.bp_radius, facing, kind: PositionKind::HullDown };
+            self.append_step(centre, Some(act));
+            return;
+        }
         self.draft.clear();
         self.remember_replaced(p);
         self.order(Command::OccupyPosition {
@@ -1408,6 +1432,63 @@ impl Game {
             kind: GraphicKind::Bp { centre, radius: self.bp_radius, facing, label },
             acknowledged: false,
         });
+    }
+
+    /// Shift released: what was added with it goes out as one order.
+    fn flush_quasi(&mut self) {
+        if !self.draft.is_empty() {
+            self.send_route();
+        }
+        if let Some(p) = self.quasi.take()
+            && self.plan.as_ref().is_some_and(|d| d.platoon == p)
+        {
+            self.send_plan();
+        }
+    }
+
+    /// Add a checkpoint (with an action) to the selected platoon's plan draft. A draft started
+    /// here is the quasimode's own and goes out when Shift is released.
+    fn append_step(&mut self, at: [f64; 2], act: Option<StepAction>) {
+        let Some(p) = self.sel_platoon else { return };
+        let fresh = !self.has_draft(p);
+        self.plan_add_cp(at);
+        if let Some(a) = act
+            && let Some(s) = self.plan.as_mut().and_then(|d| d.plan.steps.last_mut())
+        {
+            s.actions.push(a);
+        }
+        if fresh && self.has_draft(p) {
+            self.quasi = Some(p);
+        }
+    }
+
+    /// Shift+right click: append a checkpoint to the platoon's orders (its plan, its route
+    /// promoted to a plan, or a new one), or to a single vehicle's queued route.
+    fn shift_append(&mut self, at: [f64; 2]) {
+        if self.sel_platoon.is_some() {
+            self.append_step(at, None);
+        } else if self.sel_unit.is_some() {
+            self.draft.push(at);
+        }
+    }
+
+    /// Shift+SMOKE: smoke screen at the last checkpoint. False = no checkpoint to put it at.
+    fn append_smoke(&mut self) -> bool {
+        let Some(p) = self.sel_platoon else { return false };
+        let fresh = !self.has_draft(p);
+        if !self.ensure_draft() || self.plan.as_ref().is_none_or(|d| d.plan.steps.is_empty()) {
+            if fresh {
+                self.plan = None;
+            }
+            return false;
+        }
+        if let Some(s) = self.plan.as_mut().and_then(|d| d.plan.steps.last_mut()) {
+            s.actions.push(StepAction::SmokeScreen);
+        }
+        if fresh {
+            self.quasi = Some(p);
+        }
+        true
     }
 
     fn select(&mut self, cam: &Camera, s: P2, single: bool, add: bool) {
@@ -1620,16 +1701,14 @@ impl Game {
                 f.circle_lines(cam.to_screen(*u.route.last().unwrap()), 4.0, style::ROUTE);
             }
         }
-        // Route being drafted (Shift+right click or ROUTE tool), from the selection to the cursor.
-        if !self.draft.is_empty() || self.tool == Tool::Route {
+        // A single vehicle's queued route (Shift+right click), from the vehicle on.
+        if !self.draft.is_empty() {
             let mut pts: Vec<[f64; 2]> = self.selection_centre().into_iter().collect();
             pts.extend(self.draft.iter().copied());
-            if self.tool == Tool::Route {
-                pts.push(cam.to_world(mouse));
-            }
             route_line(f, cam, &pts, style::ROUTE_DRAFT, true);
             checkpoints(f, cam, &self.draft, style::ROUTE_DRAFT);
         }
+        self.draw_ghost(f, cam);
         // Smoke: a translucent disc with an outline and a label once large enough to read.
         for c in &pic.smoke {
             let (p, r) = (cam.to_screen(c.pos), (c.radius / cam.mpp) as f32);
@@ -1874,7 +1953,6 @@ impl Game {
             Tool::None if n > 0 => format!("ROUTE: {n} POINT(S). SHIFT+RIGHT CLICK ADDS, RELEASE SHIFT TO SEND"),
             Tool::None => String::new(),
             Tool::Move => "MOVE: CLICK DESTINATION   (RIGHT CLICK / ESC CANCEL)".into(),
-            Tool::Route => format!("ROUTE: CLICK CHECKPOINTS ({n}), RIGHT CLICK DESTINATION   BKSP UNDO   ESC CANCEL"),
             Tool::Engage => "ENGAGE: CLICK A CONTACT   (RIGHT CLICK / ESC CANCEL)".into(),
             Tool::CallFire => format!(
                 "CALL FOR FIRE ({}): CLICK THE TARGET   Y HE/SMOKE   (RIGHT CLICK / ESC CANCEL)",
@@ -1976,6 +2054,8 @@ impl Game {
         let (_, _, rows, _) = self.info(screen);
         out.extend(rows);
 
+        out.extend(self.strip_buttons(screen));
+
         // Command card.
         for (i, b) in self.card() {
             let mut b = b;
@@ -2041,10 +2121,7 @@ impl Game {
                 "NEXT ORDER ONLY: NOW / WHEN ENEMY CROSSES THE LAST PHASE LINE / IN 5 MIN (RESETS TO NOW AFTER THAT ORDER)",
             )
         };
-        if self.plan.is_some() && self.draft.is_empty() {
-            return self.plan_card(contingency());
-        }
-        if self.tool == Tool::Route || !self.draft.is_empty() {
+        if !self.draft.is_empty() {
             let n = self.draft.len();
             return vec![
                 (
@@ -2095,12 +2172,11 @@ impl Game {
             ),
             (
                 1,
-                b("ROUTE", Cmd::Route)
-                    .key("R")
-                    .value("SHIFT+R-CLK")
-                    .enabled(sel)
-                    .active(is(&Tool::Route))
-                    .tip("ROUTE WITH CHECKPOINTS: CLICK CPS, RIGHT CLICK DESTINATION (OR SHIFT+RIGHT CLICKS)"),
+                b("ADD CPS", Cmd::Plan)
+                    .key("P")
+                    .enabled(plt)
+                    .active(self.tool == Tool::PlanCp)
+                    .tip("LEFT CLICKS ADD CHECKPOINTS TO THE PLATOON'S ORDERS (SHIFT+RIGHT CLICK ADDS ONE), ENTER SENDS"),
             ),
             (2, {
                 let resume = self.addressee().is_some_and(|to| self.shown_held(to));
@@ -2558,6 +2634,7 @@ impl Game {
             return;
         }
         self.draw_hint(f, screen);
+        self.draw_strip_text(f, screen);
         let side = &self.sim.side_names()[self.side.0 as usize];
         f.text(&format!("{side}  /  {}", self.scenario.name), 470.0, 10.0, style::FONT_S, style::TEXT_DIM);
         let w = &self.sim.perceived(self.side).weather;

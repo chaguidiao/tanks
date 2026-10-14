@@ -43,10 +43,8 @@ impl Game {
         if over_ui || self.menu.is_some() || self.aar.is_some() {
             return String::new();
         }
-        let n = self.draft.len();
         let tool = match &self.tool {
             Tool::Move => Some("LMB MOVE HERE · RMB / ESC CANCEL".to_owned()),
-            Tool::Route => Some(format!("LMB ADD CP ({n}) · RMB DESTINATION, SENDS · BKSP UNDO · ESC CANCEL")),
             Tool::Engage => Some("LMB ENGAGE CONTACT · RMB / ESC CANCEL".to_owned()),
             Tool::SmokeRound => Some("LMB FIRE SMOKE ROUND HERE · RMB / ESC CANCEL".to_owned()),
             Tool::CallFire => Some(format!(
@@ -94,7 +92,8 @@ impl Game {
                 Some(w) => {
                     let replaces = self.sel_platoon.is_some_and(|p| self.shown_plan().is_some_and(|s| s.0 == p));
                     let tail = if replaces { " (REPLACES PLAN)" } else { "" };
-                    format!("RMB MOVE {w}{tail} · SHIFT+RMB ADD ROUTE POINT · HOLD RMB MENU · LMB SELECT")
+                    let k = self.append_index();
+                    format!("RMB MOVE {w}{tail} · SHIFT+RMB ADD CP {k} · HOLD RMB MENU · LMB SELECT")
                 }
             },
         }
@@ -109,5 +108,124 @@ impl Game {
         let w = f.text_width(&self.hint, style::FONT_S) + 20.0;
         f.rect(0.0, y, w, 20.0, Rgba(style::PANEL.0, style::PANEL.1, style::PANEL.2, 215));
         f.text(&self.hint, 10.0, y + 3.0, style::FONT_S, style::TEXT);
+    }
+
+    /// Number the next appended checkpoint would get.
+    pub(super) fn append_index(&self) -> usize {
+        if self.sel_platoon.is_none() {
+            return self.draft.len() + 1;
+        }
+        self.platoon_points().len() + 1
+    }
+
+    /// The selected platoon's current orders as points: the plan's checkpoints, else its route.
+    fn platoon_points(&self) -> Vec<[f64; 2]> {
+        if let Some((_, plan, ..)) = self.shown_plan() {
+            return plan.steps.iter().map(|s| s.at).collect();
+        }
+        self.sel_platoon.and_then(|p| self.picture().platoon(p)).map_or(Vec::new(), |v| v.waypoints.clone())
+    }
+
+    /// The point a right click would order to, when the cursor is on plain ground with a
+    /// selection and nothing else (tool, menu, hold) is using it.
+    pub(super) fn compute_ghost(&self, inp: &Input, cam: &Camera, over_ui: bool) -> Option<[f64; 2]> {
+        let idle = self.tool == Tool::None && self.menu.is_none() && self.rmb.is_none() && self.aar.is_none();
+        if !idle || over_ui || self.addressee().is_none() || self.menu_target(cam, inp.mouse) != MenuTarget::Ground {
+            return None;
+        }
+        Some(cam.to_world(inp.mouse))
+    }
+
+    /// Where the ghost order starts: the last checkpoint with Shift, else the selection.
+    fn ghost_from(&self) -> Option<[f64; 2]> {
+        if self.shift_held {
+            if self.sel_platoon.is_some() {
+                if let Some(at) = self.platoon_points().last() {
+                    return Some(*at);
+                }
+            } else if let Some(at) = self.draft.last() {
+                return Some(*at);
+            }
+        }
+        self.selection_centre()
+    }
+
+    /// Faint line from the order's start to the cursor, with length, time and what it would do
+    /// to the current orders.
+    pub(super) fn draw_ghost(&self, f: &mut Frame, cam: &Camera) {
+        let (Some(to), Some(from)) = (self.ghost, self.ghost_from()) else { return };
+        let col = Rgba(style::ROUTE_DRAFT.0, style::ROUTE_DRAFT.1, style::ROUTE_DRAFT.2, 120);
+        route_line(f, cam, &[from, to], col, true);
+        let len = ((to[0] - from[0]).powi(2) + (to[1] - from[1]).powi(2)).sqrt();
+        let mut text = format::distance(len);
+        if let Some(t) = self.ghost_time(from, to) {
+            text.push_str(&format!(" · ~{}:{:02}", t as u64 / 60, t as u64 % 60));
+        }
+        let replaces = !self.shift_held && self.sel_platoon.is_some() && !self.platoon_points().is_empty();
+        if replaces {
+            text.push_str(" · REPLACES PLAN");
+        } else if self.shift_held {
+            text.push_str(&format!(" · ADD CP {}", self.append_index()));
+        }
+        let q = cam.to_screen(to);
+        let w = f.text_width(&text, style::FONT_S) + 8.0;
+        f.rect(q[0] + 14.0, q[1] + 10.0, w, 14.0, style::PANEL);
+        f.text(&text, q[0] + 18.0, q[1] + 12.0, style::FONT_S, if replaces { style::AMBER } else { style::TEXT_DIM });
+    }
+
+    /// Straight-line travel time of the selection's lead vehicle (an estimate: no pathfinding).
+    fn ghost_time(&self, from: [f64; 2], to: [f64; 2]) -> Option<f64> {
+        let pic = self.picture();
+        let id = match (self.sel_platoon, self.sel_unit) {
+            (Some(p), _) => *pic.platoon(p)?.members.first()?,
+            (None, u) => u?,
+        };
+        let u = pic.unit(id)?;
+        let map = self.sim.map();
+        let layer = map.mobility(&u.vehicle_id)?;
+        let rt = terrain::path::segment_time(&layer.speed, map.manifest.cell_size_m, from, to)?;
+        Some(rt)
+    }
+
+    /// DRAFT strip above the command card: SEND / REVERT / UNDO for the selected platoon's draft.
+    pub(super) fn strip_buttons(&self, screen: P2) -> Vec<Button<GameAction>> {
+        let Some(d) = &self.plan else { return Vec::new() };
+        let z = Rect::new(0.0, 0.0, 0.0, 0.0);
+        let b = |label: &str, c: Cmd| Button::new(z, Look::Bar, label, GameAction::Cmd(c));
+        let n = d.plan.steps.len();
+        let mut items = vec![
+            b("SEND", Cmd::Send)
+                .key("ENTER")
+                .enabled(n > 0)
+                .colour(style::AMBER)
+                .tip("SEND THE PLAN TO THE PLATOON (ONE RADIO ORDER)"),
+            b(if self.revert_armed { "REVERT: CONFIRM" } else { "REVERT" }, Cmd::PlanRevert)
+                .active(self.revert_armed)
+                .tip("DROP THE WHOLE DRAFT (THE PLATOON KEEPS ITS ORDERS); ASKS AGAIN AFTER SEVERAL EDITS. ESC NEVER DROPS A DRAFT"),
+            b("UNDO", Cmd::Undo).key("CTRL+Z").enabled(d.changes() > 0).tip("UNDO THE LAST DRAFT EDIT"),
+        ];
+        if d.can_redo() {
+            items.push(b("REDO", Cmd::Redo).key("CTRL+Y").tip("REDO THE EDIT UNDONE LAST"));
+        }
+        let total: f32 = hud::bar_width(&items) + 4.0 * items.len() as f32;
+        let right = hud::card_frame(screen);
+        let mut out = Vec::new();
+        let x = right.x + right.w - total;
+        hud::bar_row(&mut out, x, items);
+        let y = hud::band_y(screen) - 26.0;
+        for b in &mut out {
+            b.r.y = y;
+        }
+        out
+    }
+
+    pub(super) fn draw_strip_text(&self, f: &mut Frame, screen: P2) {
+        let Some(d) = &self.plan else { return };
+        let Some(first) = self.strip_buttons(screen).first().map(|b| b.r) else { return };
+        let k = d.changes();
+        let text = format!("DRAFT · {k} CHANGE{}", if k == 1 { "" } else { "S" });
+        let w = f.text_width(&text, style::FONT_S) + 16.0;
+        f.rect(first.x - w - 8.0, first.y, w, first.h, style::PANEL);
+        f.text(&text, first.x - w, first.y + 6.0, style::FONT_S, style::AMBER);
     }
 }

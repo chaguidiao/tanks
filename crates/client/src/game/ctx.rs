@@ -36,7 +36,7 @@ pub enum MenuTarget {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MenuAct {
     MoveHere(Option<f64>),
-    RouteVia,
+    AddCp,
     BattlePositionHere,
     SmokeRoundAt,
     CallFireAt(FireKind),
@@ -187,10 +187,8 @@ impl Game {
                     at = at.disabled(no_unit);
                 }
                 v.push(at);
-                let r = MenuItem::new("ROUTE VIA HERE", MenuAct::RouteVia).key("R");
-                v.push(if sel.is_some() { r } else { r.disabled(no_unit) });
-                let cp = MenuItem::new("ADD CP TO PLAN", MenuAct::Plan(PlanEdit::AddCp)).key("P");
-                v.push(if self.sel_platoon.is_some() { cp } else { cp.disabled("NO PLATOON SELECTED") });
+                let cp = MenuItem::new("ADD CP", MenuAct::AddCp).key("P");
+                v.push(if sel.is_some() { cp } else { cp.disabled(no_unit) });
                 let bp = MenuItem::new("BATTLE POSITION HERE", MenuAct::BattlePositionHere).key("B");
                 v.push(if self.sel_platoon.is_some() { bp } else { bp.disabled("NO PLATOON SELECTED") });
                 let sm = MenuItem::new("SMOKE ROUNDS HERE", MenuAct::SmokeRoundAt).key("N");
@@ -310,9 +308,12 @@ impl Game {
                 self.draft.clear();
                 self.issue_move_at(Vec::new(), at, speed);
             }
-            MenuAct::RouteVia => {
-                self.tool = Tool::Route;
-                self.draft.push(at);
+            MenuAct::AddCp => {
+                if self.sel_platoon.is_some() {
+                    self.plan_add_cp(at);
+                } else {
+                    self.draft.push(at);
+                }
             }
             MenuAct::BattlePositionHere => self.tool = Tool::BattlePosition { centre: Some(at) },
             MenuAct::SmokeRoundAt => self.fire_smoke_round(at),

@@ -50,6 +50,8 @@ struct Opts {
     scenario_editor: bool,
     screen: Option<String>,
     pause: bool,
+    /// `--shift`: hold Shift during `--rclick`.
+    shift: bool,
     aar: bool,
     save_replay: Option<String>,
     screenshot: Option<String>,
@@ -136,6 +138,7 @@ fn opts() -> Result<Opts, String> {
         scenario_editor: a.iter().any(|x| x == "--scenario-editor"),
         screen: get("--screen"),
         pause: a.iter().any(|x| x == "--pause"),
+        shift: a.iter().any(|x| x == "--shift"),
         aar: a.iter().any(|x| x == "--aar"),
         save_replay: get("--save-replay"),
         screenshot: get("--screenshot"),
@@ -244,6 +247,7 @@ struct App {
     script_keys: std::collections::VecDeque<Option<Key>>,
     /// `--rclick`: (screen position, seconds held, frames run).
     script_rclick: Option<([f32; 2], f32, u32)>,
+    script_shift: bool,
     script_mouse: Option<[f32; 2]>,
     gfx: Gfx,
 }
@@ -326,6 +330,7 @@ fn run() -> Result<(), String> {
         last_input: Input::default(),
         script_keys: o.keys.as_deref().map(parse_keys).transpose()?.unwrap_or_default(),
         script_rclick: o.rclick.map(|(p, h)| (p, h, 0)),
+        script_shift: o.shift,
         script_mouse: None,
         gfx,
     };
@@ -569,6 +574,7 @@ impl App {
             inp.right_pressed = f == 3;
             inp.right_down = (3..3 + down_frames).contains(&f);
             inp.right_released = f == 3 + down_frames;
+            inp.shift = self.script_shift && f <= 3 + down_frames;
             if f > 3 + down_frames {
                 self.script_rclick = None;
             }

@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use sim::view::{Branch, ConditionSet, ContactReaction, Plan, PlanStep, SpeedSetting, StepAction};
+use sim::view::{Branch, ConditionSet, ContactReaction, LegSettings, Plan, PlanStep, SpeedSetting, StepAction};
 use terrain::path::{Pathfinder, segment_time};
 
 use super::ctx::{MenuAct, reaction_name};
@@ -46,6 +46,17 @@ impl PlanDraft {
     pub fn new(platoon: PlatoonId, plan: Plan, sel: Option<u16>, running: Option<u16>, passed: Vec<u16>) -> Self {
         let base = (plan.clone(), None);
         Self { platoon, plan, sel, running, passed, start: None, undo: Vec::new(), redo: Vec::new(), base }
+    }
+
+    /// Only positions: nothing a plain move order cannot say.
+    pub fn is_plain(&self) -> bool {
+        self.plan.steps.iter().all(|s| {
+            s.leg == LegSettings::default()
+                && s.actions.is_empty()
+                && s.on_release.is_empty()
+                && s.wait.is_none()
+                && s.branch.is_none()
+        })
     }
 
     /// Number of edits made since the draft was started (undoable ones).
@@ -144,7 +155,6 @@ pub enum ActKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanEdit {
     /// Append a checkpoint at the menu point.
-    AddCp,
     /// Insert a checkpoint half way along the leg to `id`.
     InsertBefore(u16),
     /// Insert a checkpoint at the menu point, before `id` (leg menu).
@@ -508,6 +518,12 @@ impl Game {
             return;
         };
         let p = d.platoon;
+        if d.is_plain() && d.running.is_none() && d.start.is_none() && self.sel_platoon == Some(p) {
+            let mut via: Vec<[f64; 2]> = d.plan.steps.iter().map(|s| s.at).collect();
+            let dest = via.pop().expect("a start id means steps");
+            self.issue_move_at(via, dest, self.current_speed());
+            return;
+        }
         let cs = self.platoon_cs(p);
         let n = d.plan.steps.len();
         let k = d.plan.index_of(start).map_or(1, |i| i + 1);
@@ -909,10 +925,6 @@ impl Game {
             let cs = self.platoon_cs(p);
             self.radio(format!("TO {cs}: CANCEL PLAN."));
             self.order(Command::SetPlan { platoon: p, plan: Plan::default(), start: 0 });
-            return;
-        }
-        if e == PlanEdit::AddCp {
-            self.plan_add_cp(at);
             return;
         }
         if !self.ensure_draft() {
@@ -1318,66 +1330,6 @@ impl Game {
 
     // ------------------------------------------------------------ card and step list
 
-    pub(super) fn plan_card(&self, contingency: Button<GameAction>) -> Vec<(usize, Button<GameAction>)> {
-        let z = Rect::new(0.0, 0.0, 0.0, 0.0);
-        let b = |label: &str, c: Cmd| Button::new(z, hud::Look::Card, label, GameAction::Cmd(c));
-        let Some(d) = &self.plan else { return Vec::new() };
-        let n = d.plan.steps.len();
-        let k = d.sel.and_then(|id| d.plan.index_of(id));
-        let pos = k.map_or(String::new(), |k| format!("CP {}/{n}", k + 1));
-        vec![
-            (
-                0,
-                b("SEND", Cmd::Send)
-                    .key("ENTER")
-                    .value(format!("{n} CP"))
-                    .enabled(n > 0)
-                    .tip("SEND THE PLAN TO THE PLATOON (ONE RADIO ORDER)"),
-            ),
-            (
-                1,
-                b("ADD CPS", Cmd::Plan)
-                    .key("P")
-                    .active(self.tool == Tool::PlanCp)
-                    .tip("LEFT CLICKS ADD CHECKPOINTS AT THE END OF THE PLAN (BKSP REMOVES THE LAST)"),
-            ),
-            (
-                2,
-                b("PREV CP", Cmd::PlanPrev)
-                    .key(",")
-                    .value(pos.clone())
-                    .enabled(n > 0)
-                    .tip("SELECT THE PREVIOUS CHECKPOINT"),
-            ),
-            (3, b("NEXT CP", Cmd::PlanNext).key(".").value(pos).enabled(n > 0).tip("SELECT THE NEXT CHECKPOINT")),
-            (
-                4,
-                b("CP MENU", Cmd::PlanMenu)
-                    .key("C")
-                    .enabled(k.is_some())
-                    .tip("SETTINGS OF THE SELECTED CHECKPOINT: LEG, ACTIONS, WAIT, BRANCH (OR RIGHT CLICK IT)"),
-            ),
-            (5, b("DELETE CP", Cmd::PlanDelete).key("DEL").enabled(k.is_some()).tip("REMOVE THE SELECTED CHECKPOINT")),
-            (6, contingency),
-            (
-                7,
-                b("UNDO", Cmd::Undo)
-                    .key("CTRL+Z")
-                    .value(format!("{}", d.changes()))
-                    .enabled(d.changes() > 0)
-                    .tip("UNDO THE LAST DRAFT EDIT"),
-            ),
-            (8, b("REDO", Cmd::Redo).key("CTRL+Y").enabled(d.can_redo()).tip("REDO THE EDIT UNDONE LAST")),
-            (
-                14,
-                b("REVERT", Cmd::PlanRevert)
-                    .value(if self.revert_armed { "CONFIRM".to_owned() } else { String::new() })
-                    .active(self.revert_armed)
-                    .tip("DROP THE WHOLE DRAFT (THE PLATOON KEEPS ITS ORDERS); ASKS AGAIN AFTER SEVERAL EDITS. ESC NEVER DROPS A DRAFT"),
-            ),
-        ]
-    }
-
     /// Plan rows of the selection panel: one per checkpoint, then the selected checkpoint's
     /// settings (each opens that part of its menu).
     pub(super) fn plan_rows(&self, x: f32, mut y: f32, w: f32) -> (Vec<Button<GameAction>>, f32) {
@@ -1691,5 +1643,117 @@ mod tests {
             Some(posture::Scope::Now(Addressee::Platoon(a))),
             "ammo is never a leg setting"
         );
+    }
+
+    fn route_len(g: &Game, p: PlatoonId) -> Option<usize> {
+        g.graphics.iter().find_map(|o| match &o.kind {
+            GraphicKind::Route { points } if o.platoon == Some(p) => Some(points.len()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn shift_right_click_appends_and_sends_a_plain_move_on_release() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        g.shift_held = true;
+        g.shift_append([700.0, 800.0]);
+        g.shift_append([700.0, 1000.0]);
+        g.sync_drafts();
+        assert_eq!(g.plan.as_ref().map(|d| d.plan.steps.len()), Some(2));
+        assert_eq!(route_len(&g, a), None, "nothing sent while Shift is down");
+        g.shift_held = false;
+        g.flush_quasi();
+        assert!(g.plan.is_none());
+        assert_eq!(route_len(&g, a), Some(3), "from the platoon, via CP 1, to CP 2");
+        assert!(!g.graphics.iter().any(|o| matches!(o.kind, GraphicKind::Plan { .. })));
+        g.advance_ticks(2000);
+        assert!(g.picture().platoon(a).unwrap().plan.is_none(), "a plain move, not a plan");
+    }
+
+    #[test]
+    fn shift_right_click_on_a_running_plan_sends_a_plan_and_ctrl_z_restores_the_old_one() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        g.plan_add_cp([700.0, 800.0]);
+        g.plan_add_cp([700.0, 1000.0]);
+        g.plan.as_mut().unwrap().plan.steps[0].wait = Some(one(TriggerCondition::Elapsed { s: 3000.0 }));
+        g.send_plan();
+        g.advance_ticks(2000);
+        select(&mut g, Some(a));
+        assert!(g.plan.is_none());
+
+        g.shift_held = true;
+        g.shift_append([700.0, 1200.0]);
+        assert_eq!(g.plan.as_ref().map(|d| d.plan.steps.len()), Some(3), "appended to the running plan");
+        g.shift_held = false;
+        g.flush_quasi();
+        g.advance_ticks(2000);
+        let v = g.picture().platoon(a).unwrap().plan.as_ref().unwrap().plan.steps.len();
+        assert_eq!(v, 3);
+
+        g.press(Cmd::Undo);
+        assert_eq!(g.plan.as_ref().map(|d| d.plan.steps.len()), Some(2), "Ctrl+Z brings the old plan back as a draft");
+    }
+
+    #[test]
+    fn an_explicit_draft_is_not_sent_when_shift_is_released() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        g.plan_add_cp([700.0, 800.0]);
+        g.sync_drafts();
+        g.shift_held = true;
+        g.shift_append([700.0, 1000.0]);
+        g.shift_held = false;
+        g.flush_quasi();
+        assert_eq!(g.plan.as_ref().map(|d| d.plan.steps.len()), Some(2));
+        assert_eq!(route_len(&g, a), None);
+    }
+
+    #[test]
+    fn shift_battle_position_and_smoke_append_actions() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        g.shift_held = true;
+        g.append_tool = true;
+        g.issue_bp([700.0, 1000.0], 0.5);
+        assert!(g.append_smoke());
+        let d = g.plan.as_ref().unwrap();
+        assert_eq!(d.plan.steps.len(), 1);
+        assert!(matches!(d.plan.steps[0].actions[0], StepAction::OccupyBp { .. }));
+        assert!(matches!(d.plan.steps[0].actions[1], StepAction::SmokeScreen));
+        g.shift_held = false;
+        g.flush_quasi();
+        assert!(g.plan.is_none());
+        g.advance_ticks(2000);
+        assert!(g.picture().platoon(a).unwrap().plan.is_some());
+    }
+
+    #[test]
+    fn shift_smoke_without_a_checkpoint_adds_no_draft() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        assert!(!g.append_smoke());
+        assert!(g.plan.is_none() && !g.has_draft(a));
+    }
+
+    #[test]
+    fn esc_cancels_a_pending_click_before_the_tool() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        g.plan_add_cp([700.0, 800.0]);
+        g.sync_drafts();
+        g.tool = Tool::BattlePosition { centre: Some([700.0, 900.0]) };
+        g.press(Cmd::Cancel);
+        assert_eq!(g.tool, Tool::BattlePosition { centre: None });
+        g.press(Cmd::Cancel);
+        assert_eq!(g.tool, Tool::None);
+        assert!(g.plan.is_some() && g.sel_platoon == Some(a));
     }
 }
