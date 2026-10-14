@@ -341,3 +341,73 @@ fn the_commander_ai_does_not_call_danger_close() {
     let rep = fire_reports(&run_events(&mut sim, 60.0));
     assert!(rep.is_empty(), "danger close call: {rep:?}");
 }
+
+/// Bursts seen by `sim`'s Blue picture while stepping `seconds`, as positions (deduplicated).
+fn observed_bursts(sim: &mut Sim, seconds: f64) -> Vec<[f64; 2]> {
+    let mut out: Vec<(u64, [f64; 2])> = Vec::new();
+    for _ in 0..seconds as usize {
+        run(sim, 1.0);
+        for i in &sim.perceived(BLUE).impacts {
+            let key = (i.time_s * 1000.0) as u64;
+            if !out.iter().any(|(k, p)| *k == key && *p == i.pos) {
+                out.push((key, i.pos));
+            }
+        }
+    }
+    out.into_iter().map(|(_, p)| p).collect()
+}
+
+fn centroid(p: &[[f64; 2]]) -> [f64; 2] {
+    let n = p.len() as f64;
+    [p.iter().map(|q| q[0]).sum::<f64>() / n, p.iter().map(|q| q[1]).sum::<f64>() / n]
+}
+
+#[test]
+fn adjusting_fire_cancels_the_systematic_error() {
+    let target = [500.0, 5000.0];
+    let (mut before, mut after) = (0.0, 0.0);
+    for seed in 0..8u64 {
+        let (ds, m) = world();
+        let mut sc = with_battery(
+            scenario(NOON, vec![unit("O1", "bulwark_a1", [500.0, 3900.0], 0.0, None)], vec![]),
+            None,
+            None,
+        );
+        sc.seed = seed;
+        let mut sim = Sim::new(&sc, ds, m).unwrap();
+        call(&mut sim, target, FireKind::He, 1);
+        let first = observed_bursts(&mut sim, 130.0);
+        assert_eq!(first.len(), 4, "one volley of four rounds");
+        let c = centroid(&first);
+        before += dist(c, target);
+        let shift = [target[0] - c[0], target[1] - c[1]];
+        sim.submit_immediate(BLUE, Command::AdjustFire { battery: 0, shift, volleys: 1 });
+        let ev = run_events(&mut sim, 1.0);
+        let eta = fire_reports(&ev).iter().find_map(|(_, r)| match r {
+            FireReport::Accepted { eta_s } => Some(*eta_s),
+            _ => None,
+        });
+        // 20 s adjustment delay + 8 s + 3.6 s/km over 4.5 km: well under a new call's 75 s FDC delay.
+        assert!(eta.is_some_and(|e| (e - (20.0 + 8.0 + 3.6 * 4.5)).abs() < 1.0), "eta {eta:?}");
+        let second = observed_bursts(&mut sim, 60.0);
+        assert_eq!(second.len(), 4);
+        after += dist(centroid(&second), target);
+    }
+    assert!(after < before * 0.6, "mean centroid error before {} after {}", before / 8.0, after / 8.0);
+}
+
+#[test]
+fn adjusting_needs_a_previous_mission_and_an_idle_battery() {
+    let (ds, m) = world();
+    let sc =
+        with_battery(scenario(NOON, vec![unit("O1", "bulwark_a1", [500.0, 3900.0], 0.0, None)], vec![]), None, None);
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    sim.submit_immediate(BLUE, Command::AdjustFire { battery: 0, shift: [10.0, 0.0], volleys: 1 });
+    let rep = fire_reports(&run_events(&mut sim, 1.0));
+    assert!(matches!(rep[0].1, FireReport::Denied(DenyReason::NoMission)), "{rep:?}");
+    call(&mut sim, [500.0, 5000.0], FireKind::He, 2);
+    run(&mut sim, 1.0);
+    sim.submit_immediate(BLUE, Command::AdjustFire { battery: 0, shift: [10.0, 0.0], volleys: 1 });
+    let rep = fire_reports(&run_events(&mut sim, 1.0));
+    assert!(matches!(rep[0].1, FireReport::Denied(DenyReason::Busy)), "{rep:?}");
+}

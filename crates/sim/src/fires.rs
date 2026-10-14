@@ -52,6 +52,11 @@ pub struct Battery {
     pub smoke: u32,
     pub smoke_kind: usize,
     pub mission: Option<Mission>,
+    /// Systematic error of this battery's fire as (range fraction, deflection rad), drawn at the
+    /// first volley; observer corrections move the aim point to cancel it.
+    bias: Option<(f64, f64)>,
+    /// Aim point and kind of the last mission, the base for an adjustment.
+    pub last_aim: Option<(Vec2, FireKind)>,
     flights: Vec<Flight>,
 }
 
@@ -66,6 +71,8 @@ impl Battery {
             smoke: d.smoke_rounds,
             smoke_kind,
             mission: None,
+            bias: None,
+            last_aim: None,
             flights: Vec::new(),
         }
     }
@@ -78,6 +85,14 @@ impl Battery {
         h.u32(self.he);
         h.u32(self.smoke);
         h.u64(self.flights.len() as u64);
+        if let Some((r, d)) = self.bias {
+            h.f64(r);
+            h.f64(d);
+        }
+        if let Some((at, _)) = self.last_aim {
+            h.f64(at[0]);
+            h.f64(at[1]);
+        }
         if let Some(m) = &self.mission {
             h.u32(m.volleys_left);
             h.u64(m.next_volley_tick);
@@ -134,6 +149,28 @@ impl Battery {
         volleys: u32,
         tick: u64,
     ) -> Result<f64, DenyReason> {
+        self.start(d, at, kind, volleys, tick, d.fdc_delay_s.get())
+    }
+
+    /// Correct the last aim point by `shift` and fire again after the adjustment delay.
+    pub fn adjust(&mut self, d: &BatteryDef, shift: Vec2, volleys: u32, tick: u64) -> Result<(Vec2, f64), DenyReason> {
+        let Some((last, kind)) = self.last_aim else { return Err(DenyReason::NoMission) };
+        if self.busy() {
+            return Err(DenyReason::Busy);
+        }
+        let at = [last[0] + shift[0], last[1] + shift[1]];
+        self.start(d, at, kind, volleys, tick, d.adjust_delay_s.get()).map(|eta| (at, eta))
+    }
+
+    fn start(
+        &mut self,
+        d: &BatteryDef,
+        at: Vec2,
+        kind: FireKind,
+        volleys: u32,
+        tick: u64,
+        fdc: f64,
+    ) -> Result<f64, DenyReason> {
         let r = dist(self.pos, at);
         if self.mission.is_some() {
             return Err(DenyReason::Busy);
@@ -148,7 +185,7 @@ impl Battery {
         if stock == 0 {
             return Err(DenyReason::NoAmmo);
         }
-        let fdc = d.fdc_delay_s.get();
+        self.last_aim = Some((at, kind));
         self.mission = Some(Mission {
             at,
             kind,
@@ -211,10 +248,13 @@ pub fn step(batteries: &mut [Battery], ctx: &mut Ctx) -> Vec<(SideId, Vec2)> {
                 m.shot_called = true;
                 ctx.events.push(Event::FireSupport { side: b.side, battery: id, at: m.at, report: FireReport::Shot });
             }
+            let (bias_r, bias_d) = *b.bias.get_or_insert_with(|| {
+                (gauss(ctx.rng) * d.range_bias_frac.get(), gauss(ctx.rng) * d.deflection_bias_mrad.get() / 1000.0)
+            });
             for i in 0..n {
                 let (er, ed) = (
-                    gauss(ctx.rng) * d.range_error_frac.get() * r,
-                    gauss(ctx.rng) * d.deflection_error_mrad.get() / 1000.0 * r,
+                    bias_r * r + gauss(ctx.rng) * d.range_error_frac.get() * r,
+                    bias_d * r + gauss(ctx.rng) * d.deflection_error_mrad.get() / 1000.0 * r,
                 );
                 // A spread of a few tens of metres between the guns of the battery.
                 let sheaf = (i as f64 - (n as f64 - 1.0) / 2.0) * 25.0;

@@ -110,6 +110,13 @@ pub enum Command {
         kind: FireKind,
         volleys: u32,
     },
+    /// Adjust fire (ATP 3-09.42): the observer corrects the last aim point by `shift` (m, map
+    /// frame) and the battery fires `volleys` volleys of the same kind after a short delay.
+    AdjustFire {
+        battery: u32,
+        shift: Vec2,
+        volleys: u32,
+    },
     /// Cease fire: the battery stops firing; rounds already in the air still land.
     CeaseFire {
         battery: u32,
@@ -259,6 +266,8 @@ pub enum DenyReason {
     TooClose,
     NoAmmo,
     Busy,
+    /// Nothing to adjust: the battery has not fired a mission.
+    NoMission,
 }
 
 /// Fire-support radio traffic (ATP 3-09.42 call-for-fire sequence).

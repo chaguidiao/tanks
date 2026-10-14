@@ -52,6 +52,8 @@ pub enum Tool {
     SmokeRound,
     /// Call for fire: the next left click is the target point.
     CallFire,
+    /// Adjust fire: the next left click is where the last rounds should have landed.
+    AdjustFire,
     /// Battle position: centre chosen, waiting for the threat direction click.
     BattlePosition {
         centre: Option<[f64; 2]>,
@@ -111,6 +113,7 @@ pub enum Cmd {
     EngineSmoke,
     SmokeRound,
     CallFire,
+    AdjustFire,
     Ammo,
     BreakContact,
     Contingency,
@@ -545,6 +548,7 @@ impl Game {
             (Key::Char('e'), C::EngineSmoke),
             (Key::Char('n'), C::SmokeRound),
             (Key::Char('y'), C::CallFire),
+            (Key::Char('j'), C::AdjustFire),
             (Key::Char('q'), C::Ammo),
             (Key::Char('x'), C::BreakContact),
             (Key::Char('h'), C::Halt),
@@ -652,6 +656,10 @@ impl Game {
                     self.call_for_fire(world);
                     self.tool = Tool::None;
                 }
+                Tool::AdjustFire => {
+                    self.adjust_fire(world);
+                    self.tool = Tool::None;
+                }
                 Tool::BattlePosition { centre: None } => self.tool = Tool::BattlePosition { centre: Some(world) },
                 Tool::BattlePosition { centre: Some(c) } => {
                     let facing = ai::drive::bearing(c, world);
@@ -700,6 +708,7 @@ impl Game {
                 | Tool::Engage
                 | Tool::SmokeRound
                 | Tool::CallFire
+                | Tool::AdjustFire
                 | Tool::BattlePosition { .. }
                 | Tool::Graphic { .. }
                 | Tool::PlanCp
@@ -853,6 +862,13 @@ impl Game {
                     self.fire_kind = if self.fire_kind == FireKind::He { FireKind::Smoke } else { FireKind::He };
                 } else {
                     self.tool = Tool::CallFire;
+                }
+            }
+            Cmd::AdjustFire => {
+                if self.last_burst().is_none() {
+                    self.radio("NO ROUNDS OBSERVED TO ADJUST.".into());
+                } else {
+                    self.toggle_tool(Tool::AdjustFire);
                 }
             }
             Cmd::Ammo => self.cycle_ammo(),
@@ -1212,6 +1228,32 @@ impl Game {
         };
         self.order(Command::CallForFire { battery: id, at, kind, volleys });
         self.radio(format!("TO {cs}: FIRE MISSION, GRID {}, {what}, FIRE FOR EFFECT, OVER.", format::grid(at)));
+    }
+
+    /// Centre of the most recent group of bursts the side has observed (rounds within 10 s of the
+    /// newest one), the base of an adjustment.
+    fn last_burst(&self) -> Option<[f64; 2]> {
+        let imp = &self.picture().impacts;
+        let newest = imp.iter().map(|i| i.time_s).fold(f64::NEG_INFINITY, f64::max);
+        let group: Vec<_> = imp.iter().filter(|i| newest - i.time_s <= 10.0).collect();
+        if group.is_empty() {
+            return None;
+        }
+        let n = group.len() as f64;
+        Some([group.iter().map(|i| i.pos[0]).sum::<f64>() / n, group.iter().map(|i| i.pos[1]).sum::<f64>() / n])
+    }
+
+    fn adjust_fire(&mut self, want: [f64; 2]) {
+        let Some(seen) = self.last_burst() else { return };
+        let Some((id, cs)) = self.fire_battery().map(|b| (b.id, b.callsign.clone())) else { return };
+        let shift = [want[0] - seen[0], want[1] - seen[1]];
+        let (ns, ew) = (if shift[1] >= 0.0 { "NORTH" } else { "SOUTH" }, if shift[0] >= 0.0 { "EAST" } else { "WEST" });
+        self.order(Command::AdjustFire { battery: id, shift, volleys: 2 });
+        self.radio(format!(
+            "TO {cs}: ADJUST FIRE, {ns} {:.0}, {ew} {:.0}, FIRE FOR EFFECT, OVER.",
+            shift[1].abs().round(),
+            shift[0].abs().round()
+        ));
     }
 
     fn smoke_salvos(&self, to: Addressee) -> u32 {
@@ -1581,7 +1623,7 @@ impl Game {
                 f.circle_lines(mouse, 12.0, style::TEXT);
                 f.circle_lines(mouse, 4.0, style::TEXT);
             }
-            Tool::CallFire => {
+            Tool::CallFire | Tool::AdjustFire => {
                 let r = (35.0 / cam.mpp) as f32;
                 f.circle_lines(mouse, r.max(8.0), style::AMBER);
                 f.circle_lines(mouse, 3.0, style::AMBER);
@@ -1671,6 +1713,9 @@ impl Game {
                 "CALL FOR FIRE ({}): CLICK THE TARGET   Y HE/SMOKE   (RIGHT CLICK / ESC CANCEL)",
                 if self.fire_kind == FireKind::He { "HE" } else { "SMOKE" }
             ),
+            Tool::AdjustFire => {
+                "ADJUST FIRE: CLICK WHERE THE LAST ROUNDS SHOULD HAVE LANDED   (RIGHT CLICK / ESC CANCEL)".into()
+            }
             Tool::SmokeRound => "SMOKE ROUND: CLICK THE AIM POINT   (RIGHT CLICK / ESC CANCEL)".into(),
             Tool::BattlePosition { centre: None } => "BATTLE POSITION: CLICK CENTRE   [ ] RADIUS".into(),
             Tool::BattlePosition { .. } => "BATTLE POSITION: CLICK THREAT DIRECTION".into(),
@@ -2018,6 +2063,14 @@ impl Game {
                     .active(self.tool == Tool::CallFire)
                     .tip("CALL FOR FIRE ON A POINT: ARTILLERY BATTERY, FDC DELAY, THEN SHOT / SPLASH / ROUNDS COMPLETE (Y AGAIN: HE / SMOKE)")
             }),
+            (
+                22,
+                b("ADJUST", Cmd::AdjustFire)
+                    .key("J")
+                    .enabled(self.last_burst().is_some() && self.fire_battery().is_some())
+                    .active(self.tool == Tool::AdjustFire)
+                    .tip("ADJUST FIRE: CLICK WHERE THE LAST OBSERVED ROUNDS SHOULD HAVE LANDED; THE BATTERY SHIFTS ITS AIM AND FIRES AGAIN WITH A SHORT DELAY"),
+            ),
             (
                 21,
                 b("PLAN", Cmd::Plan)
@@ -2728,6 +2781,7 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                         DenyReason::TooClose => "BELOW MINIMUM RANGE",
                         DenyReason::NoAmmo => "NO AMMUNITION",
                         DenyReason::Busy => "MISSION IN PROGRESS",
+                        DenyReason::NoMission => "NO MISSION TO ADJUST",
                     }
                 ),
                 FireReport::Shot => format!("{cs}: SHOT, OVER."),

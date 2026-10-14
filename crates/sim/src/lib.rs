@@ -1042,6 +1042,15 @@ impl Sim {
                 };
                 events.push(Event::FireSupport { side: c.side, battery: *battery, at: *at, report });
             }
+            Command::AdjustFire { battery, shift, volleys } => {
+                let Some(b) = self.batteries.get_mut(*battery as usize).filter(|b| b.side == c.side) else { return };
+                let d = &self.data.fires.batteries[b.def];
+                let (at, report) = match b.adjust(d, *shift, *volleys, self.tick) {
+                    Ok((at, eta_s)) => (at, FireReport::Accepted { eta_s }),
+                    Err(why) => (b.last_aim.map_or(b.pos, |a| a.0), FireReport::Denied(why)),
+                };
+                events.push(Event::FireSupport { side: c.side, battery: *battery, at, report });
+            }
             Command::CeaseFire { battery } => {
                 let Some(b) = self.batteries.get_mut(*battery as usize).filter(|b| b.side == c.side) else { return };
                 let at = b.mission.as_ref().map_or(b.pos, |m| m.at);

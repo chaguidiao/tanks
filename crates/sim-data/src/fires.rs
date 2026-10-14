@@ -28,6 +28,13 @@ pub struct BatteryDef {
     pub range_error_frac: Stat<f64>,
     /// 1σ deflection error (mrad).
     pub deflection_error_mrad: Stat<f64>,
+    /// 1σ systematic range error of unregistered fire (survey, met and gun calibration), as a
+    /// fraction of range. Drawn once per battery; only an observer's correction removes it.
+    pub range_bias_frac: Stat<f64>,
+    /// 1σ systematic deflection error (mrad).
+    pub deflection_bias_mrad: Stat<f64>,
+    /// Time from an observer's correction to the next volley (s): shorter than a new call.
+    pub adjust_delay_s: Stat<f64>,
     pub he_rounds: u32,
     pub smoke_rounds: u32,
     /// Smoke kind id in `smoke.ron` for a smoke round.
