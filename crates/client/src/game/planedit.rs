@@ -1653,6 +1653,25 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_arrows_move_a_cursor_and_ctrl_space_places_a_point() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        g.tool = Tool::Move;
+        let cam = Camera { centre: [800.0, 800.0], mpp: 2.0, screen: [1600.0, 900.0] };
+        let mut inp = Input { ctrl: true, screen: [1600.0, 900.0], ..Input::default() };
+        inp.pressed = vec![Key::Right];
+        let (k, _) = g.keyboard_click(&inp, &cam).expect("cursor moves");
+        assert!(!k.left_pressed);
+        let r = g.reticle.unwrap();
+        inp.pressed = vec![Key::Space];
+        let (k, _) = g.keyboard_click(&inp, &cam).expect("places");
+        assert!(k.left_pressed && !k.ctrl && !k.hit(Key::Space));
+        let w = cam.to_world(k.mouse);
+        assert!((w[0] - r[0]).abs() < 1.0 && (w[1] - r[1]).abs() < 1.0);
+    }
+
+    #[test]
     fn shift_right_click_appends_and_sends_a_plain_move_on_release() {
         let mut g = game();
         let (a, _) = platoons(&g);

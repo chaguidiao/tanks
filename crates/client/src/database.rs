@@ -45,6 +45,7 @@ impl Tab {
 pub enum DbAction {
     Tab(Tab),
     Pick(usize),
+    Year,
     Back,
 }
 
@@ -100,6 +101,8 @@ pub struct Database {
     /// Selected entry per tab.
     sel: [usize; 5],
     scroll: f32,
+    /// Show only what is in service in this year (vehicles, ammunition, batteries).
+    pub year: Option<i32>,
     /// Opened from the screen menu: BACK returns to it.
     pub from_pause: bool,
 }
@@ -173,24 +176,64 @@ fn upper(s: &str) -> String {
     s.replace(['_', '-'], " ").to_uppercase()
 }
 
-/// Entries of a tab: (label, value) rows of the list.
-pub fn entries(ds: &DataSet, tab: Tab) -> Vec<(String, String)> {
+/// Entries of a tab: (index into the data, label, value) rows of the list. With a `year` the
+/// era-dated tabs list only what was in service then.
+pub fn entries(ds: &DataSet, tab: Tab, year: Option<i32>) -> Vec<(usize, String, String)> {
+    let live = |d: &ServiceDates| year.is_none_or(|y| d.contains(y));
     match tab {
-        Tab::Vehicles => ds.vehicles.iter().map(|v| (v.name.clone(), years(&v.in_service))).collect(),
-        Tab::Ammunition => ds.ammo.iter().map(|a| (a.name.clone(), years(&a.in_service))).collect(),
+        Tab::Vehicles => ds
+            .vehicles
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| live(&v.in_service))
+            .map(|(k, v)| (k, v.name.clone(), years(&v.in_service)))
+            .collect(),
+        Tab::Ammunition => ds
+            .ammo
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| live(&a.in_service))
+            .map(|(k, a)| (k, a.name.clone(), years(&a.in_service)))
+            .collect(),
         Tab::Terrain => ds
             .terrain
             .landcover
             .iter()
             .map(|l| (upper(&l.name), "LAND COVER".to_owned()))
             .chain(ds.terrain.soils.iter().map(|s| (upper(&s.name), "SOIL".to_owned())))
+            .enumerate()
+            .map(|(k, (a, b))| (k, a, b))
             .collect(),
-        Tab::Doctrine => ds.doctrine.iter().map(|d| (d.name.to_uppercase(), d.id.to_uppercase())).collect(),
-        Tab::Combat => ["DETECTION", "PENETRATION", "DAMAGE", "HE EFFECTS", "SUPPRESSION"]
-            .iter()
-            .map(|s| ((*s).to_owned(), String::new()))
-            .chain(ds.fires.batteries.iter().map(|b| (b.name.clone(), years(&b.in_service))))
-            .collect(),
+        Tab::Doctrine => {
+            ds.doctrine.iter().enumerate().map(|(k, d)| (k, d.name.to_uppercase(), d.id.to_uppercase())).collect()
+        }
+        Tab::Combat => {
+            let fixed = ["DETECTION", "PENETRATION", "DAMAGE", "HE EFFECTS", "SUPPRESSION"];
+            let n = fixed.len();
+            fixed
+                .iter()
+                .enumerate()
+                .map(|(k, s)| (k, (*s).to_owned(), String::new()))
+                .chain(
+                    ds.fires
+                        .batteries
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, b)| live(&b.in_service))
+                        .map(|(k, b)| (n + k, b.name.clone(), years(&b.in_service))),
+                )
+                .collect()
+        }
+    }
+}
+
+/// Years the filter steps through: ALL, then every five years.
+const YEAR_STEPS: [i32; 13] = [1970, 1975, 1980, 1985, 1990, 1995, 2000, 2005, 2010, 2015, 2020, 2025, 2030];
+
+fn next_year(y: Option<i32>) -> Option<i32> {
+    match y {
+        None => Some(YEAR_STEPS[0]),
+        Some(y) => YEAR_STEPS.iter().copied().find(|s| *s > y),
     }
 }
 
@@ -741,7 +784,7 @@ fn tag(o: &Origin) -> (&'static str, Rgba) {
 
 impl Database {
     pub fn new(from_pause: bool) -> Self {
-        Self { tab: Tab::Vehicles, sel: [0; 5], scroll: 0.0, from_pause }
+        Self { tab: Tab::Vehicles, sel: [0; 5], scroll: 0.0, year: None, from_pause }
     }
 
     /// Open on a vehicle (the game's selected-vehicle card).
@@ -769,13 +812,24 @@ impl Database {
             x += w + 6.0;
         }
         let l = list_frame(screen);
-        for (k, (label, value)) in entries(ds, self.tab).into_iter().enumerate() {
-            let r = Rect::new(l.x + 8.0, l.y + 30.0 + k as f32 * (ROW_H + 4.0), l.w - 16.0, ROW_H);
+        for (pos, (k, label, value)) in entries(ds, self.tab, self.year).into_iter().enumerate() {
+            let r = Rect::new(l.x + 8.0, l.y + 30.0 + pos as f32 * (ROW_H + 4.0), l.w - 16.0, ROW_H);
             if r.y + r.h > l.y + l.h {
                 break;
             }
             out.push(Button::new(r, Look::Row, label, DbAction::Pick(k)).value(value).active(k == self.sel()));
         }
+        let year = self.year.map_or("ALL".to_owned(), |y| y.to_string());
+        out.push(
+            Button::new(
+                Rect::new(x + 12.0, 108.0, 190.0, 28.0),
+                Look::Bar,
+                format!("IN SERVICE {year}"),
+                DbAction::Year,
+            )
+            .key("Y")
+            .tip("Show only what is in service in this year. Click or Y steps by five years."),
+        );
         out.push(
             Button::new(Rect::new(40.0, screen[1] - 80.0, 200.0, 38.0), Look::Menu, "BACK", DbAction::Back).key("ESC"),
         );
@@ -801,13 +855,18 @@ impl Database {
                 a = Some(DbAction::Tab(t));
             }
         }
-        let n = entries(ds, self.tab).len();
+        if inp.hit(Key::Char('y')) {
+            a = Some(DbAction::Year);
+        }
+        let list = entries(ds, self.tab, self.year);
+        let n = list.len();
         if n > 0 {
+            let at = list.iter().position(|e| e.0 == self.sel()).unwrap_or(0);
             if inp.hit(Key::Down) {
-                a = Some(DbAction::Pick((self.sel() + 1) % n));
+                a = Some(DbAction::Pick(list[(at + 1) % n].0));
             }
             if inp.hit(Key::Up) {
-                a = Some(DbAction::Pick((self.sel() + n - 1) % n));
+                a = Some(DbAction::Pick(list[(at + n - 1) % n].0));
             }
         }
         match a {
@@ -815,6 +874,16 @@ impl Database {
             Some(DbAction::Tab(t)) if t != self.tab => {
                 self.tab = t;
                 self.scroll = 0.0;
+            }
+            Some(DbAction::Year) => {
+                self.year = next_year(self.year);
+                let list = entries(ds, self.tab, self.year);
+                if let Some(e) = list.first()
+                    && !list.iter().any(|x| x.0 == self.sel())
+                {
+                    self.sel[self.tab.index()] = e.0;
+                    self.scroll = 0.0;
+                }
             }
             Some(DbAction::Pick(p)) if p != self.sel() => {
                 self.sel[self.tab.index()] = p;
@@ -969,7 +1038,7 @@ mod tests {
     fn every_entry_has_a_sheet_with_sourced_rows() {
         let ds = ds();
         for tab in Tab::ALL {
-            let n = entries(&ds, tab).len();
+            let n = entries(&ds, tab, None).len();
             assert!(n > 0, "{tab:?} is empty");
             for k in 0..n {
                 let s = sheet(&ds, tab, k).unwrap_or_else(|| panic!("{tab:?} {k}"));
@@ -982,6 +1051,22 @@ mod tests {
             }
             assert!(sheet(&ds, tab, n).is_none());
         }
+    }
+
+    #[test]
+    fn year_filter_keeps_only_what_is_in_service() {
+        let ds = ds();
+        let all = entries(&ds, Tab::Vehicles, None);
+        assert_eq!(all.len(), ds.vehicles.len());
+        for y in [1975, 1990, 2020] {
+            for (k, ..) in entries(&ds, Tab::Vehicles, Some(y)) {
+                assert!(ds.vehicles[k].in_service.contains(y));
+            }
+        }
+        let early = entries(&ds, Tab::Vehicles, Some(1970)).len();
+        let late = entries(&ds, Tab::Vehicles, Some(2030)).len();
+        assert!(early < all.len() || late < all.len(), "the filter removes something");
+        assert_eq!(next_year(Some(2030)), None);
     }
 
     #[test]

@@ -8,6 +8,56 @@ pub const FPS_CAPS: [u32; 4] = [30, 60, 120, 0];
 /// Keyboard / edge pan speeds (screen px per second).
 pub const PAN_SPEEDS: [(f32, &str); 3] = [(300.0, "SLOW"), (600.0, "NORMAL"), (1200.0, "FAST")];
 
+/// What stops the clock by itself during play, beyond the menu and code-word options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoPause {
+    Off,
+    /// A new enemy contact is reported.
+    Contact,
+    /// ...or an own vehicle is destroyed.
+    ContactLoss,
+    /// ...or a platoon reports indirect fire.
+    All,
+}
+
+impl AutoPause {
+    pub const ALL: [AutoPause; 4] = [AutoPause::Off, AutoPause::Contact, AutoPause::ContactLoss, AutoPause::All];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AutoPause::Off => "OFF",
+            AutoPause::Contact => "NEW CONTACT",
+            AutoPause::ContactLoss => "CONTACT, LOSS",
+            AutoPause::All => "CONTACT, LOSS, FIRE",
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            AutoPause::Off => "off",
+            AutoPause::Contact => "contact",
+            AutoPause::ContactLoss => "contact_loss",
+            AutoPause::All => "all",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        Self::ALL[(Self::ALL.iter().position(|a| *a == self).unwrap_or(0) + 1) % Self::ALL.len()]
+    }
+
+    pub fn on_contact(self) -> bool {
+        self != AutoPause::Off
+    }
+
+    pub fn on_loss(self) -> bool {
+        matches!(self, AutoPause::ContactLoss | AutoPause::All)
+    }
+
+    pub fn on_fire(self) -> bool {
+        self == AutoPause::All
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
     pub fullscreen: bool,
@@ -24,6 +74,8 @@ pub struct Settings {
     pub pause_on_menu: bool,
     /// The clock stops when every platoon waiting on a code word reports set.
     pub pause_on_ready: bool,
+    /// Events that stop the clock.
+    pub auto_pause: AutoPause,
 }
 
 impl Default for Settings {
@@ -38,6 +90,7 @@ impl Default for Settings {
             grid: true,
             pause_on_menu: true,
             pause_on_ready: false,
+            auto_pause: AutoPause::Off,
         }
     }
 }
@@ -89,6 +142,11 @@ impl Settings {
                 ("grid", Some(b)) => s.grid = b,
                 ("pause_on_menu", Some(b)) => s.pause_on_menu = b,
                 ("pause_on_ready", Some(b)) => s.pause_on_ready = b,
+                ("auto_pause", _) => {
+                    if let Some(a) = AutoPause::ALL.into_iter().find(|a| a.key() == v) {
+                        s.auto_pause = a;
+                    }
+                }
                 ("fps_cap", _) => {
                     if let Ok(n) = v.parse::<u32>()
                         && FPS_CAPS.contains(&n)
@@ -112,7 +170,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Tanks options (written by the OPTIONS screen)\n\
-             fullscreen = {}\nfps_cap = {}\nttf_font = {}\npan_speed = {}\nedge_pan = {}\ncontours = {}\ngrid = {}\npause_on_menu = {}\npause_on_ready = {}\n",
+             fullscreen = {}\nfps_cap = {}\nttf_font = {}\npan_speed = {}\nedge_pan = {}\ncontours = {}\ngrid = {}\npause_on_menu = {}\npause_on_ready = {}\nauto_pause = {}\n",
             on_off(self.fullscreen),
             self.fps_cap,
             on_off(self.ttf_font),
@@ -122,6 +180,7 @@ impl Settings {
             on_off(self.grid),
             on_off(self.pause_on_menu),
             on_off(self.pause_on_ready),
+            self.auto_pause.key(),
         )
     }
 
@@ -152,6 +211,14 @@ mod tests {
     fn round_trip() {
         let s = Settings { fullscreen: true, fps_cap: 0, edge_pan: true, grid: false, ..Settings::default() };
         assert_eq!(Settings::parse(&s.to_text()), s);
+    }
+
+    #[test]
+    fn auto_pause_round_trips_and_cycles() {
+        let s = Settings { auto_pause: AutoPause::ContactLoss, ..Settings::default() };
+        assert_eq!(Settings::parse(&s.to_text()).auto_pause, AutoPause::ContactLoss);
+        assert_eq!(AutoPause::All.next(), AutoPause::Off);
+        assert!(AutoPause::All.on_fire() && !AutoPause::Contact.on_loss() && AutoPause::Contact.on_contact());
     }
 
     #[test]

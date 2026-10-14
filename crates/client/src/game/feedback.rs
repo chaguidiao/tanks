@@ -68,7 +68,8 @@ impl Game {
             Tool::None => None,
         };
         if let Some(t) = tool {
-            return t;
+            let kb = !matches!(self.tool, Tool::Viewshed);
+            return if kb { format!("{t} · CTRL+ARROWS CURSOR · CTRL+SPACE PLACE") } else { t };
         }
         let cp_no = |id: u16| self.shown_plan().and_then(|(_, pl, ..)| pl.index_of(id)).map_or(0, |i| i + 1);
         let who = self.addressee().map(|to| self.addressee_cs(to));

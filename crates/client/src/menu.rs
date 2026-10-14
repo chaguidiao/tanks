@@ -9,7 +9,7 @@ use terrain::{Grid, Heightfield};
 use crate::format;
 use crate::hud::{self, Button, Look, Rect};
 use crate::mapscreen::ScreenAction;
-use crate::render::{Frame, Input, Key, P2, Rgba};
+use crate::render::{Frame, Input, Key, P2, Rgba, Tex};
 use crate::settings::Settings;
 use crate::style;
 
@@ -24,6 +24,7 @@ pub enum Opt {
     Grid,
     PauseOnMenu,
     PauseOnReady,
+    AutoPause,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,6 +128,76 @@ pub fn nav(buttons: &mut [Button<MenuAction>], focus: &mut Option<usize>, inp: &
         b.focused = Some(k) == *focus;
     }
     if inp.hit(Key::Enter) { focus.map(|f| buttons[f].action) } else { None }
+}
+
+// ---------------------------------------------------------------- map previews
+
+/// Small relief images of maps already on disk, made on first use. A map not yet generated has
+/// none (a preview would mean generating it).
+#[derive(Default)]
+pub struct Previews {
+    cache: std::collections::BTreeMap<String, Option<Tex>>,
+}
+
+impl Previews {
+    const MAX_PX: usize = 256;
+
+    /// Build the preview of `id` if it has not been tried yet (needs the window, so it runs
+    /// in the update step, not while drawing).
+    pub fn ensure(&mut self, gfx: &mut crate::render::Gfx, data_dir: &std::path::Path, id: &str) {
+        if !self.cache.contains_key(id) {
+            let tex = Self::render(data_dir, id).map(|(w, h, px)| gfx.texture(w, h, &px));
+            self.cache.insert(id.to_owned(), tex);
+        }
+    }
+
+    /// Forget everything (a map may have been edited or generated since).
+    pub fn clear(&mut self) {
+        self.cache.clear();
+    }
+
+    fn render(data_dir: &std::path::Path, id: &str) -> Option<(usize, usize, Vec<u8>)> {
+        let dir = terragen::workflow::map_dir(data_dir, id);
+        if !dir.join("map.toml").exists() {
+            return None;
+        }
+        let hf = terrain::package::AuthoringPackage::load(&dir).ok()?.edited_elevation();
+        let tint = terrain::shade::elevation_tint(&hf);
+        let shade = terrain::shade::hillshade(&hf);
+        let (w, h) = (hf.z.w, hf.z.h);
+        let step = w.max(h).div_ceil(Self::MAX_PX).max(1);
+        let (ow, oh) = (w / step, h / step);
+        let mut out = vec![255u8; ow * oh * 4];
+        for y in 0..oh {
+            for x in 0..ow {
+                let (a, b) = ((y * step * w + x * step) * 4, (y * ow + x) * 4);
+                let sh = shade[a] as f32 / 200.0;
+                for c in 0..3 {
+                    out[b + c] = (tint[a + c] as f32 * sh).min(255.0) as u8;
+                }
+            }
+        }
+        Some((ow, oh, out))
+    }
+
+    /// Draw the preview (or a placeholder) in a square at `r`, with a frame.
+    fn draw(&self, f: &mut Frame, id: &str, r: Rect) {
+        match self.cache.get(id).and_then(Option::as_ref) {
+            Some(t) => {
+                let side = r.w.min(r.h);
+                let (tw, th) = (t.w as f32, t.h as f32);
+                let k = (side / tw).min(side / th);
+                let (w, h) = (tw * k, th * k);
+                f.texture(t, r.x, r.y, w, h, Rgba(255, 255, 255, 255));
+                f.rect_lines(r.x, r.y, w, h, style::PANEL_EDGE);
+            }
+            None => {
+                f.rect_lines(r.x, r.y, r.w, r.h, style::PANEL_EDGE);
+                f.text("NO PREVIEW", r.x + 12.0, r.y + 12.0, style::FONT_S, style::TEXT_OFF);
+                f.text("MAP NOT GENERATED", r.x + 12.0, r.y + 32.0, style::FONT_S, style::TEXT_OFF);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------- backdrop
@@ -377,7 +448,7 @@ impl ScenarioList {
         list_buttons(screen, rows, self.sel, go, ok)
     }
 
-    pub fn draw(&self, f: &mut Frame, bd: &Backdrop, screen: P2) {
+    pub fn draw(&self, f: &mut Frame, bd: &Backdrop, screen: P2, pv: &Previews) {
         bd.draw(f, screen);
         let (t, sub) = match self.purpose {
             Purpose::Play => ("SELECT SCENARIO", "YOU COMMAND THE FIRST SIDE; THE OTHER IS THE COMPUTER"),
@@ -474,8 +545,13 @@ impl ScenarioList {
         y += 16.0;
         f.text("BRIEFING", x, y, style::FONT, style::TEXT_DIM);
         y += 22.0;
+        let side = (d.y + d.h - 24.0 - y).clamp(0.0, 300.0);
+        if side > 120.0 {
+            pv.draw(f, &def.map.id, Rect::new(x + w - side, y, side, side));
+        }
         let text = def.briefing.as_deref().unwrap_or("NO BRIEFING. SEE THE SCENARIO FILE FOR NOTES.");
-        for l in wrap(f, text, style::FONT_S, w) {
+        let bw = if side > 120.0 { w - side - 20.0 } else { w };
+        for l in wrap(f, text, style::FONT_S, bw) {
             if y > d.y + d.h - 24.0 {
                 break;
             }
@@ -495,7 +571,7 @@ impl MapList {
         list_buttons(screen, rows, self.sel, "EDIT MAP", !self.entries.is_empty())
     }
 
-    pub fn draw(&self, f: &mut Frame, bd: &Backdrop, screen: P2) {
+    pub fn draw(&self, f: &mut Frame, bd: &Backdrop, screen: P2, pv: &Previews) {
         bd.draw(f, screen);
         heading(
             f,
@@ -513,6 +589,9 @@ impl MapList {
         let (x, mut y) = (d.x + 20.0, d.y + 18.0);
         f.text(&format!("MAP {}", e.map.id.to_uppercase()), x, y, style::FONT_L, style::AMBER);
         y += 44.0;
+        let side = 300.0f32.min(d.h - 60.0).min(d.w * 0.4);
+        pv.draw(f, &e.map.id, Rect::new(d.x + d.w - side - 20.0, d.y + 18.0, side, side));
+        let tw = d.w - side - 220.0;
         let used = if e.used_by.is_empty() { "NO SCENARIO".to_owned() } else { e.used_by.join(", ").to_uppercase() };
         for (k, v) in [
             ("RECIPE", e.map.recipe.to_uppercase()),
@@ -522,7 +601,7 @@ impl MapList {
             ("USED BY", used),
         ] {
             f.text(k, x, y, style::FONT_S, style::TEXT_DIM);
-            for (n, l) in wrap(f, &v, style::FONT_S, d.w - 160.0).iter().enumerate() {
+            for (n, l) in wrap(f, &v, style::FONT_S, tw).iter().enumerate() {
                 f.text(l, x + 120.0, y + n as f32 * 20.0, style::FONT_S, style::TEXT);
                 if n > 0 {
                     y += 20.0;
@@ -535,7 +614,7 @@ impl MapList {
             f,
             "EDITS CHANGE THE AUTHORING PACKAGE (DATA/MAPS/<ID>); SAVING ALSO WRITES THE BAKE. EVERY SCENARIO ON THIS MAP USES THE SAVED GROUND THE NEXT TIME IT STARTS.",
             style::FONT_S,
-            d.w - 40.0,
+            d.w - 40.0 - if y < d.y + side + 30.0 { side + 20.0 } else { 0.0 },
         ) {
             f.text(&l, x, y, style::FONT_S, style::TEXT_DIM);
             y += 20.0;
@@ -584,9 +663,9 @@ pub fn draw_loading(
 // ---------------------------------------------------------------- overlays
 
 pub fn options_buttons(screen: P2, s: &Settings) -> Vec<Button<MenuAction>> {
-    let r = modal(screen, 600.0, 611.0);
+    let r = modal(screen, 600.0, 661.0);
     let on = |b: bool| if b { "ON" } else { "OFF" }.to_owned();
-    let rows: [(&str, String, Opt, &str); 9] = [
+    let rows: [(&str, String, Opt, &str); 10] = [
         (
             "DISPLAY",
             if s.fullscreen { "FULLSCREEN".into() } else { "WINDOW".into() },
@@ -616,6 +695,12 @@ pub fn options_buttons(screen: P2, s: &Settings) -> Vec<Button<MenuAction>> {
             Opt::PauseOnReady,
             "THE CLOCK STOPS WHEN EVERY PLATOON WAITING ON A CODE WORD REPORTS SET",
         ),
+        (
+            "AUTO-PAUSE",
+            s.auto_pause.label().into(),
+            Opt::AutoPause,
+            "THE CLOCK STOPS ON A NEW CONTACT, AND OPTIONALLY ON A VEHICLE LOST OR INDIRECT FIRE",
+        ),
     ];
     let mut out: Vec<Button<MenuAction>> = rows
         .into_iter()
@@ -638,7 +723,7 @@ pub fn options_buttons(screen: P2, s: &Settings) -> Vec<Button<MenuAction>> {
 }
 
 pub fn draw_options(f: &mut Frame, screen: P2, note: &str) {
-    let r = modal(screen, 600.0, 611.0);
+    let r = modal(screen, 600.0, 661.0);
     f.rect(0.0, 0.0, screen[0], screen[1], Rgba(0, 0, 0, 120));
     panel(f, r);
     f.text("OPTIONS", r.x + 20.0, r.y + 20.0, style::FONT_L, style::AMBER);

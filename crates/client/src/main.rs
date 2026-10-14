@@ -225,6 +225,7 @@ struct Loading {
 struct App {
     // Screens hold textures: declared before `gfx` so they are dropped before the window.
     screen: Screen,
+    previews: menu::Previews,
     /// A game left for the main menu (RESUME).
     suspended: Option<Box<MapScreen>>,
     overlay: Option<Overlay>,
@@ -323,6 +324,7 @@ fn run() -> Result<(), String> {
         persist: !shot,
         status: String::new(),
         data_dir,
+        previews: menu::Previews::default(),
         ds,
         font_path,
         t: 0.0,
@@ -497,6 +499,9 @@ impl App {
     }
 
     fn go(&mut self, s: Screen) {
+        if matches!(s, Screen::Scenarios(_) | Screen::Maps(_)) {
+            self.previews.clear();
+        }
         self.screen = s;
         self.focus = None;
         self.help = false;
@@ -514,6 +519,7 @@ impl App {
             Opt::Grid => s.grid = !s.grid,
             Opt::PauseOnMenu => s.pause_on_menu = !s.pause_on_menu,
             Opt::PauseOnReady => s.pause_on_ready = !s.pause_on_ready,
+            Opt::AutoPause => s.auto_pause = s.auto_pause.next(),
         }
         self.settings_changed();
     }
@@ -614,6 +620,14 @@ impl App {
         if let Screen::Map(ms) = &mut self.screen {
             ms.ensure_view(&mut self.gfx, &self.ds);
         }
+        let preview_of = match &self.screen {
+            Screen::Scenarios(l) => l.entries.get(l.sel).and_then(|e| e.def.as_ref().ok()).map(|d| d.map.id.clone()),
+            Screen::Maps(l) => l.entries.get(l.sel).map(|e| e.map.id.clone()),
+            _ => None,
+        };
+        if let Some(id) = preview_of {
+            self.previews.ensure(&mut self.gfx, &self.data_dir, &id);
+        }
         self.last_input = inp;
         self.draw();
         Ok(())
@@ -646,7 +660,11 @@ impl App {
             }
             (Overlay::Pause, Some(MenuAction::Database)) => {
                 self.overlay = None;
-                self.database = Some(database::Database::new(true));
+                let mut db = database::Database::new(true);
+                if let Screen::Map(ms) = &mut self.screen {
+                    db.year = ms.game_mut().map(|g| g.scenario.date.0);
+                }
+                self.database = Some(db);
             }
             (Overlay::Pause, Some(MenuAction::Help)) => {
                 self.overlay = None;
@@ -828,6 +846,7 @@ impl App {
         let inp = &self.last_input;
         let (screen, mouse) = (inp.screen, inp.mouse);
         let (bd, t, ds) = (&self.backdrop, self.t, &self.ds);
+        let previews = &self.previews;
         let (sc, overlay, help, settings, status) =
             (&self.screen, self.overlay, self.help, &self.settings, &self.status);
         let suspended = self.suspended.as_ref().map(|s| s.title());
@@ -856,11 +875,11 @@ impl App {
                     }
                 }
                 Screen::Scenarios(l) => {
-                    l.draw(f, bd, screen);
+                    l.draw(f, bd, screen, previews);
                     menu::draw_buttons(f, &l.buttons(screen), mouse, screen);
                 }
                 Screen::Maps(l) => {
-                    l.draw(f, bd, screen);
+                    l.draw(f, bd, screen, previews);
                     menu::draw_buttons(f, &l.buttons(screen), mouse, screen);
                 }
                 Screen::Loading(ld) => {

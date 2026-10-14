@@ -333,6 +333,7 @@ impl MapScreen {
                 "POSTURE  F FORMATION  T TECHNIQUE  S SPEED  W WEAPONS  C ON CONTACT  Q AMMO  E ENGINE SMOKE (LISTS: 1-9 OR ENTER)",
                 "         WITH A CHECKPOINT SELECTED A POSTURE PICK SETS THAT LEG; OTHERWISE IT ORDERS THE SELECTION NOW",
                 "PLAN     P CHECKPOINT PLAN: LMB ADDS CPS, DRAG A CP, RMB A CP / LEG FOR ITS SETTINGS   , . PREV / NEXT CP   DEL",
+                "KEYBOARD CTRL+ARROWS MOVE A CURSOR (SHIFT: 500 M) WHILE A PLACEMENT TOOL IS ACTIVE, CTRL+SPACE PLACES IT",
                 "DRAFT    ENTER SEND   ESC STEPS BACK (A DRAFT WAITS)   CTRL+Z / CTRL+Y UNDO / REDO   CTRL+1-9 CODE WORD",
                 "FIRES    N SMOKE ROUND  Y CALL FIRE  J ADJUST FIRE   K TIMING OF THE NEXT ORDER   V VIEWSHED  L LINE OF SIGHT",
                 "STAFF    G GRAPHICS LIST (PHASE LINE / OBJECTIVE / TRP)   SPACE PAUSE  1-4 SPEED   ENTER EXECUTE (PLANNING)",
@@ -482,6 +483,7 @@ impl MapScreen {
         if let Mode::Game { game, .. } = &mut self.mode {
             game.pause_on_menu = ctx.settings.pause_on_menu;
             game.pause_on_ready = ctx.settings.pause_on_ready;
+            game.auto_pause = ctx.settings.auto_pause;
             if game.menu_frames(inp.screen).iter().any(|r| r.contains(inp.mouse)) {
                 screen_buttons.clear();
                 game_buttons.clear();
@@ -603,7 +605,7 @@ impl MapScreen {
         for (k, d) in
             [(Key::Left, [pan, 0.0]), (Key::Right, [-pan, 0.0]), (Key::Up, [0.0, pan]), (Key::Down, [0.0, -pan])]
         {
-            if inp.down(k) {
+            if inp.down(k) && !inp.ctrl {
                 self.cam.pan_px(d);
             }
         }

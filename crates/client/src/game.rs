@@ -31,6 +31,7 @@ mod ctx;
 mod feedback;
 mod planedit;
 mod posture;
+mod refs;
 use ctx::{MenuTarget, Rmb};
 use planedit::{EtaCache, Pick, PlanDraft};
 use posture::{Posture, Scope};
@@ -221,6 +222,8 @@ pub struct Game {
     pub also_of: Option<PlatoonId>,
     /// Screen position where a left-button drag started (box selection).
     drag: Option<P2>,
+    /// Keyboard cursor for placing points without the mouse (CTRL+ARROWS move, CTRL+SPACE places).
+    reticle: Option<[f64; 2]>,
     /// Control groups 1..9 (Ctrl+Shift+N sets, Shift+N recalls): platoons, primary first.
     groups: Vec<Vec<PlatoonId>>,
     pub sel_unit: Option<EntityId>,
@@ -253,6 +256,8 @@ pub struct Game {
     pub pause_on_menu: bool,
     /// Option: the clock stops when every platoon waiting on a code word reports set.
     pub pause_on_ready: bool,
+    /// Option: events that stop the clock.
+    pub auto_pause: crate::settings::AutoPause,
     /// Code words whose platoons were all set at the last check.
     ready_words: Vec<u8>,
     acc: f64,
@@ -309,6 +314,7 @@ impl Game {
             also: Vec::new(),
             also_of: None,
             drag: None,
+            reticle: None,
             groups: vec![Vec::new(); 9],
             sel_unit: None,
             paused: true,
@@ -328,6 +334,7 @@ impl Game {
             menu_target_id: MenuTarget::Ground,
             pause_on_menu: true,
             pause_on_ready: false,
+            auto_pause: crate::settings::AutoPause::Off,
             ready_words: Vec::new(),
             acc: 0.0,
             prev: Vec::new(),
@@ -641,6 +648,22 @@ impl Game {
                 self.paused = true;
             }
             self.radio(t);
+            if self.auto_pause_for(e) && !self.planning {
+                self.paused = true;
+            }
+        }
+    }
+
+    /// Whether this event is one the AUTO-PAUSE option stops the clock for.
+    fn auto_pause_for(&self, e: &Event) -> bool {
+        let ap = self.auto_pause;
+        match e {
+            Event::SpotReport { side, new: true, .. } => *side == self.side && ap.on_contact(),
+            Event::Hit { kill: Some(KillKind::Catastrophic), .. } => ap.on_loss(),
+            Event::PlatoonReport { side, report: PlatoonReport::IndirectFire { .. }, .. } => {
+                *side == self.side && ap.on_fire()
+            }
+            _ => false,
         }
     }
 
@@ -701,7 +724,7 @@ impl Game {
                 a.push(GameAction::Cmd(c));
             }
         }
-        if inp.hit(Key::Space) {
+        if inp.hit(Key::Space) && !inp.ctrl {
             a.push(GameAction::Pause);
         }
         if inp.hit(Key::Char('i')) {
@@ -721,7 +744,56 @@ impl Game {
         a
     }
 
+    /// Keyboard placement: while a tool waits for a map point, CTRL+ARROWS move a cursor (100 m,
+    /// SHIFT 500 m) and CTRL+SPACE is a left click on it. The click goes through the same
+    /// path as the mouse by handing `update_inner` an input with the mouse on the cursor.
+    fn keyboard_click(&mut self, inp: &Input, cam: &Camera) -> Option<(Input, Option<[f64; 2]>)> {
+        let waiting = !matches!(self.tool, Tool::None | Tool::Viewshed);
+        if !waiting || !inp.ctrl {
+            if !waiting {
+                self.reticle = None;
+            }
+            return None;
+        }
+        let step = if inp.shift { 500.0 } else { 100.0 };
+        let d = [
+            f64::from(i8::from(inp.hit(Key::Right)) - i8::from(inp.hit(Key::Left))),
+            f64::from(i8::from(inp.hit(Key::Up)) - i8::from(inp.hit(Key::Down))),
+        ];
+        let place = inp.hit(Key::Space);
+        if d == [0.0, 0.0] && !place {
+            return None;
+        }
+        let at = self.reticle.or_else(|| self.selection_centre()).unwrap_or(cam.centre);
+        let (w, h) = (self.sim.map().manifest.width_m(), self.sim.map().manifest.height_m());
+        let at = [(at[0] + d[0] * step).clamp(0.0, w), (at[1] + d[1] * step).clamp(0.0, h)];
+        self.reticle = Some(at);
+        let mut quiet = inp.clone();
+        quiet.pressed.retain(|k| !matches!(k, Key::Left | Key::Right | Key::Up | Key::Down | Key::Space));
+        if !place {
+            let s = cam.to_screen(at);
+            let off = s[0] < 60.0 || s[1] < 60.0 || s[0] > inp.screen[0] - 60.0 || s[1] > inp.screen[1] - 60.0;
+            return Some((quiet, off.then_some(at)));
+        }
+        quiet.mouse = cam.to_screen(at);
+        quiet.left_pressed = true;
+        quiet.left_down = true;
+        quiet.ctrl = false;
+        Some((quiet, None))
+    }
+
     pub fn update(&mut self, inp: &Input, cam: &Camera, over_ui: bool, clicked: Option<GameAction>) -> GameFx {
+        match self.keyboard_click(inp, cam) {
+            Some((k, centre)) => {
+                let mut fx = self.update_inner(&k, cam, false, clicked);
+                fx.center_on = fx.center_on.or(centre);
+                fx
+            }
+            None => self.update_inner(inp, cam, over_ui, clicked),
+        }
+    }
+
+    fn update_inner(&mut self, inp: &Input, cam: &Camera, over_ui: bool, clicked: Option<GameAction>) -> GameFx {
         let mut fx = GameFx::default();
         self.shift_held = inp.shift;
         if inp.hit(Key::F(8)) || clicked == Some(GameAction::Aar) {
@@ -1850,6 +1922,13 @@ impl Game {
                 (a[1] - mouse[1]).abs(),
                 style::SELECT,
             );
+        }
+        if let Some(r) = self.reticle
+            && !matches!(self.tool, Tool::None | Tool::Viewshed)
+        {
+            let p = cam.to_screen(r);
+            f.line([p[0] - 12.0, p[1]], [p[0] + 12.0, p[1]], 1.0, style::TEXT);
+            f.line([p[0], p[1] - 12.0], [p[0], p[1] + 12.0], 1.0, style::TEXT);
         }
         match &self.tool {
             Tool::Move => {
@@ -2988,8 +3067,9 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
             };
             let dir = format::mils(ai::drive::bearing(r.pos, c.pos));
             let head = if *new { "CONTACT" } else { "UPDATE" };
+            let rel = refs::relative_to_picture(pic, c.pos).map_or(String::new(), |t| format!(" {t}."));
             format!(
-                "{}: {head}, {what}, GRID {}, DIRECTION {dir}, {}.",
+                "{}: {head}, {what}, GRID {}, DIRECTION {dir}, {}.{rel}",
                 r.callsign,
                 format::grid(c.pos),
                 format::distance(*range_m)
@@ -3030,17 +3110,19 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                     format::mils(*facing)
                 ),
                 PlatoonReport::Contact { at, toward } => format!(
-                    "{cs}: CONTACT, DIRECTION {}, {}. ACTION, ENGAGING.",
+                    "{cs}: CONTACT, DIRECTION {}, {}.{} ACTION, ENGAGING.",
                     format::mils(ai::drive::bearing(*at, *toward)),
-                    format::distance(((toward[0] - at[0]).powi(2) + (toward[1] - at[1]).powi(2)).sqrt())
+                    format::distance(((toward[0] - at[0]).powi(2) + (toward[1] - at[1]).powi(2)).sqrt()),
+                    refs::relative_to_picture(pic, *toward).map_or(String::new(), |t| format!(" {t}."))
                 ),
                 PlatoonReport::BreakingContact { threat } => {
                     format!("{cs}: BREAKING CONTACT, THREAT GRID {}. SMOKE, WITHDRAWING.", format::grid(*threat))
                 }
                 PlatoonReport::ContinuingMission => format!("{cs}: CONTACT LOST. CONTINUING MISSION."),
                 PlatoonReport::IndirectFire { at, clearing } => format!(
-                    "{cs}: INDIRECT FIRE, GRID {}. {}.",
+                    "{cs}: INDIRECT FIRE, GRID {}.{} {}.",
                     format::grid(*at),
+                    refs::relative_to_picture(pic, *at).map_or(String::new(), |t| format!(" {t}.")),
                     if *clearing { "CLEARING IMPACT AREA" } else { "BUTTONED UP, HOLDING" }
                 ),
                 PlatoonReport::AtCheckpoint { n, waiting: true } => {
