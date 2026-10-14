@@ -936,8 +936,18 @@ fn script(g: &mut Game, o: &Opts) -> Result<(), String> {
     }
     // `--select <platoon> --press F,W,T,H,S`: command-card keys, before `--advance`.
     // `--select <platoon or vehicle callsign>`.
-    if let Some(cs) = &o.select {
+    // `--select 1+2` selects platoon 1 and adds 2 (Shift+click).
+    if let Some(sel) = &o.select {
+        let mut names = sel.split('+');
+        let cs = names.next().unwrap_or("").to_string();
+        let cs = &cs;
+        for extra in names {
+            if let Some(p) = g.picture().platoons.iter().find(|p| p.callsign == extra).map(|p| p.id) {
+                g.add_follower(p);
+            }
+        }
         g.sel_platoon = g.picture().platoons.iter().find(|p| &p.callsign == cs).map(|p| p.id);
+        g.also_of = g.sel_platoon;
         g.sel_unit = match g.sel_platoon {
             Some(p) => g.picture().platoon(p).and_then(|v| v.members.first().copied()),
             None => g.picture().own.iter().find(|u| &u.callsign == cs).map(|u| u.id),

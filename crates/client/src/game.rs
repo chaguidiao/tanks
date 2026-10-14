@@ -205,6 +205,10 @@ pub struct Game {
     pub scenario: ScenarioDef,
     pub side: SideId,
     pub sel_platoon: Option<PlatoonId>,
+    /// Platoons added with Shift+click; they follow the orders given to `sel_platoon`, and count
+    /// only while `also_of` is still the selected platoon.
+    also: Vec<PlatoonId>,
+    pub also_of: Option<PlatoonId>,
     pub sel_unit: Option<EntityId>,
     pub paused: bool,
     pub speed: usize,
@@ -268,6 +272,8 @@ impl Game {
             scenario,
             side: SideId(0),
             sel_platoon: None,
+            also: Vec::new(),
+            also_of: None,
             sel_unit: None,
             paused: true,
             speed: 0,
@@ -446,7 +452,70 @@ impl Game {
     }
 
     /// Issue an order according to the planning phase and the current order mode.
+    pub fn add_follower(&mut self, p: PlatoonId) {
+        self.also.push(p);
+    }
+
+    /// Platoons that follow the primary selection's orders.
+    fn followers(&self) -> Vec<PlatoonId> {
+        if self.also_of.is_some() && self.also_of == self.sel_platoon {
+            self.also.iter().copied().filter(|p| self.picture().platoon(*p).is_some()).collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The same order for another platoon of a multi-selection. Destinations keep the platoons'
+    /// current offset from the primary, so they move as a group instead of piling onto one point.
+    fn for_follower(cmd: &Command, primary: PlatoonId, p: PlatoonId, off: [f64; 2]) -> Option<Command> {
+        let shift = |v: [f64; 2]| [v[0] + off[0], v[1] + off[1]];
+        let mut c = cmd.clone();
+        match &mut c {
+            Command::PlatoonMove { platoon, destination, via, .. } if *platoon == primary => {
+                *platoon = p;
+                *destination = shift(*destination);
+                via.iter_mut().for_each(|v| *v = shift(*v));
+            }
+            Command::OccupyPosition { platoon, centre, .. } if *platoon == primary => {
+                *platoon = p;
+                *centre = shift(*centre);
+            }
+            Command::SetFormation { platoon, .. } | Command::BreakContact { platoon } if *platoon == primary => {
+                *platoon = p;
+            }
+            Command::SetContactReaction { platoon, .. } if *platoon == primary => *platoon = p,
+            Command::Halt { to }
+            | Command::Resume { to }
+            | Command::SetSpeed { to, .. }
+            | Command::WeaponsControl { to, .. }
+            | Command::Smoke { to, .. }
+            | Command::SelectAmmo { to, .. }
+                if *to == Addressee::Platoon(primary) =>
+            {
+                *to = Addressee::Platoon(p);
+            }
+            _ => return None,
+        }
+        Some(c)
+    }
+
     pub fn order(&mut self, cmd: Command) {
+        if let Some(primary) = self.sel_platoon {
+            let centre = self.platoon_centre(primary);
+            for p in self.followers() {
+                let off = match (centre, self.platoon_centre(p)) {
+                    (Some(a), Some(b)) => [b[0] - a[0], b[1] - a[1]],
+                    _ => [0.0, 0.0],
+                };
+                if let Some(c) = Self::for_follower(&cmd, primary, p, off) {
+                    self.order_one(c);
+                }
+            }
+        }
+        self.order_one(cmd);
+    }
+
+    fn order_one(&mut self, cmd: Command) {
         if self.planning && self.order_mode == OrderMode::Now {
             self.sim.submit_immediate(self.side, cmd);
             return;
@@ -633,7 +702,7 @@ impl Game {
         if self.plan_mouse(inp, cam, over_ui) {
         } else if !over_ui && inp.left_pressed {
             match self.tool.clone() {
-                Tool::None => self.select(cam, inp.mouse, inp.ctrl),
+                Tool::None => self.select(cam, inp.mouse, inp.ctrl, inp.shift),
                 Tool::PlanCp => self.plan_add_cp(world),
                 Tool::PlanPick { id, release, pick } => {
                     self.plan_pick(id, release, pick, world);
@@ -1330,7 +1399,7 @@ impl Game {
         });
     }
 
-    fn select(&mut self, cam: &Camera, s: P2, single: bool) {
+    fn select(&mut self, cam: &Camera, s: P2, single: bool, add: bool) {
         let hit = self
             .picture()
             .own
@@ -1342,6 +1411,15 @@ impl Game {
             .filter(|(_, _, d)| *d < 18.0 * 18.0)
             .min_by(|a, b| a.2.total_cmp(&b.2));
         match hit {
+            Some((_, Some(p), _)) if add && !single && self.sel_platoon.is_some_and(|prim| prim != p) => {
+                self.also_of = self.sel_platoon;
+                match self.also.iter().position(|a| *a == p) {
+                    Some(i) => {
+                        self.also.remove(i);
+                    }
+                    None => self.also.push(p),
+                }
+            }
             Some((id, p, _)) => {
                 self.sel_unit = Some(id);
                 self.sel_platoon = if single { None } else { p };
@@ -1586,6 +1664,7 @@ impl Game {
                 }
                 continue;
             }
+            let followers = self.followers();
             let (pos, hdg) = self.interp(u.id, u.pos, u.heading);
             let p = cam.to_screen(pos);
             if cam.mpp < 0.6 {
@@ -1601,7 +1680,9 @@ impl Game {
                 symbols::heading_staff(f, p, hdg, 14.0, style::FRIENDLY);
             }
             f.text(&u.callsign, p[0] + 16.0, p[1] - 5.0, style::FONT, style::FRIENDLY);
-            let selected = self.sel_unit == Some(u.id) || (self.sel_platoon.is_some() && u.platoon == self.sel_platoon);
+            let selected = self.sel_unit == Some(u.id)
+                || (self.sel_platoon.is_some() && u.platoon == self.sel_platoon)
+                || u.platoon.is_some_and(|p| followers.contains(&p));
             if selected {
                 symbols::selection(f, p);
             }
@@ -2482,7 +2563,13 @@ impl Game {
         let cr = hud::card_frame(screen);
         hud::panel(f, cr);
         let title = match (self.sel_platoon, self.sel_unit) {
-            (Some(p), _) => format!("ORDERS: PLATOON {}", self.platoon_cs(p)),
+            (Some(p), _) => {
+                let mut t = format!("ORDERS: PLATOON {}", self.platoon_cs(p));
+                for a in self.followers() {
+                    t.push_str(&format!(" + {}", self.platoon_cs(a)));
+                }
+                t
+            }
             (None, Some(u)) => format!("ORDERS: {}", self.picture().unit(u).map_or("?".into(), |u| u.callsign.clone())),
             _ => "ORDERS: NO SELECTION".into(),
         };

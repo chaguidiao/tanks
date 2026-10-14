@@ -406,7 +406,7 @@ impl Game {
             .map(|l| l.id)
     }
 
-    fn platoon_centre(&self, p: PlatoonId) -> Option<[f64; 2]> {
+    pub(super) fn platoon_centre(&self, p: PlatoonId) -> Option<[f64; 2]> {
         let pic = self.picture();
         let ps: Vec<[f64; 2]> = pic
             .platoon(p)?
