@@ -70,6 +70,8 @@ pub struct Platoon {
     /// Step ids passed by the plan that last ran to its end.
     pub finished: Vec<u16>,
     pub contact_reaction: ContactReaction,
+    /// Orders to carry out in turn once the current task is finished.
+    pub queue: Vec<crate::command::Command>,
 }
 
 impl PlatoonOrder {
@@ -189,6 +191,24 @@ impl Platoon {
             speed_limit: self.speed_limit,
             plan: self.plan.as_ref().map(|s| s.view()),
             contact_reaction: self.contact_reaction,
+            queued: self.queue.len() as u8,
         }
+    }
+
+    /// Nothing left to do: no move, no battle position being occupied, no plan, not halted with
+    /// an order held, and every vehicle has finished its own order.
+    pub fn is_idle(&self, w: &World) -> bool {
+        let done = match &self.order {
+            PlatoonOrder::None => true,
+            PlatoonOrder::Occupy { reported, .. } => *reported,
+            _ => false,
+        };
+        done && self.held.is_none()
+            && self.plan.is_none()
+            && self
+                .members
+                .iter()
+                .filter(|&&k| w.can_move(k))
+                .all(|&k| w.ai[k].as_ref().is_none_or(|a| a.order == crate::world::Order::Idle))
     }
 }

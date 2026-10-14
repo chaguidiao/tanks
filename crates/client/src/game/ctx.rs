@@ -136,6 +136,7 @@ impl Game {
             item("WEAPONS", "W", Cmd::Weapons, sel),
             item("SMOKE SCREEN", "Z", Cmd::Smoke, sel),
             item("ENGINE SMOKE", "E", Cmd::EngineSmoke, sel),
+            item("REVERSE 100 M", "D", Cmd::Reverse, sel),
             item("AMMUNITION", "Q", Cmd::Ammo, sel),
             item("BREAK CONTACT", "X", Cmd::BreakContact, self.sel_platoon.is_some()),
         ]
@@ -204,6 +205,7 @@ impl Game {
                         ("NOW", OrderMode::Now),
                         ("ON ENEMY CROSSING", OrderMode::OnEnemyCrossing),
                         ("IN 5 MIN", OrderMode::InFiveMinutes),
+                        ("AFTER CURRENT TASK", OrderMode::Queue),
                     ]
                     .into_iter()
                     .map(|(l, m)| MenuItem::new(l, MenuAct::NextOrder(m)).checked(self.order_mode == m))

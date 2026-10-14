@@ -24,8 +24,25 @@ pub fn step(world: &mut World, vehicles: &[VehicleDef], events: &mut Vec<Event>)
             continue;
         }
         let t = &world.transform[k];
+        m.cmd_reverse = matches!(ai.order, Order::Reverse { .. });
         match &mut ai.order {
             Order::Idle => m.cmd_speed = 0.0,
+            Order::Reverse { to } => {
+                let mv = &vehicles[vi].mobility;
+                m.cmd_heading = t.heading;
+                // Behind the hull axis: distance left along the line of travel.
+                let (sh, ch) = (libm::sin(t.heading), libm::cos(t.heading));
+                let left = -((to[0] - t.pos[0]) * sh + (to[1] - t.pos[1]) * ch);
+                let v_max = mv.max_speed_reverse_mps.get();
+                if left <= 1.0 {
+                    m.cmd_speed = 0.0;
+                    ai.order = Order::Idle;
+                    ai.set = true;
+                } else {
+                    // Brake so that the vehicle stops on the point.
+                    m.cmd_speed = v_max.min(libm::sqrt(2.0 * mv.braking_decel_mps2.get() * 0.5 * left));
+                }
+            }
             Order::Face { heading } => {
                 m.cmd_speed = 0.0;
                 m.cmd_heading = *heading;

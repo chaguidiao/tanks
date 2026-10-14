@@ -38,6 +38,9 @@ const MAX_TICKS_PER_FRAME: u32 = 40;
 /// Zoomed out beyond this (m/px), platoons are drawn as one symbol (DESIGN.md §10.1).
 const AGGREGATE_MPP: f64 = 7.0;
 
+/// Distance of the REVERSE order (m).
+const REVERSE_M: f64 = 100.0;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Tool {
     None,
@@ -95,6 +98,8 @@ pub enum OrderMode {
     OnEnemyCrossing,
     /// Execute five minutes from now.
     InFiveMinutes,
+    /// Queue the next order: it starts when the platoon has finished its current task.
+    Queue,
 }
 
 /// Commands on the command card; each also has a hotkey.
@@ -114,6 +119,8 @@ pub enum Cmd {
     SmokeRound,
     CallFire,
     AdjustFire,
+    /// Back up 100 m, hull and gun still facing the same way.
+    Reverse,
     Ammo,
     BreakContact,
     Contingency,
@@ -500,6 +507,7 @@ impl Game {
     }
 
     pub fn order(&mut self, cmd: Command) {
+        let mode = self.order_mode;
         if let Some(primary) = self.sel_platoon {
             let centre = self.platoon_centre(primary);
             for p in self.followers() {
@@ -508,10 +516,12 @@ impl Game {
                     _ => [0.0, 0.0],
                 };
                 if let Some(c) = Self::for_follower(&cmd, primary, p, off) {
+                    self.order_mode = mode;
                     self.order_one(c);
                 }
             }
         }
+        self.order_mode = mode;
         self.order_one(cmd);
     }
 
@@ -536,6 +546,32 @@ impl Game {
                     self.sim.submit(self.side, cmd);
                 }
             },
+            OrderMode::Queue => {
+                let queueable = matches!(
+                    cmd,
+                    Command::PlatoonMove { .. }
+                        | Command::OccupyPosition { .. }
+                        | Command::SetPlan { .. }
+                        | Command::BreakContact { .. }
+                        | Command::Reverse { to: Addressee::Platoon(_), .. }
+                );
+                let platoon = match &cmd {
+                    Command::PlatoonMove { platoon, .. }
+                    | Command::OccupyPosition { platoon, .. }
+                    | Command::SetPlan { platoon, .. }
+                    | Command::BreakContact { platoon } => Some(*platoon),
+                    Command::Reverse { to: Addressee::Platoon(p), .. } => Some(*p),
+                    _ => None,
+                };
+                match platoon {
+                    Some(platoon) if queueable => {
+                        self.sim.submit(self.side, Command::QueueOrder { platoon, then: Box::new(cmd) });
+                        let cs = self.platoon_cs(platoon);
+                        self.radio(format!("TO {cs}: ON COMPLETION OF CURRENT TASK, NEXT ORDER FOLLOWS."));
+                    }
+                    _ => self.sim.submit(self.side, cmd),
+                }
+            }
             OrderMode::InFiveMinutes => {
                 let t = self.sim.time_s() + 300.0;
                 self.sim.submit_immediate(
@@ -618,6 +654,7 @@ impl Game {
             (Key::Char('n'), C::SmokeRound),
             (Key::Char('y'), C::CallFire),
             (Key::Char('j'), C::AdjustFire),
+            (Key::Char('d'), C::Reverse),
             (Key::Char('q'), C::Ammo),
             (Key::Char('x'), C::BreakContact),
             (Key::Char('h'), C::Halt),
@@ -1042,8 +1079,16 @@ impl Game {
                 self.order_mode = match self.order_mode {
                     OrderMode::Now => OrderMode::OnEnemyCrossing,
                     OrderMode::OnEnemyCrossing => OrderMode::InFiveMinutes,
-                    OrderMode::InFiveMinutes => OrderMode::Now,
+                    OrderMode::InFiveMinutes => OrderMode::Queue,
+                    OrderMode::Queue => OrderMode::Now,
                 };
+            }
+            Cmd::Reverse => {
+                if let Some(to) = self.addressee() {
+                    let cs = self.addressee_cs(to);
+                    self.order(Command::Reverse { to, distance_m: REVERSE_M });
+                    self.radio(format!("TO {cs}: REVERSE {} M.", REVERSE_M as u32));
+                }
             }
             Cmd::NextPlatoon => {
                 let ps: Vec<(PlatoonId, Option<EntityId>)> =
@@ -1937,6 +1982,7 @@ impl Game {
                 format!("ON {}", self.last_phase_line().map_or("PL ?".into(), |g| g.label.clone()))
             }
             OrderMode::InFiveMinutes => "AT +5 MIN".into(),
+            OrderMode::Queue => "QUEUE".into(),
         };
         let technique = || {
             b("TECHNIQUE", Cmd::Technique)
@@ -1945,11 +1991,9 @@ impl Game {
                 .tip("MOVEMENT TECHNIQUE FOR THE NEXT MOVE: TRAVELING / TRAVELING OVERWATCH / BOUNDING OVERWATCH")
         };
         let contingency = || {
-            b("TIMING", Cmd::Contingency)
-                .key("K")
-                .value(timing.clone())
-                .active(self.order_mode != OrderMode::Now)
-                .tip("NEXT ORDER: NOW / WHEN ENEMY CROSSES THE LAST PHASE LINE / IN 5 MIN")
+            b("TIMING", Cmd::Contingency).key("K").value(timing.clone()).active(self.order_mode != OrderMode::Now).tip(
+                "NEXT ORDER: NOW / WHEN ENEMY CROSSES THE LAST PHASE LINE / IN 5 MIN / QUEUED AFTER THE CURRENT TASK",
+            )
         };
         if self.plan.is_some() && self.draft.is_empty() {
             return self.plan_card(contingency());
@@ -2172,6 +2216,13 @@ impl Game {
                     .tip("CHECKPOINT PLAN: CPS WITH LEG SETTINGS, ACTIONS, WAITS (CODE WORDS) AND BRANCHES"),
             ),
             (
+                23,
+                b("REVERSE", Cmd::Reverse)
+                    .key("D")
+                    .enabled(sel)
+                    .tip("BACK UP 100 M IN REVERSE, HULL AND GUN STILL FACING THE SAME WAY (OUT OF A POSITION, AWAY FROM A THREAT)"),
+            ),
+            (
                 19,
                 b("BREAK CONT", Cmd::BreakContact)
                     .key("X")
@@ -2205,7 +2256,10 @@ impl Game {
             }
             let types: Vec<String> = types.iter().map(|(n, k)| format!("{k}× {n}")).collect();
             head.push((format!("PLATOON {}   {}", pv.callsign, types.join(", ")), style::FRIENDLY));
-            head.push((pv.task.clone(), style::TEXT));
+            head.push((
+                if pv.queued > 0 { format!("{}   +{} QUEUED", pv.task, pv.queued) } else { pv.task.clone() },
+                style::TEXT,
+            ));
             head.push((
                 format!(
                     "FORM {}   SPEED {}   NEXT {}, {}",
@@ -2474,6 +2528,9 @@ impl Game {
         if w.precipitation_mm_h > 0.0 {
             wx.push_str(&format!("  {:.0} MM/H", w.precipitation_mm_h));
         }
+        if w.traction_factor < 0.9 {
+            wx.push_str("  GOING SOFT");
+        }
         f.text(&wx, 800.0, 10.0, style::FONT_S, style::TEXT_DIM);
 
         let prompt = self.prompt();
@@ -2484,6 +2541,7 @@ impl Game {
                 self.last_phase_line().map_or("(NO PHASE LINE)".into(), |g| g.label.clone())
             ),
             OrderMode::InFiveMinutes => "NEXT ORDER AT +5 MIN".into(),
+            OrderMode::Queue => "NEXT ORDER QUEUED AFTER CURRENT TASK".into(),
         };
         let mut py = TOP_H + 6.0;
         // (The end-of-mission panel is the app's: it carries menu buttons.)

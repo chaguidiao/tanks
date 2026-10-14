@@ -41,6 +41,11 @@ impl Weather {
         Ok(Self { preset, def: scenario.weather.clone(), date: scenario.date })
     }
 
+    /// Going: (traction factor, rolling-resistance factor) applied to every soil.
+    pub fn going(&self) -> (f64, f64) {
+        (self.preset.traction_factor.get(), self.preset.rolling_factor.get())
+    }
+
     pub fn at(&self, clock_s: f64, m: &DetectionModel) -> Atmosphere {
         let day = libm::floor(clock_s / 86_400.0);
         let hour = (clock_s - day * 86_400.0) / 3600.0;
@@ -63,6 +68,7 @@ impl Weather {
             light: atm.light,
             visibility_m: self.preset.visibility_m.get(),
             precipitation_mm_h: self.preset.precipitation_mm_h,
+            traction_factor: self.preset.traction_factor.get(),
             wind_from_deg: self.def.wind_from_deg,
             wind_speed_mps: self.def.wind_speed_mps,
         }

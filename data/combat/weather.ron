@@ -11,6 +11,8 @@
             thermal_extinction_per_m: (value: 0.00005, source: "estimate: dry air, 8-12 um window", confidence: estimate),
             sky_light: (value: 1.0, source: "reference", confidence: high),
             dust_cue: (value: 1.5, source: "estimate: dry ground raises a plume behind a fast vehicle", confidence: estimate),
+            traction_factor: (value: 1.0, source: "estimate", confidence: estimate),
+            rolling_factor: (value: 1.0, source: "estimate: wet soil is softer, tracks sink deeper (Wong ch. 2 bevameter model)", confidence: estimate),
             precipitation_mm_h: 0.0,
         ),
         (
@@ -20,6 +22,8 @@
             thermal_extinction_per_m: (value: 0.0001, source: "estimate: haze particles are small against 8-12 um", confidence: estimate),
             sky_light: (value: 0.9, source: "estimate", confidence: estimate),
             dust_cue: (value: 1.5, source: "estimate", confidence: estimate),
+            traction_factor: (value: 1.0, source: "estimate", confidence: estimate),
+            rolling_factor: (value: 1.0, source: "estimate: wet soil is softer, tracks sink deeper (Wong ch. 2 bevameter model)", confidence: estimate),
             precipitation_mm_h: 0.0,
         ),
         (
@@ -29,6 +33,8 @@
             thermal_extinction_per_m: (value: 0.00008, source: "estimate", confidence: estimate),
             sky_light: (value: 0.5, source: "estimate: cloud cover removes the moon and most of the twilight glow", confidence: estimate),
             dust_cue: (value: 1.2, source: "estimate", confidence: estimate),
+            traction_factor: (value: 1.0, source: "estimate", confidence: estimate),
+            rolling_factor: (value: 1.0, source: "estimate: wet soil is softer, tracks sink deeper (Wong ch. 2 bevameter model)", confidence: estimate),
             precipitation_mm_h: 0.0,
         ),
         (
@@ -38,6 +44,8 @@
             thermal_extinction_per_m: (value: 0.0005, source: "estimate: rain attenuates 8-12 um modestly", confidence: estimate),
             sky_light: (value: 0.6, source: "estimate", confidence: estimate),
             dust_cue: (value: 1.0, source: "estimate: wet ground raises no dust", confidence: estimate),
+            traction_factor: (value: 0.75, source: "estimate: Wong, Theory of Ground Vehicles, ch. 2: cohesion and friction angle of wet soil fall steeply with moisture; about 5 mm/h over a few hours", confidence: estimate),
+            rolling_factor: (value: 1.3, source: "estimate: wet soil is softer, tracks sink deeper (Wong ch. 2 bevameter model)", confidence: estimate),
             precipitation_mm_h: 5.0,
         ),
         (
@@ -47,6 +55,8 @@
             thermal_extinction_per_m: (value: 0.009, source: "estimate: fog droplets are comparable to 8-12 um; thermal range is only mildly better than visual", confidence: estimate),
             sky_light: (value: 0.7, source: "estimate", confidence: estimate),
             dust_cue: (value: 1.0, source: "estimate", confidence: estimate),
+            traction_factor: (value: 0.95, source: "estimate", confidence: estimate),
+            rolling_factor: (value: 1.05, source: "estimate: wet soil is softer, tracks sink deeper (Wong ch. 2 bevameter model)", confidence: estimate),
             precipitation_mm_h: 0.0,
         ),
         (
@@ -56,6 +66,8 @@
             thermal_extinction_per_m: (value: 0.0008, source: "estimate: dust particles are small against 8-12 um, so thermal imagers see through", confidence: estimate),
             sky_light: (value: 0.6, source: "estimate", confidence: estimate),
             dust_cue: (value: 1.0, source: "estimate: the air is already full of dust", confidence: estimate),
+            traction_factor: (value: 1.0, source: "estimate", confidence: estimate),
+            rolling_factor: (value: 1.0, source: "estimate: wet soil is softer, tracks sink deeper (Wong ch. 2 bevameter model)", confidence: estimate),
             precipitation_mm_h: 0.0,
         ),
     ],

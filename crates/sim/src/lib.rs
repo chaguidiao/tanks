@@ -54,6 +54,8 @@ pub const DT: f64 = 1.0 / TICK_HZ as f64;
 pub const VEHICLE_AI_EVERY: u64 = 4;
 /// Platoon AI rate: 1 Hz.
 pub const PLATOON_AI_EVERY: u64 = 20;
+/// Most orders a platoon can have queued.
+const MAX_QUEUE: usize = 6;
 
 /// One seeded ChaCha stream per subsystem (CLAUDE.md rule 2).
 #[derive(Debug, Clone)]
@@ -216,6 +218,7 @@ impl Sim {
                                 plan: None,
                                 finished: Vec::new(),
                                 contact_reaction: Default::default(),
+                                queue: Vec::new(),
                             });
                             platoons.last_mut().expect("pushed")
                         }
@@ -559,6 +562,19 @@ impl Sim {
             }
         }
 
+        // 2b. Order queue: the next queued order starts when the platoon has finished its task.
+        if tick.is_multiple_of(PLATOON_AI_EVERY) {
+            for pi in 0..self.platoons.len() {
+                let p = &self.platoons[pi];
+                if p.queue.is_empty() || !p.is_idle(&self.world) {
+                    continue;
+                }
+                let side = p.side;
+                let cmd = self.platoons[pi].queue.remove(0);
+                self.execute(&TimedCommand { tick, side, cmd, immediate: true, generated: true }, &mut events);
+            }
+        }
+
         // 3. Vehicle AI.
         if tick.is_multiple_of(VEHICLE_AI_EVERY) {
             vehicle::step(&mut self.world, &self.vehicles, &mut events);
@@ -713,7 +729,14 @@ impl Sim {
         self.smoke.step(DT);
 
         // 8. Mobility.
-        mobility::step(&mut self.world, &self.vehicles, &self.map, &self.data.terrain, &mut events);
+        mobility::step(
+            &mut self.world,
+            &self.vehicles,
+            &self.map,
+            &self.data.terrain,
+            self.weather.going(),
+            &mut events,
+        );
 
         // 9. Victory conditions (1 Hz).
         if tick.is_multiple_of(PLATOON_AI_EVERY)
@@ -827,8 +850,77 @@ impl Sim {
         }
     }
 
+    /// Deliver an order. A new direct movement order replaces whatever the platoon had queued.
     fn apply(&mut self, c: &TimedCommand, events: &mut Vec<Event>) {
+        let replaced = match &c.cmd {
+            Command::PlatoonMove { platoon, .. }
+            | Command::OccupyPosition { platoon, .. }
+            | Command::SetPlan { platoon, .. }
+            | Command::BreakContact { platoon } => Some(*platoon),
+            Command::Reverse { to: Addressee::Platoon(p), .. } => Some(*p),
+            Command::Move { unit, .. } => self.world.index_of(*unit).and_then(|k| self.world.platoon[k]),
+            _ => None,
+        };
+        if let Some(pid) = replaced
+            && let Some(p) = self.platoon_mut(c.side, pid)
+        {
+            p.queue.clear();
+        }
+        self.execute(c, events);
+    }
+
+    fn execute(&mut self, c: &TimedCommand, events: &mut Vec<Event>) {
         match &c.cmd {
+            Command::Reverse { to, distance_m } => {
+                for k in self.members(c.side, *to) {
+                    if !self.world.can_move(k) {
+                        continue;
+                    }
+                    let t = &self.world.transform[k];
+                    let (sh, ch) = (libm::sin(t.heading), libm::cos(t.heading));
+                    let at = [t.pos[0] - sh * distance_m, t.pos[1] - ch * distance_m];
+                    if let Some(ai) = self.world.ai[k].as_mut() {
+                        ai.order = world::Order::Reverse { to: at };
+                        ai.held = None;
+                        ai.set = false;
+                        ai.position_note = None;
+                    }
+                    if let Some(m) = self.world.mobility[k].as_mut() {
+                        m.stalled_s = 0.0;
+                    }
+                }
+                match to {
+                    Addressee::Platoon(pid) => {
+                        if let Some(p) = self.platoon_mut(c.side, *pid) {
+                            p.order = platoon::PlatoonOrder::None;
+                            p.plan = None;
+                            p.held = None;
+                            p.withdraw = false;
+                        }
+                    }
+                    Addressee::Unit(u) => {
+                        if let Some(k) = self.world.index_of(*u)
+                            && let Some(pid) = self.world.platoon[k]
+                            && let Some(p) = self.platoon_mut(c.side, pid)
+                        {
+                            p.order = platoon::PlatoonOrder::None;
+                            p.plan = None;
+                        }
+                    }
+                }
+                events.push(Event::OrderReceived { side: c.side, to: *to });
+            }
+            Command::QueueOrder { platoon, then } => {
+                if matches!(**then, Command::QueueOrder { .. }) {
+                    return;
+                }
+                if let Some(p) = self.platoon_mut(c.side, *platoon)
+                    && p.queue.len() < MAX_QUEUE
+                {
+                    p.queue.push((**then).clone());
+                    events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
+                }
+            }
             Command::Move { unit, destination, via, speed_limit_mps } => {
                 let Some(k) = self.world.index_of(*unit) else { return };
                 if self.world.side[k] != c.side || !self.world.can_move(k) {
@@ -1162,6 +1254,10 @@ impl Sim {
         for p in &self.platoons {
             if let Some(st) = &p.plan {
                 st.hash_into(p.id, &mut h);
+            }
+            if !p.queue.is_empty() {
+                h.u32(p.id.0);
+                h.u64(p.queue.len() as u64);
             }
             if p.contact_reaction != ai::picture::ContactReaction::Drill {
                 h.u32(p.id.0);

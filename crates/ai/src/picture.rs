@@ -152,6 +152,8 @@ pub struct PlatoonView {
     /// Step ids reached by the plan that last finished (for `PlatoonAt` synchronisation).
     pub plan_done: Vec<u16>,
     pub contact_reaction: ContactReaction,
+    /// Orders waiting in the queue.
+    pub queued: u8,
 }
 
 /// Control measures (DESIGN.md §8.4; MIL-STD-2525D tactical graphics).
@@ -408,6 +410,8 @@ pub struct WeatherView {
     pub light: f64,
     pub visibility_m: f64,
     pub precipitation_mm_h: f64,
+    /// Soil traction relative to dry going (1 = dry).
+    pub traction_factor: f64,
     pub wind_from_deg: f64,
     pub wind_speed_mps: f64,
 }

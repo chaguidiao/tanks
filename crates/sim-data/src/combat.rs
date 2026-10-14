@@ -58,6 +58,10 @@ pub struct WeatherPreset {
     /// Extra spotting cue for a fast-moving vehicle raising dust (multiplies the moving-target
     /// factor; 1 = none, wet ground or dense air).
     pub dust_cue: Stat<f64>,
+    /// Multiplier on soil traction (wet soil gives less grip; 1 = dry going).
+    pub traction_factor: Stat<f64>,
+    /// Multiplier on soil rolling resistance (wet soil sinks tracks deeper; 1 = dry going).
+    pub rolling_factor: Stat<f64>,
     /// Display only (mm/h).
     pub precipitation_mm_h: f64,
 }

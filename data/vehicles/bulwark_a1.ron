@@ -20,7 +20,7 @@
             notes: "Hydrokinetic transmission plus final drives and track losses; chosen so the power-limited speed on firm ground is near the governed speed."),
         max_speed_road_mps: (value: 18.5, source: "Hunnicutt, Abrams (1990): governed 41.5 mph (66.8 km/h)", confidence: high),
         max_speed_cross_country_mps: (value: 13.4, source: "Hunnicutt, Abrams (1990): 30 mph cross-country", confidence: medium),
-        max_speed_reverse_mps: (value: 11.1, source: "Zaloga, M1 Abrams Main Battle Tank (Osprey)", confidence: medium, notes: "~40 km/h"),
+        max_speed_reverse_mps: (value: 4.9, source: "Zaloga, M1 Abrams Main Battle Tank (Osprey); public sources give about 16-20 km/h", confidence: medium, notes: "Corrected from 11.1 m/s (40 km/h), which is implausible for a reverse gear; reverse driving is now used by the REVERSE order."),
         max_slope: (value: 0.60, source: "Hunnicutt, Abrams (1990): 60% gradient", confidence: high),
         max_side_slope: (value: 0.40, source: "Hunnicutt, Abrams (1990): 40% side slope", confidence: high),
         fording_depth_m: (value: 1.22, source: "Hunnicutt, Abrams (1990): 48 in unprepared", confidence: high),

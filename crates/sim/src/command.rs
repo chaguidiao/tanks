@@ -117,6 +117,20 @@ pub enum Command {
         shift: Vec2,
         volleys: u32,
     },
+    /// Drive backwards `distance_m` along the hull axis without turning (FM 3-20.21 ch. 2:
+    /// reverse out of a firing position keeping the gun on the threat). A single vehicle leaves
+    /// its platoon's task; a platoon's own order ends.
+    Reverse {
+        to: Addressee,
+        distance_m: f64,
+    },
+    /// Order queue: `then` is carried out once the platoon has finished its current task (moved
+    /// to its destination, set in its battle position, finished its plan). One radio order; the
+    /// queued orders run without further delay. Any new direct movement order clears the queue.
+    QueueOrder {
+        platoon: PlatoonId,
+        then: Box<Command>,
+    },
     /// Cease fire: the battery stops firing; rounds already in the air still land.
     CeaseFire {
         battery: u32,

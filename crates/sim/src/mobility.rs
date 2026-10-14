@@ -38,6 +38,7 @@ pub(crate) fn step(
     vehicles: &[VehicleDef],
     map: &BakedMap,
     td: &TerrainData,
+    going: (f64, f64),
     events: &mut Vec<Event>,
 ) {
     let hf = &map.elevation;
@@ -56,7 +57,14 @@ pub(crate) fn step(
         let (i, j) = hf.cell_of(t.pos[0], t.pos[1]);
         let cap = terrain_cap(&class, td, map.landcover.get(i, j), map.water_depth.get(i, j));
         let soil = td.soil(map.soil.get(i, j));
-        let (f_r, mu) = (soil.rolling_resistance.get(), soil.traction_coefficient.get());
+        // Weather changes the going: wet soil grips less and resists more (Wong ch. 2).
+        let (f_r, mu) = (soil.rolling_resistance.get() * going.1, soil.traction_coefficient.get() * going.0);
+
+        // Direction change: stop first, then engage the other gear.
+        if m.cmd_reverse != m.reversing && m.speed < 0.3 {
+            m.reversing = m.cmd_reverse;
+        }
+        let dir = if m.reversing { -1.0 } else { 1.0 };
 
         // Steering.
         let w_max = d.max_yaw_rate_rad_s.get().min(d.max_lateral_accel_mps2.get() / m.speed.abs().max(0.1));
@@ -69,11 +77,14 @@ pub(crate) fn step(
         let (gx, gy) = hf.gradient(t.pos[0], t.pos[1]);
         let grade = gx * sh + gy * ch;
         let side = gx * ch - gy * sh; // positive: ground rises to the left (right side down)
-        let th = libm::atan(grade);
+        let th_hull = libm::atan(grade);
+        // Slope along the direction of travel (uphill resists, whichever way the hull points).
+        let th = libm::atan(grade * dir);
         let (cth, sth) = (libm::cos(th), libm::sin(th));
 
         // Speed target.
-        let mut target = m.cmd_speed.min(cap).min(d.max_speed_road_mps.get());
+        let top = if m.reversing { d.max_speed_reverse_mps.get() } else { d.max_speed_road_mps.get() };
+        let mut target = if m.cmd_reverse != m.reversing { 0.0 } else { m.cmd_speed.min(cap).min(top) };
         if side.abs() > d.max_side_slope.get() {
             target = target.min(SIDE_SLOPE_CRAWL);
         }
@@ -81,7 +92,7 @@ pub(crate) fn step(
             target = 0.0;
         }
 
-        // Longitudinal dynamics (forward motion only; reverse comes with drills in M4).
+        // Longitudinal dynamics; `speed` is a magnitude, `reversing` gives the direction.
         let mass = d.combat_mass_kg.get();
         let (power, eta) = (d.engine_power_w.get(), d.drivetrain_efficiency.get());
         let resist = mass * G * (f_r * cth + sth);
@@ -113,10 +124,10 @@ pub(crate) fn step(
         // Kinematics (horizontal component of motion along the slope).
         let v_h = m.speed * cth;
         let (w_m, h_m) = (hf.width_m(), hf.height_m());
-        t.pos[0] = (t.pos[0] + sh * v_h * DT).clamp(0.0, w_m);
-        t.pos[1] = (t.pos[1] + ch * v_h * DT).clamp(0.0, h_m);
+        t.pos[0] = (t.pos[0] + dir * sh * v_h * DT).clamp(0.0, w_m);
+        t.pos[1] = (t.pos[1] + dir * ch * v_h * DT).clamp(0.0, h_m);
         t.z = hf.height(t.pos[0], t.pos[1]);
-        t.pitch = th;
+        t.pitch = th_hull;
         t.roll = libm::atan(side);
 
         // Fuel: idle plus delivered power.

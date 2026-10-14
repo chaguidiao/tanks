@@ -31,6 +31,10 @@ pub struct MobilityState {
     /// Commanded by the vehicle AI.
     pub cmd_speed: f64,
     pub cmd_heading: f64,
+    /// Commanded to drive backwards (cmd_speed is then the reverse speed magnitude).
+    pub cmd_reverse: bool,
+    /// Currently moving backwards (`speed` stays a magnitude).
+    pub reversing: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,6 +53,11 @@ pub enum Order {
     /// Turn in place to a heading.
     Face {
         heading: f64,
+    },
+    /// Drive backwards, hull pointing the same way, to a point (back out of a position while
+    /// keeping the gun on the threat; FM 3-20.21 (1996) ch. 2 "reverse" movement).
+    Reverse {
+        to: Vec2,
     },
 }
 
@@ -175,6 +184,8 @@ impl World {
             stalled_s: 0.0,
             cmd_speed: 0.0,
             cmd_heading: heading,
+            cmd_reverse: false,
+            reversing: false,
         }));
         self.ai.push(Some(VehicleAi { order: Order::Idle, position_note: None, set: false, held: None }));
         let sensors = def
@@ -271,6 +282,9 @@ impl World {
                 for v in [m.speed, m.fuel_l, m.stalled_s, m.cmd_speed, m.cmd_heading] {
                     h.f64(v);
                 }
+                if m.reversing || m.cmd_reverse {
+                    h.u8(1 + m.reversing as u8);
+                }
             }
             if let Some(s) = &self.sensors[k] {
                 h.u64(s.tracks.len() as u64);
@@ -299,6 +313,11 @@ impl World {
                     Order::Face { heading } => {
                         h.u8(2);
                         h.f64(*heading);
+                    }
+                    Order::Reverse { to } => {
+                        h.u8(3);
+                        h.f64(to[0]);
+                        h.f64(to[1]);
                     }
                 }
             }
