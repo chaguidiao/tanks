@@ -54,6 +54,8 @@ pub struct Recorder {
     pub shots: Vec<Shot>,
     pub stats: Vec<SideStats>,
     pub callsigns: BTreeMap<EntityId, String>,
+    /// Code words sent: (time, side, name).
+    pub code_words: Vec<(f64, SideId, String)>,
 }
 
 impl Recorder {
@@ -93,6 +95,10 @@ impl Recorder {
                 Event::SpotReport { side, .. } => {
                     let st = &mut self.stats[side.0 as usize];
                     st.first_report_s.get_or_insert(t);
+                }
+                Event::CodeWordSent { side, word } => {
+                    let name = sim.doctrine(*side).and_then(|d| d.code_words.get(*word as usize).cloned());
+                    self.code_words.push((t, *side, name.unwrap_or_else(|| format!("WORD {}", word + 1))));
                 }
                 _ => {}
             }
@@ -223,6 +229,13 @@ impl AarView {
                     1.0,
                     if s.side.0 == 0 { style::FRIENDLY } else { style::HOSTILE },
                 );
+            }
+            // Code words above the line (FM 6-0 execution by code word).
+            for (t, side, name) in &rec.code_words {
+                let xs = x0 + (x1 - x0) * (*t / tmax) as f32;
+                let c = if side.0 == 0 { style::AMBER } else { style::HOSTILE };
+                f.line([xs, y - 4.0], [xs, y - 12.0], 1.5, c);
+                f.text(name, xs + 3.0, y - 20.0, style::FONT, c);
             }
         }
         let t = rec.frames.get(self.index).map_or(0.0, |f| f.t);

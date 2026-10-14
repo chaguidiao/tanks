@@ -52,7 +52,8 @@ tools/dev/devbox.sh run cargo run --release -p headless -- run --scenario m1-mov
 Client: starts at the title screen → main menu (play scenario, scenario editor, terrain editor, database,
 options). Every control is a button that shows its hotkey; hover for a tooltip, F7 for the key list of
 the current screen, Esc for the screen menu. Game: LMB select (a single vehicle shows its status card; I opens its data), RMB move, Shift+RMB add route checkpoints
-(release Shift to send), H halt, Space pause, 1–4 speed. Terrain editor: 1–4 brushes, 5 river, 6 road,
+(release Shift to send), hold RMB (or RMB on a unit, contact, graphic or plan CP) for the context menu, P plan
+(LMB adds CPs, C CP menu, Enter send), Ctrl+1–9 code words, H halt, Space pause, 1–4 speed. Terrain editor: 1–4 brushes, 5 river, 6 road,
 7 forest, 8 building, Ctrl+S save. Scenario editor: F9 play test (and back). Options are stored in
 `~/.config/tanks/settings.cfg` (override with `TANKS_CONFIG`).
 

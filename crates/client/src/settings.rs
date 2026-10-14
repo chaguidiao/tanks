@@ -24,6 +24,8 @@ pub struct Settings {
     pub right_click_menu: bool,
     /// The clock stops while the context menu is open.
     pub pause_on_menu: bool,
+    /// The clock stops when every platoon waiting on a code word reports set.
+    pub pause_on_ready: bool,
 }
 
 impl Default for Settings {
@@ -38,6 +40,7 @@ impl Default for Settings {
             grid: true,
             right_click_menu: false,
             pause_on_menu: true,
+            pause_on_ready: false,
         }
     }
 }
@@ -88,6 +91,7 @@ impl Settings {
                 ("contours", Some(b)) => s.contours = b,
                 ("grid", Some(b)) => s.grid = b,
                 ("pause_on_menu", Some(b)) => s.pause_on_menu = b,
+                ("pause_on_ready", Some(b)) => s.pause_on_ready = b,
                 ("right_click", _) => s.right_click_menu = v == "menu",
                 ("fps_cap", _) => {
                     if let Ok(n) = v.parse::<u32>()
@@ -112,7 +116,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Tanks options (written by the OPTIONS screen)\n\
-             fullscreen = {}\nfps_cap = {}\nttf_font = {}\npan_speed = {}\nedge_pan = {}\ncontours = {}\ngrid = {}\nright_click = {}\npause_on_menu = {}\n",
+             fullscreen = {}\nfps_cap = {}\nttf_font = {}\npan_speed = {}\nedge_pan = {}\ncontours = {}\ngrid = {}\nright_click = {}\npause_on_menu = {}\npause_on_ready = {}\n",
             on_off(self.fullscreen),
             self.fps_cap,
             on_off(self.ttf_font),
@@ -122,6 +126,7 @@ impl Settings {
             on_off(self.grid),
             if self.right_click_menu { "menu" } else { "move" },
             on_off(self.pause_on_menu),
+            on_off(self.pause_on_ready),
         )
     }
 

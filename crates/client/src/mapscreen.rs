@@ -333,7 +333,9 @@ impl MapScreen {
                 "         R ROUTE TOOL: LMB CHECKPOINTS, RMB DESTINATION, BKSP UNDO   H HALT / RESUME",
                 "ORDERS   F FORMATION  T TECHNIQUE  S MOVE SPEED  B BATTLE POSITION ([ ] RADIUS)  W WEAPONS  A / CTRL+RMB ENGAGE",
                 "TIME     SPACE PAUSE  1-4 SPEED X1 X2 X4 X8   V VIEWSHED  L LINE OF SIGHT",
-                "PLAN     ENTER EXECUTE (PLANNING PHASE)  G GRAPHICS (PL/OBJ/TRP)  K TIMING OF THE NEXT ORDER",
+                "CP PLAN  P PLAN: LMB ADDS CPS, DRAG A CP, RMB A CP / LEG: LEG, ACTIONS, WAIT, BRANCH   , . CP   C CP MENU",
+                "         DEL DELETE CP   ENTER SEND   ESC REVERT   CTRL+1-9 CODE WORD (LEFT PANEL: WHO IS SET)",
+                "STAFF    ENTER EXECUTE (PLANNING PHASE)  G GRAPHICS (PL/OBJ/TRP)  K TIMING OF THE NEXT ORDER",
                 "         RMB OR ESC CANCELS A TOOL   F8 AFTER-ACTION REVIEW (CTRL+R SAVE REPLAY)",
                 "         F9 BACK TO THE SCENARIO EDITOR (PLAY TEST)",
             ],
@@ -481,6 +483,7 @@ impl MapScreen {
         if let Mode::Game { game, .. } = &mut self.mode {
             game.rclick_menu = ctx.settings.right_click_menu;
             game.pause_on_menu = ctx.settings.pause_on_menu;
+            game.pause_on_ready = ctx.settings.pause_on_ready;
             if game.menu_frames(inp.screen).iter().any(|r| r.contains(inp.mouse)) {
                 screen_buttons.clear();
                 game_buttons.clear();

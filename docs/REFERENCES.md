@@ -11,6 +11,8 @@ A reading list grouped by subsystem. ★ = read first. Public sources only — n
 - **TC 3-20.31 *Training and Qualification, Crew*** — tank gunnery: fire commands, engagement standards and times.
 - **ATP 2-01.3 *Intelligence Preparation of the Battlefield*** — OAKOC terrain analysis (what the AI's terrain reasoning should mimic).
 - **FM 1-02.2 *Military Symbols*** and **MIL-STD-2525D/E**, **NATO APP-6D/E** — symbology and tactical graphics.
+- **FM 6-0 *Commander and Staff Organization and Operations*** (2022) — orders, "on order" execution by code word, the execution matrix, branches and sequels (the checkpoint plans of DESIGN.md §8.3).
+- **ADP 3-90 *Offense and Defense*** (2019) — control measures: checkpoints, routes, phase lines, battle positions.
 - **TC 3-25.26 *Map Reading and Land Navigation*** — grid, contours, military crest, intervisibility.
 
 ## Doctrine — Red (OPFOR)
@@ -90,7 +92,7 @@ A reading list grouped by subsystem. ★ = read first. Public sources only — n
 - ProSIM *ATF* / *BCT Commander* — https://www.shrapnelgames.com/ProSIM/ATF/ATF_page.html
 - MicroProse *M1 Tank Platoon* (1989) and *M1 Tank Platoon II* (1998)
 - Matrix *Armored Brigade* (2018) and *Armored Brigade II* (2024/25) — pausable real-time, real-world terrain, 1965–1991
-- eSim *Steel Beasts Pro PE*; Battlefront *Combat Mission* series; Graviteam *Tactics* series; *Flashpoint Campaigns*
+- eSim *Steel Beasts Pro PE* — routes whose waypoints set tactics, formation, speed and fire control, with conditions to leave a battle position ([SBWiki: Moving units on routes](https://www.steelbeasts.com/sbwiki/index.php/Moving_Units_On_Routes)); Holdridge *TacOps* — orders attached to waypoints, with an estimated time at each ([TacOps 4 user guide](https://generaltzsoschickencoop.wordpress.com/wp-content/uploads/2009/08/tacops4-guide-user.pdf)); Battlefront *Combat Mission* series; Graviteam *Tactics* series; *Flashpoint Campaigns*
 
 ## Historical validation cases
 - 73 Easting (1991) — the IDA/DARPA SIMNET reconstruction.

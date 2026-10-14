@@ -26,6 +26,7 @@ use crate::style;
 use crate::symbols;
 use crate::view::{Camera, Minimap};
 
+mod codewords;
 mod ctx;
 mod planedit;
 use ctx::{MenuTarget, Rmb};
@@ -224,6 +225,10 @@ pub struct Game {
     /// Options: a plain right click opens the menu; the clock stops while it is open.
     pub rclick_menu: bool,
     pub pause_on_menu: bool,
+    /// Option: the clock stops when every platoon waiting on a code word reports set.
+    pub pause_on_ready: bool,
+    /// Code words whose platoons were all set at the last check.
+    ready_words: Vec<u8>,
     acc: f64,
     prev: Vec<(EntityId, [f64; 2], f64)>,
     pub log: VecDeque<(String, String)>,
@@ -276,6 +281,8 @@ impl Game {
             menu_target_id: MenuTarget::Ground,
             rclick_menu: false,
             pause_on_menu: true,
+            pause_on_ready: false,
+            ready_words: Vec::new(),
             acc: 0.0,
             prev: Vec::new(),
             log: VecDeque::new(),
@@ -480,6 +487,9 @@ impl Game {
             }
         }
         self.prune_pending();
+        if n > 0 {
+            self.check_ready();
+        }
     }
 
     fn on_event(&mut self, e: &Event) {
@@ -1745,6 +1755,9 @@ impl Game {
             );
         }
 
+        // Code words in use (left, under the roster and fire support).
+        out.extend(self.code_buttons(self.roster().len() as f32));
+
         // Selection panel: member rows select a single vehicle.
         let (_, _, rows, _) = self.info(screen);
         out.extend(rows);
@@ -2144,7 +2157,7 @@ impl Game {
         for t in pic.triggers.iter().rev().take(3) {
             let cond = self.condition_text(&t.condition);
             foot.push((
-                format!("CW {}: {cond} -> {}{}", t.id, t.order, if t.fired { " (DONE)" } else { "" }),
+                format!("CONT {}: {cond} -> {}{}", t.id, t.order, if t.fired { " (DONE)" } else { "" }),
                 style::TEXT_DIM,
             ));
         }
@@ -2277,6 +2290,7 @@ impl Game {
         vec![self.info(screen).0, Rect::new(4.0, TOP_H + 4.0, ROSTER_W + 4.0, 24.0 + n * 24.0)]
             .into_iter()
             .chain(self.fire_panel(n))
+            .chain(self.code_panel(n))
             .chain([hud::minimap_frame(screen), hud::log_frame(screen), hud::card_frame(screen)])
             .collect()
     }
@@ -2360,6 +2374,10 @@ impl Game {
             for (k, (l, c)) in self.fire_lines().iter().enumerate() {
                 f.text(l, r.x + 8.0, r.y + 24.0 + k as f32 * 16.0, style::FONT_S, *c);
             }
+        }
+        if let Some(r) = self.code_panel(n) {
+            hud::panel(f, r);
+            f.text("CODE WORDS", r.x + 8.0, r.y + 6.0, style::FONT, style::TEXT_DIM);
         }
 
         // Selection panel.
@@ -2636,7 +2654,7 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
         }
         Event::TriggerFired { side, id } if *side == pic.side => {
             let t = pic.triggers.iter().find(|t| t.id == *id)?;
-            format!("CODE WORD {}: EXECUTE {}.", id, t.order)
+            format!("CONTINGENCY {}: EXECUTE {}.", id, t.order)
         }
         Event::CodeWordSent { side, word } if *side == pic.side => {
             format!("ALL STATIONS, CODE WORD {}.", game.code_word_name(*word))
@@ -2664,9 +2682,32 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                     format::grid(*at),
                     if *clearing { "CLEARING IMPACT AREA" } else { "BUTTONED UP, HOLDING" }
                 ),
-                PlatoonReport::AtCheckpoint { n, waiting: true } => format!("{cs}: CP {n}. WAITING."),
+                PlatoonReport::AtCheckpoint { n, waiting: true } => {
+                    let step = pic.platoon(*platoon).and_then(|v| v.plan.as_ref()?.plan.steps.get(*n as usize - 1));
+                    match step.and_then(|s| s.wait.as_ref()) {
+                        Some(w) => format!("{cs}: CP {n}. WAITING {}.", game.condition_set_text(w)),
+                        None => format!("{cs}: CP {n}. WAITING."),
+                    }
+                }
                 PlatoonReport::AtCheckpoint { n, waiting: false } => format!("{cs}: AT CP {n}."),
-                PlatoonReport::PlanBranch { to } => format!("{cs}: CONTACT, MOVING TO CP {to}."),
+                PlatoonReport::PlanBranch { to } => {
+                    // The branch that led here: its first condition says why.
+                    let why = pic
+                        .platoon(*platoon)
+                        .and_then(|v| v.plan.as_ref())
+                        .and_then(|pv| {
+                            let id = pv.plan.steps.get(*to as usize - 1)?.id;
+                            pv.plan.steps.iter().find_map(|s| s.branch.as_ref().filter(|b| b.goto == id))
+                        })
+                        .and_then(|b| b.when.conditions.first())
+                        .map_or("CONTACT", |c| match c {
+                            TriggerCondition::UnderFire { .. } => "UNDER FIRE",
+                            TriggerCondition::StrengthAtMost { .. } => "LOSSES",
+                            TriggerCondition::EnemyCrosses { .. } | TriggerCondition::EnemyInArea { .. } => "ENEMY",
+                            _ => "CONTACT",
+                        });
+                    format!("{cs}: {why}, MOVING TO CP {to}.")
+                }
                 PlatoonReport::PlanComplete => format!("{cs}: PLAN COMPLETE."),
                 PlatoonReport::Bounding { section } => format!("{cs}: SECTION {section} BOUNDING."),
                 PlatoonReport::Strength { remaining, of } => format!("{cs}: {remaining} OF {of} VEHICLES OPERATIONAL."),

@@ -24,6 +24,7 @@ pub enum Opt {
     Grid,
     RightClick,
     PauseOnMenu,
+    PauseOnReady,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -584,9 +585,9 @@ pub fn draw_loading(
 // ---------------------------------------------------------------- overlays
 
 pub fn options_buttons(screen: P2, s: &Settings) -> Vec<Button<MenuAction>> {
-    let r = modal(screen, 600.0, 610.0);
+    let r = modal(screen, 600.0, 655.0);
     let on = |b: bool| if b { "ON" } else { "OFF" }.to_owned();
-    let rows: [(&str, String, Opt, &str); 9] = [
+    let rows: [(&str, String, Opt, &str); 10] = [
         (
             "DISPLAY",
             if s.fullscreen { "FULLSCREEN".into() } else { "WINDOW".into() },
@@ -610,7 +611,18 @@ pub fn options_buttons(screen: P2, s: &Settings) -> Vec<Button<MenuAction>> {
             Opt::RightClick,
             "MOVE: RMB MOVES, HOLD FOR THE MENU.  MENU: RMB OPENS THE MENU (MOVE HERE FIRST)",
         ),
-        ("PAUSE ON MENU", on(s.pause_on_menu), Opt::PauseOnMenu, "THE CLOCK STOPS WHILE A CONTEXT MENU IS OPEN"),
+        (
+            "PAUSE ON MENU",
+            on(s.pause_on_menu),
+            Opt::PauseOnMenu,
+            "THE CLOCK STOPS WHILE A CONTEXT MENU IS OPEN OR A PLAN IS EDITED",
+        ),
+        (
+            "PAUSE WHEN SET",
+            on(s.pause_on_ready),
+            Opt::PauseOnReady,
+            "THE CLOCK STOPS WHEN EVERY PLATOON WAITING ON A CODE WORD REPORTS SET",
+        ),
     ];
     let mut out: Vec<Button<MenuAction>> = rows
         .into_iter()
@@ -633,7 +645,7 @@ pub fn options_buttons(screen: P2, s: &Settings) -> Vec<Button<MenuAction>> {
 }
 
 pub fn draw_options(f: &mut Frame, screen: P2, note: &str) {
-    let r = modal(screen, 600.0, 610.0);
+    let r = modal(screen, 600.0, 655.0);
     f.rect(0.0, 0.0, screen[0], screen[1], Rgba(0, 0, 0, 120));
     panel(f, r);
     f.text("OPTIONS", r.x + 20.0, r.y + 20.0, style::FONT_L, style::AMBER);
