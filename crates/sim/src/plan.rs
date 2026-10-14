@@ -6,7 +6,7 @@
 //! - Execution on conditions ("on order" / by code word): FM 6-0 execution matrix.
 //! - Leg settings (speed, formation, technique, weapons): per-leg tactics as in ATP 3-20.15 ch. 3.
 
-use ai::picture::{ConditionSet, Plan, PlanView, PlatoonId, SpeedSetting, StepAction, TriggerCondition};
+use ai::picture::{ConditionSet, LegSettings, Plan, PlanView, PlatoonId, SpeedSetting, StepAction, TriggerCondition};
 use terrain::hash::StableHasher;
 
 use crate::command::{Addressee, Command, PlatoonReport, SmokeMode};
@@ -70,6 +70,25 @@ impl PlanState {
         Self { plan, cursor: start, phase, passed: self.passed, paused: self.paused, branch_ref: None }
     }
 
+    /// A posture order given while the plan runs (DESIGN.md §14 #25): write the new setting into
+    /// the leg in progress, i.e. the steps from the cursor to the next stop, so a pass-through
+    /// checkpoint does not undo it. While acting or waiting at a checkpoint there is no leg in
+    /// progress and the next leg keeps its planned setting.
+    pub fn rewrite_leg(&mut self, set: impl Fn(&mut LegSettings)) {
+        let stop = match self.phase {
+            Phase::Leg { stop } => stop,
+            Phase::Start => {
+                let steps = &self.plan.steps;
+                let last = steps.len() - 1;
+                (self.cursor..=last).find(|&i| i == last || steps[i].is_stop()).unwrap_or(last)
+            }
+            Phase::Setting { .. } | Phase::Waiting { .. } => return,
+        };
+        for s in &mut self.plan.steps[self.cursor..=stop.max(self.cursor)] {
+            set(&mut s.leg);
+        }
+    }
+
     pub fn view(&self) -> PlanView {
         let step = &self.plan.steps[self.cursor];
         PlanView {
@@ -103,6 +122,22 @@ impl PlanState {
             }
         }
         h.u64(self.passed.len() as u64);
+        for s in &self.plan.steps {
+            let l = &s.leg;
+            h.u32(s.id as u32);
+            h.u8(match l.speed {
+                None => 0,
+                Some(SpeedSetting::Max) => 1,
+                Some(SpeedSetting::Limit(_)) => 2,
+            });
+            if let Some(SpeedSetting::Limit(v)) = l.speed {
+                h.f64(v);
+            }
+            h.u8(l.formation.map_or(255, |f| f as u8));
+            h.u8(l.technique.map_or(255, |t| t as u8));
+            h.u8(l.weapons.map_or(255, |w| w as u8));
+            h.u8(l.on_contact.map_or(255, |r| r as u8));
+        }
     }
 }
 

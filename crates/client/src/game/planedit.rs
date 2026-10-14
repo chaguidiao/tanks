@@ -1503,6 +1503,7 @@ mod tests {
     use terrain::mobility::MobilityClass;
     use terrain::{AuthoringPackage, MapManifest, bake};
 
+    use super::posture::Posture;
     use super::*;
 
     fn unit(cs: &str, x: f64, platoon: &str) -> UnitDef {
@@ -1636,5 +1637,59 @@ mod tests {
         assert!(g.plan.is_none(), "the move replaced the draft");
         g.press(Cmd::Undo);
         assert_eq!(g.plan.as_ref().map(|d| d.plan.steps.len()), Some(2), "Ctrl+Z restores it as a draft");
+    }
+
+    #[test]
+    fn a_posture_pick_with_no_cp_selected_orders_the_platoon_now() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        let scope = g.posture_scope(Posture::Formation).unwrap();
+        assert_eq!(scope, posture::Scope::Now(Addressee::Platoon(a)));
+        g.apply_posture(scope, posture::PostureVal::Formation(Formation::Line));
+        assert_eq!(g.shown_formation(a), Some(Formation::Line));
+        let scope = g.posture_scope(Posture::Technique).unwrap();
+        g.apply_posture(scope, posture::PostureVal::Technique(Technique::BoundingOverwatch));
+        assert_eq!(g.shown_technique(a), Some(Technique::BoundingOverwatch));
+        assert_eq!(g.posture_value(Posture::Technique), "BOUND OVW");
+        g.advance_ticks(2000);
+        assert_eq!(g.picture().platoon(a).unwrap().technique, Technique::BoundingOverwatch);
+    }
+
+    #[test]
+    fn a_posture_pick_with_a_cp_selected_edits_that_leg_only() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        g.plan_add_cp([700.0, 800.0]);
+        g.plan_add_cp([700.0, 1000.0]);
+        g.sync_drafts();
+        let (first, second) = {
+            let d = g.plan.as_ref().unwrap();
+            (d.plan.steps[0].id, d.plan.steps[1].id)
+        };
+        g.select_cp(first);
+        let scope = g.posture_scope(Posture::Speed).unwrap();
+        assert_eq!(scope, posture::Scope::Leg(a, first));
+        g.apply_posture(scope, posture::PostureVal::Speed(Some(8.0)));
+        g.apply_posture(scope, posture::PostureVal::Formation(Formation::Vee));
+        let d = g.plan.as_ref().unwrap();
+        assert_eq!(d.plan.steps[0].leg.speed, Some(SpeedSetting::Limit(8.0)));
+        assert_eq!(d.plan.steps[0].leg.formation, Some(Formation::Vee));
+        assert_eq!(d.plan.steps[1].leg.speed, None);
+        assert!(g.pending_formation.is_empty(), "nothing was ordered now");
+        assert_eq!(g.posture_value(Posture::Speed), "29 KM/H");
+
+        g.apply_posture(scope, posture::PostureVal::Keep(Posture::Speed));
+        assert_eq!(g.plan.as_ref().unwrap().plan.steps[0].leg.speed, None);
+        assert_eq!(g.posture_value(Posture::Speed), "KEEP");
+
+        g.select_cp(second);
+        assert_eq!(g.posture_scope(Posture::Speed), Some(posture::Scope::Leg(a, second)));
+        assert_eq!(
+            g.posture_scope(Posture::Ammo),
+            Some(posture::Scope::Now(Addressee::Platoon(a))),
+            "ammo is never a leg setting"
+        );
     }
 }

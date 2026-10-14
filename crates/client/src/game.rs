@@ -30,8 +30,10 @@ mod codewords;
 mod ctx;
 mod feedback;
 mod planedit;
+mod posture;
 use ctx::{MenuTarget, Rmb};
 use planedit::{EtaCache, Pick, PlanDraft};
+use posture::Posture;
 
 /// Time compression steps (DESIGN.md §2.1).
 pub const SPEEDS: [u32; 4] = [1, 2, 4, 8];
@@ -227,9 +229,6 @@ pub struct Game {
     pub sel_unit: Option<EntityId>,
     pub paused: bool,
     pub speed: usize,
-    pub technique: Technique,
-    /// March speed for the next move (m/s); None = MAX (formation speed).
-    pub move_speed: Option<f64>,
     pub tool: Tool,
     pub bp_radius: f64,
     /// Ammunition for the next call for fire.
@@ -265,6 +264,10 @@ pub struct Game {
     /// step, or for the radio): the card shows and cycles from these. (target, value, sent at)
     pending_formation: Vec<(PlatoonId, Formation, f64)>,
     pending_weapons: Vec<(Addressee, WeaponsStatus, f64)>,
+    pending_technique: Vec<(PlatoonId, Technique, f64)>,
+    pending_speed: Vec<(Addressee, Option<f64>, f64)>,
+    /// A posture list asked for by a card button or hotkey; opened once the screen is known.
+    posture_request: Option<Posture>,
     /// HALT (true) / RESUME (false) sent but not yet received.
     pending_held: Vec<(Addressee, bool, f64)>,
     /// Plan being edited (sent with SEND; drawn dashed until then).
@@ -303,8 +306,6 @@ impl Game {
             sel_unit: None,
             paused: true,
             speed: 0,
-            technique: Technique::Traveling,
-            move_speed: None,
             tool: Tool::None,
             bp_radius: 250.0,
             fire_kind: FireKind::He,
@@ -329,6 +330,9 @@ impl Game {
             counts: [0; 3],
             pending_formation: Vec::new(),
             pending_weapons: Vec::new(),
+            pending_technique: Vec::new(),
+            pending_speed: Vec::new(),
+            posture_request: None,
             pending_held: Vec::new(),
             plan: None,
             parked: BTreeMap::new(),
@@ -412,10 +416,10 @@ impl Game {
 
     /// Move the selection to `dest` through checkpoints `via` (route with checkpoints).
     pub fn issue_move(&mut self, via: Vec<[f64; 2]>, dest: [f64; 2]) {
-        self.issue_move_at(via, dest, self.move_speed);
+        self.issue_move_at(via, dest, self.current_speed());
     }
 
-    /// As `issue_move`, with this order's own speed limit (the sticky `move_speed` is not touched).
+    /// As `issue_move`, with this order's own speed limit (the platoon's own speed setting is what `issue_move` passes).
     pub fn issue_move_at(&mut self, via: Vec<[f64; 2]>, dest: [f64; 2], speed_limit_mps: Option<f64>) {
         let start = self.selection_centre();
         let cps: Vec<String> =
@@ -426,7 +430,7 @@ impl Game {
         points.push(dest);
         match (self.sel_platoon, self.sel_unit) {
             (Some(p), _) => {
-                let technique = self.technique;
+                let technique = self.shown_technique(p).unwrap_or(Technique::Traveling);
                 self.remember_replaced(p);
                 self.graphics.retain(|g| g.platoon != Some(p));
                 self.graphics.push(OrderGraphic {
@@ -515,7 +519,11 @@ impl Game {
                 *platoon = p;
                 *centre = shift(*centre);
             }
-            Command::SetFormation { platoon, .. } | Command::BreakContact { platoon } if *platoon == primary => {
+            Command::SetFormation { platoon, .. }
+            | Command::SetTechnique { platoon, .. }
+            | Command::BreakContact { platoon }
+                if *platoon == primary =>
+            {
                 *platoon = p;
             }
             Command::SetContactReaction { platoon, .. } if *platoon == primary => *platoon = p,
@@ -752,6 +760,7 @@ impl Game {
 
         self.sync_drafts();
         self.open_requested_menu(cam, inp);
+        self.open_posture_menu(inp);
         let world = cam.to_world(inp.mouse);
         let swallowed = self.rmb_update(inp, cam, over_ui, &mut fx) || menu_was_open;
         let over_ui = over_ui || swallowed;
@@ -995,7 +1004,7 @@ impl Game {
                     self.toggle_tool(Tool::AdjustFire);
                 }
             }
-            Cmd::Ammo => self.cycle_ammo(),
+            Cmd::Ammo => self.request_posture(Posture::Ammo),
             Cmd::BattlePosition if self.sel_platoon.is_some() => {
                 self.toggle_tool(Tool::BattlePosition { centre: None });
             }
@@ -1019,56 +1028,10 @@ impl Game {
                     }
                 }
             }
-            Cmd::Formation => {
-                if let Some(p) = self.sel_platoon
-                    && let Some(cur) = self.shown_formation(p)
-                {
-                    let i = Formation::ALL.iter().position(|f| *f == cur).unwrap_or(0);
-                    let f = Formation::ALL[(i + 1) % Formation::ALL.len()];
-                    if self.order_mode == OrderMode::Now {
-                        self.pending_formation.retain(|x| x.0 != p);
-                        self.pending_formation.push((p, f, self.sim.time_s()));
-                    }
-                    self.order(Command::SetFormation { platoon: p, formation: f });
-                    let cs = self.platoon_cs(p);
-                    self.radio(format!("TO {cs}: CHANGE FORMATION, {}.", format_formation(f)));
-                }
-            }
-            Cmd::Technique => {
-                self.technique = match self.technique {
-                    Technique::Traveling => Technique::TravelingOverwatch,
-                    Technique::TravelingOverwatch => Technique::BoundingOverwatch,
-                    Technique::BoundingOverwatch => Technique::Traveling,
-                };
-            }
-            // March speed for the next move; the selection is ordered to it as well (applies to
-            // its current or held move).
-            Cmd::Speed => {
-                let presets = self.speed_presets();
-                let i = presets.iter().position(|s| *s == self.move_speed).map_or(0, |i| (i + 1) % presets.len());
-                self.move_speed = presets[i];
-                if let Some(to) = self.addressee() {
-                    let cs = self.addressee_cs(to);
-                    self.order(Command::SetSpeed { to, speed_limit_mps: self.move_speed });
-                    let sp = self.move_speed.map_or("MAX".into(), |v| format!("{} KM/H", format::kmh(v)));
-                    self.radio(format!("TO {cs}: SPEED {sp}."));
-                }
-            }
-            Cmd::Weapons => {
-                if let Some(to) = self.addressee() {
-                    let next = match self.selection_weapons().unwrap_or(WeaponsStatus::Free) {
-                        WeaponsStatus::Free => WeaponsStatus::Tight,
-                        WeaponsStatus::Tight => WeaponsStatus::Hold,
-                        WeaponsStatus::Hold => WeaponsStatus::Free,
-                    };
-                    if self.order_mode == OrderMode::Now {
-                        self.pending_weapons.retain(|x| x.0 != to);
-                        self.pending_weapons.push((to, next, self.sim.time_s()));
-                    }
-                    self.order(Command::WeaponsControl { to, status: next });
-                    self.radio(format!("WEAPONS {}.", weapons_str(next)));
-                }
-            }
+            Cmd::Formation => self.request_posture(Posture::Formation),
+            Cmd::Technique => self.request_posture(Posture::Technique),
+            Cmd::Speed => self.request_posture(Posture::Speed),
+            Cmd::Weapons => self.request_posture(Posture::Weapons),
             Cmd::Smoke => {
                 if let Some(to) = self.addressee() {
                     let cs = self.addressee_cs(to);
@@ -1201,16 +1164,6 @@ impl Game {
         }
     }
 
-    /// Weapons control status of the selection (its first vehicle).
-    /// Weapons status of the selection, or the one just ordered if not yet acknowledged.
-    fn selection_weapons(&self) -> Option<WeaponsStatus> {
-        let to = self.addressee()?;
-        if let Some(w) = self.pending_weapons.iter().find(|x| x.0 == to) {
-            return Some(w.1);
-        }
-        self.actual_weapons(to)
-    }
-
     /// Halted with an order held for RESUME, or as just ordered if not yet received.
     fn shown_held(&self, to: Addressee) -> bool {
         if let Some(h) = self.pending_held.iter().find(|x| x.0 == to) {
@@ -1272,6 +1225,12 @@ impl Game {
         let mut pw = std::mem::take(&mut self.pending_weapons);
         pw.retain(|&(to, w, t)| fresh(t) && self.actual_weapons(to).is_some_and(|a| a != w));
         self.pending_weapons = pw;
+        let mut pt = std::mem::take(&mut self.pending_technique);
+        pt.retain(|&(p, t, ts)| fresh(ts) && self.picture().platoon(p).is_some_and(|v| v.technique != t));
+        self.pending_technique = pt;
+        let mut ps = std::mem::take(&mut self.pending_speed);
+        ps.retain(|&(to, s, ts)| fresh(ts) && self.actual_speed(to).is_some_and(|a| a != s));
+        self.pending_speed = ps;
         let mut ph = std::mem::take(&mut self.pending_held);
         ph.retain(|&(to, h, t)| fresh(t) && self.actual_held(to) != h);
         self.pending_held = ph;
@@ -1320,21 +1279,6 @@ impl Game {
             .collect();
         let chosen = u.ammo_selected.as_deref().and_then(by_label);
         Some((chosen, kinds))
-    }
-
-    fn cycle_ammo(&mut self) {
-        let Some(to) = self.addressee() else {
-            self.radio("NO UNIT SELECTED.".into());
-            return;
-        };
-        let Some((chosen, kinds)) = self.ammo_choice(to) else { return };
-        let next = match chosen.and_then(|c| kinds.iter().position(|k| *k == c)) {
-            None => kinds.first().copied(),
-            Some(i) => kinds.get(i + 1).copied(),
-        };
-        let cs = self.addressee_cs(to);
-        self.order(Command::SelectAmmo { to, kind: next });
-        self.radio(format!("TO {cs}: AMMUNITION {}.", next.map_or("AUTO", |k| k.label())));
     }
 
     fn fire_smoke_round(&mut self, at: [f64; 2]) {
@@ -2088,8 +2032,9 @@ impl Game {
         let technique = || {
             b("TECHNIQUE", Cmd::Technique)
                 .key("T")
-                .value(short_technique(self.technique))
-                .tip("MOVEMENT TECHNIQUE FOR THE NEXT MOVE: TRAVELING / TRAVELING OVERWATCH / BOUNDING OVERWATCH")
+                .value(self.posture_value(Posture::Technique))
+                .enabled(plt)
+                .tip("MOVEMENT TECHNIQUE: TRAVELING / TRAVELING OVERWATCH / BOUNDING OVERWATCH (LIST)")
         };
         let contingency = || {
             b("TIMING", Cmd::Contingency).key("K").value(timing.clone()).active(self.order_mode != OrderMode::Now).tip(
@@ -2136,8 +2081,8 @@ impl Game {
         }
         let is = |t: &Tool| std::mem::discriminant(&self.tool) == std::mem::discriminant(t);
         let gfx = |k: DrawKind| matches!(&self.tool, Tool::Graphic { kind, .. } if *kind == k);
-        let formation = self.sel_platoon.and_then(|p| self.shown_formation(p)).map_or(String::new(), format_formation);
-        let weapons = self.selection_weapons().map_or("", weapons_str);
+        let formation = self.posture_value(Posture::Formation);
+        let weapons = self.posture_value(Posture::Weapons);
         vec![
             (
                 0,
@@ -2192,7 +2137,7 @@ impl Game {
                     .key("F")
                     .value(formation)
                     .enabled(plt)
-                    .tip("CHANGE PLATOON FORMATION (CYCLES)"),
+                    .tip("PLATOON FORMATION (LIST; WITH A CP SELECTED, THAT LEG ONLY)"),
             ),
             (6, technique()),
             (
@@ -2201,15 +2146,16 @@ impl Game {
                     .key("W")
                     .value(weapons)
                     .enabled(sel)
-                    .tip("WEAPONS CONTROL: FREE / TIGHT / HOLD"),
+                    .tip("WEAPONS CONTROL: FREE / TIGHT / HOLD (LIST)"),
             ),
             (8, contingency()),
             (
                 9,
                 b("MOVE SPEED", Cmd::Speed)
                     .key("S")
-                    .value(speed_short(self.move_speed))
-                    .tip("MARCH SPEED: ORDERS THE SELECTION AND SETS THE NEXT MOVE (MAX / DOCTRINE SPEEDS)"),
+                    .value(self.posture_value(Posture::Speed))
+                    .enabled(sel)
+                    .tip("MARCH SPEED: MAX OR A DOCTRINE SPEED (LIST; WITH A CP SELECTED, THAT LEG ONLY)"),
             ),
             (
                 14,
@@ -2259,13 +2205,9 @@ impl Game {
                 12,
                 b("AMMO", Cmd::Ammo)
                     .key("Q")
-                    .value(
-                        self.addressee()
-                            .and_then(|to| self.ammo_choice(to))
-                            .map_or(String::new(), |(c, _)| c.map_or("AUTO", |k| k.label()).to_owned()),
-                    )
+                    .value(self.posture_value(Posture::Ammo))
                     .enabled(sel)
-                    .tip("AMMUNITION TYPE: AUTO (BY TARGET CLASS) OR HELD ON ONE TYPE (CYCLES)"),
+                    .tip("AMMUNITION TYPE: AUTO (BY TARGET CLASS) OR HELD ON ONE TYPE (LIST)"),
             ),
             (
                 13,
@@ -2363,11 +2305,10 @@ impl Game {
             ));
             head.push((
                 format!(
-                    "FORM {}   SPEED {}   NEXT {}, {}",
+                    "FORM {}   TECH {}   SPEED {}",
                     format_formation(self.shown_formation(pv.id).unwrap_or(pv.formation)),
-                    speed_short(pv.speed_limit),
-                    short_technique(self.technique),
-                    speed_short(self.move_speed)
+                    short_technique(self.shown_technique(pv.id).unwrap_or(pv.technique)),
+                    speed_short(self.shown_speed(Addressee::Platoon(pv.id)).unwrap_or(pv.speed_limit))
                 ),
                 style::TEXT_DIM,
             ));
@@ -2859,7 +2800,14 @@ fn condition_colour(c: Condition) -> Rgba {
 }
 
 pub fn format_formation(f: Formation) -> String {
-    format!("{f:?}").to_uppercase()
+    let mut s = String::new();
+    for (i, c) in format!("{f:?}").chars().enumerate() {
+        if i > 0 && c.is_uppercase() {
+            s.push(' ');
+        }
+        s.push(c.to_ascii_uppercase());
+    }
+    s
 }
 
 pub fn format_technique(t: Technique) -> &'static str {

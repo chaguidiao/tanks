@@ -238,6 +238,124 @@ fn other_orders_and_drills_treat_the_plan_correctly() {
     assert!(sim.perceived(BLUE).platoon(P1).unwrap().plan.is_none(), "player move discards the plan");
 }
 
+fn elapsed(s: f64) -> Option<ConditionSet> {
+    Some(ConditionSet { all: true, conditions: vec![TriggerCondition::Elapsed { s }] })
+}
+
+fn plan_view(sim: &Sim) -> ai::picture::PlanView {
+    sim.perceived(BLUE).platoon(P1).unwrap().plan.clone().expect("plan running")
+}
+
+/// CONTROL-UX §7: a posture order during a leg is written into the leg in progress, up to the
+/// next stop, and the leg after that stop keeps its planned setting.
+#[test]
+fn a_speed_order_holds_through_pass_through_checkpoints_up_to_the_next_stop() {
+    let mut sim = new_sim();
+    let slow = LegSettings { speed: Some(SpeedSetting::Limit(15.0 * KMH)), ..Default::default() };
+    let mut s1 = step_at(1, [800.0, 900.0]);
+    s1.wait = elapsed(1.0);
+    let mut s2 = step_at(2, [800.0, 1300.0]);
+    s2.leg = slow.clone();
+    let mut s3 = step_at(3, [800.0, 1800.0]);
+    s3.leg = slow;
+    s3.wait = elapsed(5.0);
+    let mut s4 = step_at(4, [800.0, 2300.0]);
+    s4.leg = LegSettings { speed: Some(SpeedSetting::Limit(10.0 * KMH)), ..Default::default() };
+    send(&mut sim, Plan { steps: vec![s1, s2, s3, s4] }, 1);
+
+    // Leave CP 1 and be on the leg towards CP 2.
+    let mut t = 0;
+    while !(view_task(&sim).starts_with("PLAN CP 2") && centroid(&sim)[1] > 1000.0) {
+        sim.step();
+        t += 1;
+        assert!(t < 400 * sim::TICK_HZ, "reached the leg: {}", view_task(&sim));
+    }
+    sim.submit_immediate(BLUE, Command::SetSpeed { to: Addressee::Platoon(P1), speed_limit_mps: None });
+    sim.step();
+    let v = plan_view(&sim);
+    let speed = |i: usize| v.plan.steps[i].leg.speed;
+    assert_eq!(speed(0), None, "the leg already driven is not touched");
+    assert_eq!(speed(1), Some(SpeedSetting::Max), "pass-through CP 2 rewritten");
+    assert_eq!(speed(2), Some(SpeedSetting::Max), "the leg ends at the stop CP 3");
+    assert_eq!(speed(3), Some(SpeedSetting::Limit(10.0 * KMH)), "later legs are never touched");
+
+    // MAX holds through CP 2 ...
+    let mut fastest_after_cp2 = 0.0f64;
+    for _ in 0..(120 * sim::TICK_HZ) {
+        sim.step();
+        if centroid(&sim)[1] > 1400.0 && centroid(&sim)[1] < 1700.0 {
+            fastest_after_cp2 = fastest_after_cp2.max(max_speed(&sim));
+        }
+        if view_task(&sim).starts_with("WAITING") {
+            break;
+        }
+    }
+    assert!(fastest_after_cp2 > 30.0 * KMH, "still at MAX after CP 2: {fastest_after_cp2:.1} m/s");
+    // ... and leg 4's planned limit applies after the stop.
+    let mut worst = 0.0f64;
+    let mut left = false;
+    for _ in 0..(200 * sim::TICK_HZ) {
+        sim.step();
+        if centroid(&sim)[1] > 1900.0 {
+            left = true;
+        }
+        if centroid(&sim)[1] > 2000.0 {
+            worst = worst.max(max_speed(&sim));
+        }
+    }
+    assert!(left, "departed CP 3");
+    assert!(worst <= 10.0 * KMH * 1.15, "leg 4 planned limit applies: {worst:.2} m/s");
+}
+
+#[test]
+fn a_posture_order_at_a_waiting_checkpoint_applies_now_and_the_next_leg_keeps_its_plan() {
+    let mut sim = new_sim();
+    let mut a = step_at(1, [800.0, 1000.0]);
+    a.wait = elapsed(60.0);
+    a.leg.formation = Some(Formation::Column);
+    let mut b = step_at(2, [800.0, 1600.0]);
+    b.leg.formation = Some(Formation::Wedge);
+    send(&mut sim, Plan { steps: vec![a, b] }, 1);
+    let mut t = 0;
+    while !view_task(&sim).starts_with("WAITING") {
+        sim.step();
+        t += 1;
+        assert!(t < 400 * sim::TICK_HZ, "waiting: {}", view_task(&sim));
+    }
+    sim.submit_immediate(BLUE, Command::SetFormation { platoon: P1, formation: Formation::Line });
+    sim.step();
+    assert_eq!(sim.perceived(BLUE).platoon(P1).unwrap().formation, Formation::Line, "applies now");
+    let v = plan_view(&sim);
+    assert_eq!(v.plan.steps[0].leg.formation, Some(Formation::Column), "no leg in progress: not rewritten");
+    assert_eq!(v.plan.steps[1].leg.formation, Some(Formation::Wedge));
+    for _ in 0..(90 * sim::TICK_HZ) {
+        sim.step();
+    }
+    assert_eq!(sim.perceived(BLUE).platoon(P1).unwrap().formation, Formation::Wedge, "next leg's plan on release");
+}
+
+#[test]
+fn set_technique_changes_the_move_in_progress_and_replays() {
+    let (ds, m, sc) = setup();
+    let mut sim = Sim::new(&sc, ds.clone(), m.clone()).unwrap();
+    sim.set_ai_enabled(SideId(1), false);
+    let mut a = step_at(1, [800.0, 1500.0]);
+    a.leg.technique = Some(Technique::Traveling);
+    send(&mut sim, Plan { steps: vec![a] }, 1);
+    run(&mut sim, 20.0);
+    sim.submit_immediate(BLUE, Command::SetTechnique { platoon: P1, technique: Technique::BoundingOverwatch });
+    run(&mut sim, 2.0);
+    assert_eq!(sim.perceived(BLUE).platoon(P1).unwrap().technique, Technique::BoundingOverwatch);
+    assert_eq!(plan_view(&sim).plan.steps[0].leg.technique, Some(Technique::BoundingOverwatch));
+    let rec = Replay::record(&sim);
+    let back = Replay::from_ron(&rec.to_ron()).expect("RON round trip of SetTechnique");
+    assert!(back.commands.iter().any(|c| matches!(c.cmd, Command::SetTechnique { .. })));
+    let mut again = Sim::new(&sc, ds, m).unwrap();
+    again.set_ai_enabled(SideId(1), false);
+    back.play(&mut again, |_, _| {});
+    assert_eq!(again.state_hash(), rec.final_hash, "replay diverged");
+}
+
 #[test]
 fn a_contact_drill_mid_leg_resumes_the_same_step() {
     let ds = data();

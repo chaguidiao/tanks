@@ -409,6 +409,7 @@ impl<A: Clone> PopupMenu<A> {
                     text_w(&l, style::FONT_S) + text_w(&v, style::FONT_S) + 28.0
                 })
                 .fold(150.0f32, f32::max);
+            let w = if depth == 0 { w.max(text_w(&self.title, style::FONT_S) + 20.0) } else { w };
             let head = if depth == 0 && !self.title.is_empty() { MENU_ROW_H } else { 0.0 };
             let h = items.len() as f32 * MENU_ROW_H + head + 4.0;
             let (mut x, y0) = match out.last() {
@@ -505,9 +506,14 @@ impl<A: Clone> PopupMenu<A> {
             }
         }
         for k in &inp.pressed {
-            if let Key::Char(c) = k {
+            let c = match k {
+                Key::Char(c) => Some(*c),
+                Key::Num(d) => char::from_digit(u32::from(*d), 10),
+                _ => None,
+            };
+            if let Some(c) = c {
                 let hit = self.level(depth).iter().position(|it| {
-                    it.enabled && it.key.len() == 1 && it.key.chars().next().is_some_and(|x| x.eq_ignore_ascii_case(c))
+                    it.enabled && it.key.len() == 1 && it.key.chars().next().is_some_and(|x| x.eq_ignore_ascii_case(&c))
                 });
                 if let Some(i) = hit {
                     let mut p = self.path.clone();

@@ -6,6 +6,7 @@
 use ai::picture::{ContactId, ContactReaction};
 
 use super::planedit::PlanEdit;
+use super::posture::{Posture, PostureVal, Scope};
 use super::*;
 use crate::hud::{MenuEvent, MenuItem, PopupMenu};
 
@@ -52,6 +53,7 @@ pub enum MenuAct {
     LosTo,
     RemoveGraphic(u32),
     Plan(PlanEdit),
+    Posture(Scope, PostureVal),
 }
 
 pub(super) fn reaction_name(r: ContactReaction) -> &'static str {
@@ -135,14 +137,14 @@ impl Game {
         let halt = if self.addressee().is_some_and(|to| self.shown_held(to)) { "RESUME" } else { "HALT" };
         vec![
             item(halt, "H", Cmd::Halt, sel),
-            item("FORMATION", "F", Cmd::Formation, self.sel_platoon.is_some()),
-            item("TECHNIQUE", "T", Cmd::Technique, true).value(format_technique(self.technique)),
-            item("SPEED", "S", Cmd::Speed, true).value(Self::speed_label(self.move_speed)),
-            item("WEAPONS", "W", Cmd::Weapons, sel),
+            self.posture_item(Posture::Formation, "F"),
+            self.posture_item(Posture::Technique, "T"),
+            self.posture_item(Posture::Speed, "S"),
+            self.posture_item(Posture::Weapons, "W"),
             item("SMOKE SCREEN", "Z", Cmd::Smoke, sel),
             item("ENGINE SMOKE", "E", Cmd::EngineSmoke, sel),
             item("REVERSE 100 M", "D", Cmd::Reverse, sel),
-            item("AMMUNITION", "Q", Cmd::Ammo, sel),
+            self.posture_item(Posture::Ammo, "Q"),
             item("BREAK CONTACT", "X", Cmd::BreakContact, self.sel_platoon.is_some()),
         ]
     }
@@ -170,15 +172,15 @@ impl Game {
         let grid = format::grid(world);
         match target {
             MenuTarget::Ground => {
+                let cur_speed = self.current_speed();
                 let mut speeds = Vec::new();
                 for s in self.speed_presets() {
-                    speeds
-                        .push(MenuItem::new(Self::speed_label(s), MenuAct::MoveHere(s)).checked(s == self.move_speed));
+                    speeds.push(MenuItem::new(Self::speed_label(s), MenuAct::MoveHere(s)).checked(s == cur_speed));
                 }
                 let mut v = Vec::new();
-                let mv = MenuItem::new("MOVE HERE", MenuAct::MoveHere(self.move_speed))
+                let mv = MenuItem::new("MOVE HERE", MenuAct::MoveHere(cur_speed))
                     .key("M")
-                    .value(Self::speed_label(self.move_speed));
+                    .value(Self::speed_label(cur_speed));
                 v.push(if sel.is_some() { mv } else { mv.disabled(no_unit) });
                 let mut at = MenuItem::submenu("MOVE HERE AT", speeds);
                 if sel.is_none() {
@@ -274,7 +276,7 @@ impl Game {
             }
             MenuTarget::Graphic(id) => {
                 let label = self.picture().graphic(id).map_or("GRAPHIC".into(), |g| g.label.clone());
-                let mv = MenuItem::new("MOVE TO", MenuAct::MoveHere(self.move_speed));
+                let mv = MenuItem::new("MOVE TO", MenuAct::MoveHere(self.current_speed()));
                 let v = vec![
                     if sel.is_some() { mv } else { mv.disabled(no_unit) },
                     self.fire_item("CALL FOR FIRE ON"),
@@ -361,6 +363,7 @@ impl Game {
                 self.sim.settle();
             }
             MenuAct::Plan(e) => self.run_plan_edit(e, at),
+            MenuAct::Posture(scope, val) => self.apply_posture(scope, val),
         }
     }
 

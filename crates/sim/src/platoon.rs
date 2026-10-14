@@ -116,6 +116,13 @@ impl PlatoonOrder {
 }
 
 impl Platoon {
+    /// A posture order given while a plan runs also rewrites the leg in progress.
+    pub fn rewrite_leg(&mut self, set: impl Fn(&mut ai::picture::LegSettings)) {
+        if let Some(st) = self.plan.as_mut() {
+            st.rewrite_leg(set);
+        }
+    }
+
     /// HALT (ATP 3-20.15 ch. 3, a halt during movement): stop in place but keep the interrupted
     /// order, so RESUME continues it from where the platoon stopped. Halting again keeps the
     /// order already held.

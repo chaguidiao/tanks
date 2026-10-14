@@ -63,6 +63,12 @@ pub enum Command {
         platoon: PlatoonId,
         formation: Formation,
     },
+    /// Change the movement technique of the current (or held) move and later platoon moves
+    /// (ATP 3-20.15 ch. 3).
+    SetTechnique {
+        platoon: PlatoonId,
+        technique: Technique,
+    },
     /// Occupy a battle position (ATP 3-20.15 ch. 5): circle area, threat direction (compass rad).
     OccupyPosition {
         platoon: PlatoonId,

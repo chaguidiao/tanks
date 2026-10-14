@@ -29,7 +29,7 @@ pub mod world;
 
 use std::sync::Arc;
 
-use ai::picture::{Condition, PlatoonId, ShotView, WeaponsStatus};
+use ai::picture::{Condition, PlatoonId, ShotView, SpeedSetting, WeaponsStatus};
 use rand_chacha::ChaCha8Rng;
 use rand_chacha::rand_core::SeedableRng;
 use sim_data::{AmmoDef, DataSet, ScenarioDef, VehicleDef};
@@ -989,6 +989,8 @@ impl Sim {
                     Addressee::Platoon(p) => {
                         if let Some(p) = self.platoon_mut(c.side, *p) {
                             p.speed_limit = *speed_limit_mps;
+                            let v = speed_limit_mps.map_or(SpeedSetting::Max, SpeedSetting::Limit);
+                            p.rewrite_leg(|l| l.speed = Some(v));
                         }
                     }
                     Addressee::Unit(_) => {
@@ -1002,6 +1004,11 @@ impl Sim {
             Command::WeaponsControl { to, status } => {
                 for k in self.members(c.side, *to) {
                     self.world.weapons[k] = *status;
+                }
+                if let Addressee::Platoon(p) = to
+                    && let Some(p) = self.platoon_mut(c.side, *p)
+                {
+                    p.rewrite_leg(|l| l.weapons = Some(*status));
                 }
                 events.push(Event::OrderReceived { side: c.side, to: *to });
             }
@@ -1047,6 +1054,15 @@ impl Sim {
                 if let Some(p) = self.platoon_mut(c.side, *platoon) {
                     p.formation = f;
                     p.replanned = 0;
+                    p.rewrite_leg(|l| l.formation = Some(f));
+                }
+            }
+            Command::SetTechnique { platoon, technique } => {
+                let t = *technique;
+                if let Some(p) = self.platoon_mut(c.side, *platoon) {
+                    p.technique = t;
+                    p.rewrite_leg(|l| l.technique = Some(t));
+                    events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
                 }
             }
             Command::Smoke { to, mode } => {
@@ -1156,6 +1172,8 @@ impl Sim {
             Command::SetContactReaction { platoon, reaction } => {
                 if let Some(p) = self.platoon_mut(c.side, *platoon) {
                     p.contact_reaction = *reaction;
+                    let r = *reaction;
+                    p.rewrite_leg(|l| l.on_contact = Some(r));
                     events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
                 }
             }

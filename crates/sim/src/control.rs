@@ -148,6 +148,7 @@ pub fn describe(c: &Command) -> String {
         Command::WeaponsControl { status, .. } => format!("WEAPONS {status:?}").to_uppercase(),
         Command::Move { .. } => "MOVE".into(),
         Command::SetFormation { formation, .. } => format!("FORMATION {formation:?}").to_uppercase(),
+        Command::SetTechnique { technique, .. } => format!("TECHNIQUE {technique:?}").to_uppercase(),
         _ => "ORDER".into(),
     }
 }
