@@ -441,6 +441,12 @@ impl Sim {
         &self.world
     }
 
+    /// Ground truth, writable: tests only (scenario set-up such as knocking out a vehicle).
+    #[doc(hidden)]
+    pub fn truth_mut(&mut self) -> &mut World {
+        &mut self.world
+    }
+
     pub fn step(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
         let tick = self.tick;

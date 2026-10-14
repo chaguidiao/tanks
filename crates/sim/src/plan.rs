@@ -145,11 +145,7 @@ fn run(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx) -> bool {
                     return true;
                 }
                 PlatoonOrder::None => {
-                    let alive = p.alive_members(ctx.world);
-                    // The lead vehicle ends the route at the checkpoint; the rest trail behind it.
-                    let at = st.plan.steps[stop].at;
-                    let near = alive.iter().any(|&k| dist(ctx.world.transform[k].pos, at) <= ARRIVE_TOLERANCE_M);
-                    if !near {
+                    if !arrived(p, ctx, st.plan.steps[stop].at) {
                         return false; // route failed or the move was cancelled
                     }
                     if !arrive(st, p, ctx, stop) {
@@ -178,6 +174,19 @@ fn run(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx) -> bool {
         }
     }
     true
+}
+
+/// The move ended at checkpoint `at` (not a failed route): a vehicle that can still move stands in
+/// its formation slot there. The leader's slot is on the checkpoint, but in a line or after losses
+/// the nearest survivor can be a slot or two away from it.
+fn arrived(p: &Platoon, ctx: &Ctx, at: crate::Vec2) -> bool {
+    let d = &ctx.doctrines[p.side.0 as usize];
+    let spacing = d.spacing_m.get();
+    let slots = &d.formation(p.formation).slots;
+    p.members.iter().enumerate().filter(|&(_, &k)| ctx.world.can_move(k)).any(|(i, &k)| {
+        let off = slots.get(i).map_or(i as f64, |s| libm::hypot(s.0, s.1)) * spacing;
+        dist(ctx.world.transform[k].pos, at) <= ARRIVE_TOLERANCE_M + off
+    })
 }
 
 /// Issue the move for the leg(s) from the cursor to the next stop. False = nothing to do yet.

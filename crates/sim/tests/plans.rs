@@ -147,6 +147,27 @@ fn a_pass_through_checkpoint_does_not_stop_the_platoon() {
 }
 
 #[test]
+fn a_platoon_in_line_that_lost_its_leader_still_arrives() {
+    // The leader's slot is on the checkpoint; with it knocked out the survivors stand a slot or
+    // two away from it, and that is still arrival (not a failed route that ends the plan).
+    let mut sim = new_sim();
+    sim.truth_mut().condition[0] = sim::view::Condition::Destroyed;
+    let mut a = step_at(1, [800.0, 1400.0]);
+    a.leg.formation = Some(Formation::Line);
+    a.wait = Some(ConditionSet { all: false, conditions: vec![TriggerCondition::Elapsed { s: 5.0 }] });
+    send(&mut sim, Plan { steps: vec![a, step_at(2, [800.0, 1800.0])] }, 1);
+    let mut rs = Vec::new();
+    for _ in 0..(400 * sim::TICK_HZ) {
+        rs.extend(reports(&sim.step()));
+        if rs.contains(&PlatoonReport::PlanComplete) {
+            break;
+        }
+    }
+    assert!(rs.contains(&PlatoonReport::AtCheckpoint { n: 1, waiting: true }), "arrived at CP 1: {rs:?}");
+    assert!(rs.contains(&PlatoonReport::PlanComplete), "plan runs on: {rs:?}");
+}
+
+#[test]
 fn an_elapsed_wait_holds_the_platoon_then_releases_it() {
     let mut sim = new_sim();
     let mut plan = two_leg_plan();
