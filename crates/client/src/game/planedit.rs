@@ -1,4 +1,4 @@
-//! Plan editing (docs/plans/PLANS-AND-CONTEXT-MENU.md §4.3): a client draft of a platoon's
+//! Plan editing (docs/plans/archive/PLANS-AND-CONTEXT-MENU.md §4.3): a client draft of a platoon's
 //! checkpoint plan, edited on the map (click to add, drag to move), with the context menu and
 //! the step list, and sent as one `SetPlan` order (DESIGN.md §14 #22).
 //!

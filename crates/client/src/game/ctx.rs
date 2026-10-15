@@ -1,4 +1,4 @@
-//! Right-click handling and the map context menu (docs/plans/PLANS-AND-CONTEXT-MENU.md §4).
+//! Right-click handling and the map context menu (docs/plans/archive/PLANS-AND-CONTEXT-MENU.md §4).
 //!
 //! A plain right click still moves the selection (on release); holding it, or clicking an
 //! object, opens a menu whose items dispatch the same actions as the command card.

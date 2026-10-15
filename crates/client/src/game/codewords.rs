@@ -1,4 +1,4 @@
-//! Code-word strip (docs/plans/PLANS-AND-CONTEXT-MENU.md §4.4): the words the side's plans and
+//! Code-word strip (docs/plans/archive/PLANS-AND-CONTEXT-MENU.md §4.4): the words the side's plans and
 //! contingencies wait on, who is waiting and whether they are set, and the button that sends
 //! each one (FM 6-0 execution by code word: one transmission releases every platoon at once).
 //!

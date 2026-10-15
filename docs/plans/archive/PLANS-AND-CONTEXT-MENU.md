@@ -1,6 +1,6 @@
 # Execution plan: checkpoint plans and the map context menu
 
-Status: **done** (P0–P5, 2026-10-14; DESIGN.md §13.1 lists what shipped and what is deferred). Approved 2026-10-13 as the hand-off document for the implementing agent.
+Status: **done and archived** (P0–P5, 2026-10-14; DESIGN.md §13.1 lists what shipped and what is deferred). Approved 2026-10-13 as the hand-off document for the implementing agent. Kept for the design rationale; the live description is DESIGN.md §8.3 and §10.3.
 Read `CLAUDE.md`, `docs/DESIGN.md` §8 and §10 and decisions #14 and #16 (§14) first.
 
 ## 1. Goal

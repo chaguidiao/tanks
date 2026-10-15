@@ -1,4 +1,4 @@
-// The example plan of docs/plans/PLANS-AND-CONTEXT-MENU.md §1, for 1 PLT of scenario
+// The example plan of docs/plans/archive/PLANS-AND-CONTEXT-MENU.md §1, for 1 PLT of scenario
 // m5-hold-the-village (demo map). Load it with
 //   client --scenario m5-hold-the-village --plan 1:@docs/plans/example-plan.ron
 //          --advance 240 --code-word HAMMER --advance 300 --save-replay out/plan.ron
