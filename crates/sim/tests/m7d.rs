@@ -433,6 +433,8 @@ fn the_commander_ai_screens_with_smoke_on_entering_battle() {
                 objective: "OBJ".into(),
             },
             start_s: 20.0,
+            release_on_contact: false,
+            latest_s: None,
         }],
     });
     let mut sim = Sim::new(&sc, ds, m).unwrap();

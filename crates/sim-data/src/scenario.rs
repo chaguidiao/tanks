@@ -104,14 +104,46 @@ pub struct AiTask {
     /// Seconds after start before the task begins.
     #[serde(default)]
     pub start_s: f64,
+    /// Hold the task at its start position until the side's picture shows a live contact (a
+    /// reconnaissance report), but no later than `latest_s` (FM 3-98: the main
+    /// body moves once reconnaissance has found the enemy).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub release_on_contact: bool,
+    /// Latest release time (s since the scenario start) for `release_on_contact`; `None` = wait
+    /// for contact only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_s: Option<f64>,
+}
+
+/// A battle position: a circle with the direction of the expected threat.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BattlePosition {
+    pub centre: [f64; 2],
+    pub radius_m: f64,
+    pub facing_deg: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Mission {
     /// Attack along an axis of advance to an objective.
     Attack { axis: Vec<[f64; 2]>, objective: String },
-    /// Occupy and hold a battle position.
-    Defend { centre: [f64; 2], radius_m: f64, facing_deg: f64 },
+    /// Occupy and hold a battle position. `alternates` are the supplementary / alternate
+    /// positions the platoons displace to, in order, when the doctrine's trigger is met
+    /// (ATP 3-20.15 ch. 5).
+    Defend {
+        centre: [f64; 2],
+        radius_m: f64,
+        facing_deg: f64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        alternates: Vec<BattlePosition>,
+    },
+    /// Reconnaissance: move ahead of the main body along the axis, stop at the first contact (or
+    /// at the end of the axis) and observe from the position (FM 3-98).
+    Recon { axis: Vec<[f64; 2]>, observe: BattlePosition },
+    /// Hold an assembly position; when the objective is contested or the side has lost too much,
+    /// counter-attack onto the objective (ATP 3-90.5 / FM 3-90: the reserve is committed at the
+    /// decisive point).
+    Reserve { assembly: BattlePosition, objective: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

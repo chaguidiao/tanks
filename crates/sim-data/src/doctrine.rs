@@ -94,6 +94,40 @@ pub struct DoctrinePack {
     /// Commander-level call for fire on fresh contacts; `None` = the AI never calls fire.
     #[serde(default)]
     pub fire_support: Option<FireSupportDoctrine>,
+    /// Synchronised assault: platoons close up on an assault position before the shake-out.
+    #[serde(default)]
+    pub assault: Option<AssaultDoctrine>,
+    /// Defence: displacement to alternate positions and commitment of the reserve.
+    #[serde(default)]
+    pub defence: Option<DefenceDoctrine>,
+}
+
+/// Attack position / line of departure (FM 3-90 ch. 3; FM 100-2-1 ch. 5: the echeloned attack
+/// deploys from an attack position so the platoons hit together instead of one by one).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssaultDoctrine {
+    /// Distance from the objective at which platoons halt and close up before the assault (m).
+    pub assault_position_m: Stat<f64>,
+    /// A platoon counts as in position within this distance of its assault position (m).
+    pub in_position_m: Stat<f64>,
+    /// Go anyway this long after the first platoon is in position (s).
+    pub sync_timeout_s: Stat<f64>,
+}
+
+/// When the commander AI displaces defenders and commits the reserve (ATP 3-20.15 ch. 5:
+/// supplementary and alternate positions; FM 3-90: counterattack by the reserve).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefenceDoctrine {
+    /// Displace to the next position when a fresh contact is this close to the current one (m).
+    pub displace_contact_range_m: Stat<f64>,
+    /// ... or when the task's platoons have lost this fraction of their vehicles.
+    pub displace_losses: Stat<f64>,
+    /// Minimum time on a position before displacing again (s).
+    pub displace_hold_s: Stat<f64>,
+    /// Commit the reserve when a fresh contact is within this distance of the objective (m).
+    pub reserve_commit_range_m: Stat<f64>,
+    /// ... or when the side has lost this fraction of its vehicles.
+    pub reserve_commit_losses: Stat<f64>,
 }
 
 /// When the commander AI calls its batteries (FM 6-20-30 / ATP 3-09.42: fire support is

@@ -26,6 +26,8 @@ fn setup() -> (std::sync::Arc<sim_data::DataSet>, std::sync::Arc<terrain::BakedM
             platoons: vec!["21".into()],
             mission: Mission::Attack { axis: vec![[800.0, 3000.0]], objective: "OBJ".into() },
             start_s: 0.0,
+            release_on_contact: false,
+            latest_s: None,
         }],
     });
     (ds, m, sc)

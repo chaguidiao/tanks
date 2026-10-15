@@ -239,18 +239,21 @@ impl Sim {
                     let tasks = plan
                         .tasks
                         .iter()
-                        .map(|t| ai::commander::TaskState {
-                            platoons: t
+                        .map(|t| {
+                            let platoons = t
                                 .platoons
                                 .iter()
                                 .filter_map(|cs| {
                                     platoons.iter().find(|p| p.side.0 as usize == si && &p.callsign == cs).map(|p| p.id)
                                 })
-                                .collect(),
-                            mission: t.mission.clone(),
-                            start_s: t.start_s,
-                            phase: ai::commander::Phase::Waiting,
-                            broken: Vec::new(),
+                                .collect();
+                            ai::commander::TaskState::new(
+                                platoons,
+                                t.mission.clone(),
+                                t.start_s,
+                                t.release_on_contact,
+                                t.latest_s,
+                            )
                         })
                         .collect();
                     ai::commander::Commander::new(tasks)

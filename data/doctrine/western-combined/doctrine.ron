@@ -39,6 +39,18 @@
         max_contact_age_s: (value: 20.0, source: "estimate", confidence: estimate, notes: "Fires are unadjusted, so only fresh reports are worth a mission."),
         smoke_volleys: 2,
     ),
+    assault: (
+        assault_position_m: (value: 3000.0, source: "FM 3-90 ch. 3 (attack position); ATP 3-20.15 ch. 5", confidence: low, notes: "Between the pre-battle distance (4 km) and the battle distance (1.5 km): the platoons stop here, close up abreast and shake out together."),
+        in_position_m: (value: 150.0, source: "estimate", confidence: estimate),
+        sync_timeout_s: (value: 90.0, source: "estimate", confidence: estimate, notes: "Do not wait for a platoon that cannot reach the position; the assault goes this long after the first platoon is in."),
+    ),
+    defence: (
+        displace_contact_range_m: (value: 1200.0, source: "estimate", confidence: estimate, notes: "ATP 3-20.15 ch. 5: displace on the trigger, before the position is fixed; the trigger is a distance short of the enemy reaching the battle position."),
+        displace_losses: (value: 0.25, source: "estimate", confidence: estimate, notes: "One vehicle of a three- or four-tank platoon."),
+        displace_hold_s: (value: 120.0, source: "estimate", confidence: estimate, notes: "Time to occupy the new position and re-orient before the next displacement."),
+        reserve_commit_range_m: (value: 500.0, source: "estimate", confidence: estimate, notes: "Enemy on or just short of the objective: the reserve's decisive point."),
+        reserve_commit_losses: (value: 0.25, source: "estimate", confidence: estimate, notes: "A quarter of the side out of action: the main effort is faltering."),
+    ),
     code_words: ["HAMMER", "ANVIL", "SWORD", "SHIELD", "FALCON", "RAVEN", "COBRA", "TIGER", "EAGLE"],
     break_off_losses: (value: 0.5, source: "estimate", confidence: estimate),
     // Ordered march speeds (m/s): 40, 25 and 15 km/h.
