@@ -4,6 +4,7 @@
     name: "ATGM SK-5",
     mirrors: "9M113 Konkurs",
     kind: heat,
+    guided: true,
     in_service: (from: 1975),
     muzzle_velocity_mps: (value: 200.0, source: "open-source estimates: cruise speed ~200 m/s", confidence: low),
     velocity_loss_mps_per_km: (value: 0.0, source: "a sustained rocket motor holds cruise speed", confidence: low),

@@ -228,6 +228,11 @@ pub struct AmmoDef {
     /// Target classes the crew picks this round for, in the AI's first choice.
     #[serde(default)]
     pub preferred_vs: Vec<VehicleClass>,
+    /// Command-guided round (ATGM): flies to the aim point the gunner keeps on the target, so
+    /// there is no superelevation (ranging) error, no ballistic bias and no lead error; only the
+    /// gunner's tracking error and the missile's own dispersion remain.
+    #[serde(default)]
+    pub guided: bool,
     #[serde(default)]
     pub smoke: Option<AmmoSmoke>,
     /// Round-to-round dispersion, 1σ (mrad).

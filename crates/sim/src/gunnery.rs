@@ -115,6 +115,9 @@ pub fn time_of_flight(a: &AmmoDef, r: f64) -> f64 {
 
 /// Gravity drop the fire-control system must correct (m).
 pub fn drop_at(a: &AmmoDef, r: f64) -> f64 {
+    if a.guided {
+        return 0.0;
+    }
     let t = time_of_flight(a, r);
     0.5 * G * t * t
 }
@@ -196,7 +199,12 @@ pub fn random_sigma_mrad(def: &VehicleDef, ammo: &AmmoDef, g: &ShotGeometry) -> 
     let fc = &def.fire_control;
     let aim = if g.shooter_moving { fc.moving_error_mrad.get() } else { fc.aim_error_mrad.get() };
     let disp = ammo.dispersion_mrad.get();
-    let lead = g.crossing_speed * time_of_flight(ammo, g.range) / g.range * 1000.0 * fc.lead_error_fraction.get();
+    // A guided round is steered onto the moving target: no lead error.
+    let lead = if ammo.guided {
+        0.0
+    } else {
+        g.crossing_speed * time_of_flight(ammo, g.range) / g.range * 1000.0 * fc.lead_error_fraction.get()
+    };
     let v = libm::sqrt(disp * disp + aim * aim);
     let h = libm::sqrt(disp * disp + aim * aim + lead * lead);
     (v, h)
@@ -212,7 +220,7 @@ pub fn bias_sigma_mrad(def: &VehicleDef, ammo: &AmmoDef, range: f64) -> f64 {
         fc.estimated_range_error_fraction.get() * range
     };
     let ranging = elevation_sensitivity_mrad_per_m(ammo, range) * range_sigma;
-    let b = fc.ballistic_error_mrad.get();
+    let b = if ammo.guided { 0.0 } else { fc.ballistic_error_mrad.get() };
     libm::sqrt(ranging * ranging + b * b)
 }
 
@@ -688,6 +696,31 @@ mod tests {
 
     fn ds() -> sim_data::DataSet {
         sim_data::DataSet::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data")).unwrap()
+    }
+
+    #[test]
+    fn a_guided_round_has_no_ranging_bias_and_no_lead_error() {
+        // A command-guided missile is steered onto the target: superelevation, ballistic bias and
+        // lead do not apply (FM 3-20.12 on ATGM engagement: the gunner tracks to impact), while
+        // the unguided 30 mm APDS at the same range keeps its ranging bias.
+        let ds = ds();
+        let ifv = ds.vehicle("skif_m1").unwrap();
+        let atgm = ds.ammo("atgm_sk5").unwrap();
+        let apds = ds.ammo("apds_30").unwrap();
+        assert!(atgm.guided && !apds.guided);
+        assert_eq!(drop_at(atgm, 2000.0), 0.0);
+        assert_eq!(bias_sigma_mrad(ifv, atgm, 2000.0), 0.0);
+        assert!(bias_sigma_mrad(ifv, apds, 1500.0) > 0.0);
+        let g = ShotGeometry {
+            range: 2000.0,
+            visible: 1.0,
+            bearing_to_shooter: 0.0,
+            target_heading: 0.0,
+            crossing_speed: 10.0,
+            shooter_moving: false,
+        };
+        let (v, h) = random_sigma_mrad(ifv, atgm, &g);
+        assert_eq!(v, h, "no lead error for a guided round");
     }
 
     #[test]

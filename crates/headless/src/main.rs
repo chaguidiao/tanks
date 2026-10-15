@@ -394,7 +394,7 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                             if hit {
                                 hits += 1;
                             }
-                            if rounds == 1 && shots > 0 {
+                            if shots == 1 {
                                 fr_n += 1;
                                 if hit {
                                     fr_hit += 1;
