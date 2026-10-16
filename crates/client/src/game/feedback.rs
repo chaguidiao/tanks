@@ -1,4 +1,4 @@
-//! Feedback and feedforward (docs/plans/CONTROL-UX.md §5.6): the top-bar hold state, the hold
+//! Feedback and feedforward (docs/plans/archive/CONTROL-UX.md §5.6): the top-bar hold state, the hold
 //! ring and the mouse hint line. The hint is built from the same state the click handling
 //! reads, so it says what the next click will do.
 

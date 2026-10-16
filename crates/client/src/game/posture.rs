@@ -1,4 +1,4 @@
-//! Posture orders (docs/plans/CONTROL-UX.md §5.3, §7): FORMATION, TECHNIQUE, SPEED, WEAPONS,
+//! Posture orders (docs/plans/archive/CONTROL-UX.md §5.3, §7): FORMATION, TECHNIQUE, SPEED, WEAPONS,
 //! ON CONTACT and AMMO. Each is a value list: one pick is one radio order. With a checkpoint selected the pick
 //! edits that leg of the plan, otherwise it goes to the selection now (and the sim writes it into
 //! the leg in progress, see `sim::plan::PlanState::rewrite_leg`).

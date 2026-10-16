@@ -282,6 +282,7 @@ fn a_task_without_a_release_condition_starts_at_once() {
 
 #[test]
 fn platoons_close_up_on_the_assault_position_and_assault_together() {
+    // The axis ends 5 km short of the objective: the march must carry on to the objective anyway.
     // FM 3-90 ch. 3: the attack position synchronises the assault. Platoon 22 trails 500 m
     // behind platoon 21; both must be at the assault position (3 km) before the shake-out.
     let ds = data();
@@ -296,7 +297,7 @@ fn platoons_close_up_on_the_assault_position_and_assault_together() {
     let mut sc = scenario(10 * 3600, blue, red);
     sc.objectives = vec![ObjectiveDef { name: "OBJ".into(), centre: [1000.0, 1000.0], radius_m: 300.0 }];
     sc.sides[1].ai = Some(AiPlan {
-        tasks: vec![task(&["21", "22"], Mission::Attack { axis: vec![[1000.0, 4400.0]], objective: "OBJ".into() })],
+        tasks: vec![task(&["21", "22"], Mission::Attack { axis: vec![[1000.0, 6000.0]], objective: "OBJ".into() })],
     });
     let mut sim = Sim::new(&sc, ds, m).unwrap();
     hold_fire(&mut sim, BLUE);

@@ -9,7 +9,7 @@
     muzzle_velocity_mps: (value: 200.0, source: "open-source estimates: cruise speed ~200 m/s", confidence: low),
     velocity_loss_mps_per_km: (value: 0.0, source: "a sustained rocket motor holds cruise speed", confidence: low),
     flat_penetration_mm: (value: 650.0, source: "open-source estimates (~600-750 mm RHA)", confidence: low),
-    dispersion_mrad: (value: 0.2, source: "estimate", confidence: estimate, notes: "Guided: the operator steers out most of the error."),
+    dispersion_mrad: (value: 0.28, source: "estimate", confidence: estimate, notes: "Guided: the operator steers out most of the error, but wire/radio SACLOS tracking still leaves a miss of about 1 m at 3 km; tuned with the duel harness (tanks-headless duel) to a first-round hit probability on a tank-sized target of about 0.99 at 1 km, 0.85 at 2 km and 0.65 at 3 km, near the 0.7-0.9 range usually quoted for first-generation SACLOS missiles (no precise public source)."),
     reload_s: (value: 12.0, source: "estimate", confidence: estimate, notes: "Load the next missile; the gunner must also keep the sight on target to the end of flight."),
     max_range_m: (value: 4000.0, source: "open-source estimates", confidence: low),
     preferred_vs: [mbt],

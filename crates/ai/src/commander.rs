@@ -365,7 +365,9 @@ impl Commander {
                         match t.phase {
                             Phase::March { waypoint } => {
                                 let wp = axis.get(waypoint).copied().unwrap_or(obj.centre);
-                                if dist(lead, wp) < 250.0 && waypoint + 1 < axis.len() {
+                                // Past the last axis waypoint the march goes on to the objective (an axis
+                                // that stops short of the pre-battle distance must not stall the attack).
+                                if dist(lead, wp) < 250.0 && waypoint < axis.len() {
                                     Phase::March { waypoint: waypoint + 1 }
                                 } else {
                                     Phase::March { waypoint }

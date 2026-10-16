@@ -379,6 +379,7 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
             );
             let mut seen = false;
             let mut rounds = 0;
+            let mut results = 0;
             for _ in 0..(120 * sim::TICK_HZ) {
                 for e in sim.step() {
                     match e {
@@ -391,10 +392,11 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                         }
                         Event::ShotResult { unit: EntityId(1), hit, .. } => {
                             shots += 1;
+                            results += 1;
                             if hit {
                                 hits += 1;
                             }
-                            if shots == 1 {
+                            if results == 1 {
                                 fr_n += 1;
                                 if hit {
                                     fr_hit += 1;

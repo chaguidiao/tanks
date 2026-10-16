@@ -1,6 +1,6 @@
 # Proposal: one control model for orders, routes and plans
 
-Status: **approved** (2026-10-14), decisions recorded in §9. This is the hand-off document for
+Status: **done** (U1–U4, 2026-10-14/15; DESIGN.md §10.2–10.3, §14 #25–26), decisions recorded in §9. This is the hand-off document for
 the implementing agent.
 Read `CLAUDE.md`, `docs/DESIGN.md` §8.3 and §10.2–10.3, and `docs/plans/archive/PLANS-AND-CONTEXT-MENU.md`
 first. Code: `crates/client/src/game.rs` (`hotkeys`, `update`, `command`, `card`, `prompt`),
