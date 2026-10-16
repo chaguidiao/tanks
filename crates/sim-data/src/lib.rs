@@ -199,25 +199,37 @@ impl DataSet {
 }
 
 /// Locate the repository `data/` directory: `$TANKS_DATA`, else walk up from the current dir.
+/// Locate the `data/` directory: `$TANKS_DATA`, else search upward from the current directory
+/// (development: run from anywhere in the repository), else upward from the executable's folder
+/// (a packaged release launched from a shortcut or another directory).
 pub fn find_data_dir() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("TANKS_DATA") {
         return Some(PathBuf::from(p));
     }
-    let mut dir = std::env::current_dir().ok()?;
-    loop {
-        let cand = dir.join("data");
-        if cand.join("vehicles").is_dir() {
-            return Some(cand);
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
+    let cwd = std::env::current_dir().ok();
+    let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf));
+    cwd.into_iter().chain(exe_dir).find_map(|start| find_data_from(&start))
+}
+
+/// The nearest `data/` directory (one holding `vehicles/`) in `start` or its ancestors.
+pub fn find_data_from(start: &Path) -> Option<PathBuf> {
+    start.ancestors().map(|d| d.join("data")).find(|c| c.join("vehicles").is_dir())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn data_is_found_from_a_nested_folder_and_not_from_an_empty_one() {
+        let here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let found = find_data_from(&here.join("src")).expect("data/ above the crate");
+        assert!(found.join("vehicles").is_dir());
+        let empty = std::env::temp_dir().join("tanks-no-data-here");
+        std::fs::create_dir_all(&empty).unwrap();
+        // Unless a parent of the temp dir happens to hold a data/ folder with vehicles/.
+        assert!(find_data_from(&empty).is_none_or(|d| d.join("vehicles").is_dir()));
+    }
 
     #[test]
     fn every_listed_scenario_loads() {

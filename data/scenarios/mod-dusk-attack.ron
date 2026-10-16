@@ -8,8 +8,8 @@
 (
     id: "mod-dusk-attack",
     name: "DUSK ATTACK",
-    date: (2005, 6, 20),
-    start_time_s: 70200, // 19:30
+    date: (2005, 10, 3),
+    start_time_s: 63000, // 17:30
     map: (id: "demo", recipe: "rolling-farmland", seed: 42, size_m: 8000.0),
     seed: 4,
     weather: (preset: "clear", latitude_deg: 50.0, wind_speed_mps: 2.0, wind_from_deg: 290.0, moon_phase: 0.2),

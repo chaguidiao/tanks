@@ -82,6 +82,12 @@ the container's PID 1, where it can miss Xvfb's ready signal and hang forever.
 - **Software renderer**: `LIBGL_ALWAYS_SOFTWARE=1` (Mesa llvmpipe), or raylib's own software backend.
 - **Fake an older GL version on Mesa**: `MESA_GL_VERSION_OVERRIDE=2.1 MESA_GLSL_VERSION_OVERRIDE=120`. This is a smoke test, not a guarantee; real old hardware is still the final check.
 
+## Releases (M7e)
+- **Local package** (current OS): `tools/dev/devbox.sh run tools/package.sh linux-x86_64 dist` builds the GL 3.3 game (`tanks`), the GL 2.1 game (`tanks-gl21`) and `tanks-headless`, copies `data/` with the maps pre-generated (`demo` = `rolling-farmland` seed 42, `uplands` = `wooded-uplands` seed 7), checks that every scenario in `data/scenarios` loads from the package, and writes `dist/tanks-<version>-<platform>.tar.gz` (`.zip` on Windows) with a `.sha256`. The package finds `data/` next to the executable, so it can be started from any directory; `TANKS_DATA` overrides.
+- **All three OSes**: `.github/workflows/release.yml` runs the script on Linux (Ubuntu 22.04, for glibc compatibility), Windows and macOS (arm64) for a `v*` tag or a manual run, and a tag also publishes a GitHub release with the archives. Not run from this container: the first tag is the first real test of the Windows and macOS legs; Intel macOS is not built.
+- Packages are unsigned (macOS Gatekeeper and Windows SmartScreen will warn). Add a map or scenario to the script's `gen` lines when a scenario uses a new map.
+- raylib quirk: `--screenshot` with an absolute path prepends the working directory; use a relative path.
+
 ## Editor / IDE
 rust-analyzer needs the toolchain. Either:
 - run your editor inside the distrobox (`devbox.sh enter`, then launch it, or `distrobox-export --app <editor>`), or
