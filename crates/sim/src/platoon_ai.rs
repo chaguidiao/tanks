@@ -33,8 +33,12 @@ const REPLAN_DISTANCE: f64 = 25.0;
 const REPLAN_EVERY_S: f64 = 4.0;
 /// A contact counts as current if reported within this time (s).
 const CONTACT_FRESH_S: f64 = 25.0;
-/// Resume the mission after this long without fresh contacts (s).
+/// Resume the mission after this long without being engaged (s).
 const QUIET_RESUME_S: f64 = 45.0;
+/// An enemy shot counts as current this long (s).
+const SHOT_RECENT_S: f64 = 20.0;
+/// After a drill ends quiet, sighting alone does not trigger it again for this long (s).
+const DRILL_COOLDOWN_S: f64 = 150.0;
 const SLOT_ARRIVE: f64 = 6.0;
 const BP_ARRIVE: f64 = 1.5;
 /// Search radius for hasty hull-down positions around the platoon (m).
@@ -192,6 +196,9 @@ fn contact_drill(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
         return;
     }
     let pic = &ctx.pictures[p.side.0 as usize];
+    if ctx.tick < p.drill_off_until && !pic.shots.iter().any(|s| !s.own && pic.time_s - s.time_s < SHOT_RECENT_S) {
+        return;
+    }
     let alive = p.alive_members(ctx.world);
     let c = centroid(ctx.world, &alive);
     let Some(threat) = fresh_contacts(pic)
@@ -228,7 +235,11 @@ fn contact_drill(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
 
 fn contact_step(p: &mut Platoon, ctx: &mut Ctx) {
     let pic = &ctx.pictures[p.side.0 as usize];
-    if !fresh_contacts(pic).is_empty()
+    // The drill holds while the platoon is engaged: its guns have a target, or an enemy shot has been
+    // seen lately (ATP 3-20.15 App. F: react to contact, then continue the mission). An enemy that
+    // is merely visible, out of range and silent does not freeze the platoon forever.
+    let shot_at = pic.shots.iter().any(|s| !s.own && pic.time_s - s.time_s < SHOT_RECENT_S);
+    if shot_at
         || p.alive_members(ctx.world).iter().any(|&k| ctx.world.gun[k].as_ref().is_some_and(|g| g.target.is_some()))
     {
         p.quiet_since = ctx.tick;
@@ -239,6 +250,7 @@ fn contact_step(p: &mut Platoon, ctx: &mut Ctx) {
             Some((dest, via, tech)) => {
                 p.technique = tech;
                 p.order = PlatoonOrder::new_move(dest, via);
+                p.drill_off_until = ctx.tick + (DRILL_COOLDOWN_S / DT) as u64;
                 ctx.report(p, PlatoonReport::ContinuingMission);
             }
             None => p.order = PlatoonOrder::None,

@@ -48,6 +48,8 @@
         (name: "ISU THERMAL (EARLY)", kind: thermal, in_service: (from: 1981),
             cycles_per_mrad: (value: 2.5, source: "estimate", confidence: estimate,
                 notes: "Early integrated sight unit with a first-generation imager for TOW; open sources are unclear on its performance, so this is an estimate.")),
+        (name: "IBAS THERMAL (GEN 2)", kind: thermal, in_service: (from: 2000),
+            cycles_per_mrad: (value: 5.0, source: "Vollmerhausen & Jacobs (2004); second-generation imager of the improved Bradley acquisition upgrade", confidence: estimate)),
     ],
     fire_control: (
         laser_rangefinder: false,

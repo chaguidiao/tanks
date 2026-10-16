@@ -212,6 +212,7 @@ impl Sim {
                                 held: None,
                                 speed_limit: None,
                                 quiet_since: 0,
+                                drill_off_until: 0,
                                 last_strength: 0,
                                 last_indirect: None,
                                 withdraw: false,

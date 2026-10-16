@@ -1,0 +1,73 @@
+// M7e Modern scenario (2005): Blue attacks a prepared Red defence at dusk across open farmland.
+// Both sides have thermal imagers, so engagements start at 3 km and more. The T-90's gun-launched
+// missiles reach 5 km and its reactive armour defeats much of what the Blue infantry fighting
+// vehicles can throw; the A2 outranges and out-protects it frontally. Blue wins by seizing the
+// village (2 minutes uncontested) within 40 minutes. The player commands the attack; the Red AI
+// defends with alternate positions and a reserve. The Blue AI plan is used only when the side is
+// not player-controlled (headless runs, tests).
+(
+    id: "mod-dusk-attack",
+    name: "DUSK ATTACK",
+    date: (2005, 6, 20),
+    start_time_s: 70200, // 19:30
+    map: (id: "demo", recipe: "rolling-farmland", seed: 42, size_m: 8000.0),
+    seed: 4,
+    weather: (preset: "clear", latitude_deg: 50.0, wind_speed_mps: 2.0, wind_from_deg: 290.0, moon_phase: 0.2),
+    briefing: "SITUATION: A RED TANK COMPANY (T-90A, T-72B) AND AN INFANTRY FIGHTING VEHICLE PLATOON HOLD A VILLAGE ON OPEN FARMLAND. A RED RESERVE OF T-90A IS BEHIND IT. BOTH SIDES HAVE THERMAL IMAGERS; RED TANKS CARRY GUN-LAUNCHED MISSILES (UP TO 5 KM) AND HEAVY REACTIVE ARMOUR. A 155 MM BATTERY (ARTY 1) IS IN DIRECT SUPPORT.\n\nMISSION: 1ST AND 2ND PLATOONS (M1A2) AND 3RD PLATOON (M2A2) SEIZE THE VILLAGE WITHIN 40 MINUTES. A SIDE THAT LOSES 70 % OF ITS VEHICLES LOSES.\n\nNOTES: THERE IS NO COVER ON THE APPROACH. USE SMOKE TO BREAK THE RED MISSILE ENGAGEMENT, MOVE IN BOUNDS, AND AIM FOR THE SIDES OF THE T-90A; ITS FRONT IS REACTIVE ARMOUR OVER COMPOSITE.",
+    objectives: [(name: "VILLAGE", centre: (4500.0, 4300.0), radius_m: 350.0)],
+    victory: (time_limit_s: 2400.0, objective: "VILLAGE", attacker: 0, destroyed_fraction: 0.7),
+    sides: [
+        (
+            name: "BLUE",
+            doctrine: "western-combined",
+            fire_support: [(callsign: "ARTY 1", battery: "sph155_btry", position: (900.0, 700.0))],
+            units: [
+                (callsign: "1-1", vehicle: "bulwark_a2", position: (1500.0, 1500.0), heading_deg: 45.0, platoon: "1"),
+                (callsign: "1-2", vehicle: "bulwark_a2", position: (1570.0, 1470.0), heading_deg: 45.0, platoon: "1"),
+                (callsign: "1-3", vehicle: "bulwark_a2", position: (1640.0, 1440.0), heading_deg: 45.0, platoon: "1"),
+                (callsign: "1-4", vehicle: "bulwark_a2", position: (1710.0, 1410.0), heading_deg: 45.0, platoon: "1"),
+                (callsign: "2-1", vehicle: "bulwark_a2", position: (1700.0, 1750.0), heading_deg: 45.0, platoon: "2"),
+                (callsign: "2-2", vehicle: "bulwark_a2", position: (1770.0, 1720.0), heading_deg: 45.0, platoon: "2"),
+                (callsign: "2-3", vehicle: "bulwark_a2", position: (1840.0, 1690.0), heading_deg: 45.0, platoon: "2"),
+                (callsign: "2-4", vehicle: "bulwark_a2", position: (1910.0, 1660.0), heading_deg: 45.0, platoon: "2"),
+                (callsign: "3-1", vehicle: "ward_m2", position: (1300.0, 1300.0), heading_deg: 45.0, platoon: "3"),
+                (callsign: "3-2", vehicle: "ward_m2", position: (1370.0, 1270.0), heading_deg: 45.0, platoon: "3"),
+                (callsign: "3-3", vehicle: "ward_m2", position: (1440.0, 1240.0), heading_deg: 45.0, platoon: "3"),
+            ],
+            ai: (tasks: [
+                (platoons: ["1", "2", "3"], mission: Attack(axis: [(2800.0, 2600.0), (3600.0, 3400.0)], objective: "VILLAGE")),
+            ]),
+        ),
+        (
+            name: "RED",
+            doctrine: "generic-opfor",
+            fire_support: [(callsign: "ARTY 2", battery: "sph152_btry", position: (7000.0, 6800.0))],
+            units: [
+                (callsign: "211", vehicle: "kurgan_c", position: (4700.0, 4700.0), heading_deg: 225.0, platoon: "21"),
+                (callsign: "212", vehicle: "kurgan_c", position: (4770.0, 4670.0), heading_deg: 225.0, platoon: "21"),
+                (callsign: "213", vehicle: "kurgan_c", position: (4840.0, 4640.0), heading_deg: 225.0, platoon: "21"),
+                (callsign: "214", vehicle: "kurgan_c", position: (4910.0, 4610.0), heading_deg: 225.0, platoon: "21"),
+                (callsign: "221", vehicle: "kurgan_c", position: (4300.0, 4900.0), heading_deg: 225.0, platoon: "22"),
+                (callsign: "222", vehicle: "kurgan_c", position: (4370.0, 4870.0), heading_deg: 225.0, platoon: "22"),
+                (callsign: "223", vehicle: "kurgan_c", position: (4440.0, 4840.0), heading_deg: 225.0, platoon: "22"),
+                (callsign: "224", vehicle: "kurgan_c", position: (4510.0, 4810.0), heading_deg: 225.0, platoon: "22"),
+                (callsign: "231", vehicle: "kurgan_b", position: (5000.0, 4400.0), heading_deg: 225.0, platoon: "23"),
+                (callsign: "232", vehicle: "kurgan_b", position: (5070.0, 4370.0), heading_deg: 225.0, platoon: "23"),
+                (callsign: "233", vehicle: "kurgan_b", position: (5140.0, 4340.0), heading_deg: 225.0, platoon: "23"),
+                (callsign: "234", vehicle: "kurgan_b", position: (5210.0, 4310.0), heading_deg: 225.0, platoon: "23"),
+                (callsign: "241", vehicle: "skif_m1", position: (4000.0, 4600.0), heading_deg: 225.0, platoon: "24"),
+                (callsign: "242", vehicle: "skif_m1", position: (4070.0, 4570.0), heading_deg: 225.0, platoon: "24"),
+                (callsign: "243", vehicle: "skif_m1", position: (4140.0, 4540.0), heading_deg: 225.0, platoon: "24"),
+                (callsign: "251", vehicle: "kurgan_c", position: (5600.0, 5200.0), heading_deg: 225.0, platoon: "25"),
+                (callsign: "252", vehicle: "kurgan_c", position: (5670.0, 5170.0), heading_deg: 225.0, platoon: "25"),
+                (callsign: "253", vehicle: "kurgan_c", position: (5740.0, 5140.0), heading_deg: 225.0, platoon: "25"),
+                (callsign: "254", vehicle: "kurgan_c", position: (5810.0, 5110.0), heading_deg: 225.0, platoon: "25"),
+            ],
+            ai: (tasks: [
+                (platoons: ["21", "22", "23", "24"], mission: Defend(centre: (4600.0, 4500.0), radius_m: 260.0, facing_deg: 225.0,
+                    alternates: [(centre: (5200.0, 5000.0), radius_m: 220.0, facing_deg: 225.0)])),
+                (platoons: ["25"], mission: Reserve(assembly: (centre: (5500.0, 5200.0), radius_m: 150.0, facing_deg: 225.0), objective: "VILLAGE")),
+            ]),
+        ),
+    ],
+)

@@ -1,0 +1,16 @@
+// Fictional 120 mm APFSDS mirroring the M829A2/A3 class (depleted uranium, 1992-2000s).
+(
+    id: "apfsds_120b",
+    name: "APFSDS 120-B",
+    mirrors: "M829A2/A3",
+    kind: apfsds,
+    in_service: (from: 1992),
+    muzzle_velocity_mps: (value: 1680.0, source: "Jane's Ammunition Handbook (open editions): about 1,680 m/s", confidence: low),
+    velocity_loss_mps_per_km: (value: 60.0, source: "McCoy, Modern Exterior Ballistics (1999), long-rod drag; estimate", confidence: estimate),
+    rod_length_mm: (value: 767.0, source: "fitted so the model reproduces the reference penetration; open sources give no rod geometry", confidence: estimate),
+    rod_diameter_mm: (value: 22.0, source: "estimate", confidence: estimate),
+    rod_density_g_cm3: (value: 18.6, source: "depleted-uranium alloy density", confidence: medium),
+    dispersion_mrad: (value: 0.18, source: "estimate", confidence: estimate),
+    reference_penetration_2km_mm: (value: 720.0, source: "open-source estimates (range ~650-800 mm RHA at 2 km)", confidence: low),
+    preferred_vs: [mbt],
+)

@@ -1,0 +1,16 @@
+// Fictional 125 mm APFSDS mirroring the 3BM42M class (1990s-2000s).
+(
+    id: "apfsds_125c",
+    name: "APFSDS 125-C",
+    mirrors: "3BM42M",
+    kind: apfsds,
+    in_service: (from: 1992),
+    muzzle_velocity_mps: (value: 1750.0, source: "open-source estimates", confidence: low),
+    velocity_loss_mps_per_km: (value: 70.0, source: "estimate", confidence: estimate),
+    rod_length_mm: (value: 579.0, source: "fitted so the model reproduces the reference penetration; open sources give no rod geometry", confidence: estimate),
+    rod_diameter_mm: (value: 24.0, source: "estimate", confidence: estimate),
+    rod_density_g_cm3: (value: 17.6, source: "tungsten heavy alloy density", confidence: medium),
+    dispersion_mrad: (value: 0.27, source: "estimate", confidence: estimate),
+    reference_penetration_2km_mm: (value: 550.0, source: "open-source estimates (range ~500-600 mm RHA at 2 km)", confidence: low),
+    preferred_vs: [mbt],
+)

@@ -1,0 +1,17 @@
+// Fictional gun-launched laser-beam-riding missile mirroring the 9M119 class (fired from the
+// 125 mm tank gun). Guided: the gunner holds the sight on the target; no ballistic error.
+(
+    id: "atgm_refleks",
+    name: "ATGM RF-1 (GUN-LAUNCHED)",
+    mirrors: "9M119 Svir/Refleks",
+    kind: heat,
+    guided: true,
+    in_service: (from: 1992),
+    muzzle_velocity_mps: (value: 350.0, source: "open-source estimates: average flight speed of the order of 300-400 m/s", confidence: low),
+    velocity_loss_mps_per_km: (value: 0.0, source: "a sustained rocket motor holds cruise speed", confidence: low),
+    flat_penetration_mm: (value: 700.0, source: "open-source estimates (about 700 mm RHA behind ERA for tandem versions)", confidence: low),
+    dispersion_mrad: (value: 0.25, source: "estimate", confidence: estimate, notes: "Laser beam riding tracks well; same order as SACLOS wire guidance."),
+    reload_s: (value: 8.0, source: "estimate", confidence: estimate, notes: "Autoloader cycle plus the gunner holding the sight to impact."),
+    max_range_m: (value: 5000.0, source: "open-source estimates: about 5 km", confidence: medium),
+    preferred_vs: [mbt],
+)

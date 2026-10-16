@@ -60,6 +60,9 @@ pub struct Platoon {
     /// Order interrupted by a HALT, continued by RESUME. Any new order discards it.
     pub held: Option<PlatoonOrder>,
     pub quiet_since: u64,
+    /// The contact drill does not trigger on sighting alone before this tick (set when a drill
+    /// ends quiet, so a visible but silent enemy does not stop the platoon again at once).
+    pub drill_off_until: u64,
     pub last_strength: u8,
     /// Tick of the last "react to indirect fire" report.
     pub last_indirect: Option<u64>,

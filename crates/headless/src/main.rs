@@ -15,9 +15,10 @@ const USAGE: &str = "usage: tanks-headless <command> [options]
   render  --map <id> --layer <tint|shade|slope|traffic|landcover> [--class <vehicle>] [--downsample <n>] --out <png>
   info    --map <id>                                                   print map statistics
   probe   --map <id> --at <x,y[;x,y..]>                                terrain at points
-  run     --scenario <id> [--seconds <s>] [--move <x,y>]               run a scenario headless
+  run     --scenario <id> [--seconds <s>] [--move <x,y>] [--seed <n>] [--summary]
+                                                                       run a scenario headless (--summary: one CSV line)
   replay  --file <replay.ron>                                          re-simulate a replay, verify its hash
-  duel    [--shooter <id>] [--target <id>] [--ranges 500,1000,..] [--trials <n>] [--aspect front|side]
+  duel    [--shooter <id>] [--target <id>] [--ranges 500,1000,..] [--trials <n>] [--aspect front|side] [--year <y>]
           [--out <csv>]                                                Monte-Carlo duel validation harness
 
 Options: --data <dir> (default: ./data or $TANKS_DATA)";
@@ -242,7 +243,11 @@ fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), St
     use sim::{Command, Event, SideId, Sim};
 
     let id = a.req("--scenario")?;
-    let sc = DataSet::load_scenario(data, id).map_err(|e| e.to_string())?;
+    let mut sc = DataSet::load_scenario(data, id).map_err(|e| e.to_string())?;
+    if let Some(seed) = a.get("--seed") {
+        sc.seed = seed.parse().map_err(|_| "bad --seed")?;
+    }
+    let summary = a.0.iter().any(|x| x == "--summary");
     let map = Arc::new(workflow::ensure_map(data, ds, &sc.map, |s| eprintln!("{s}")).map_err(|e| e.to_string())?);
     let mut sim = Sim::new(&sc, Arc::new(ds.clone()), map).map_err(|e| e.to_string())?;
     let seconds: f64 = a.get("--seconds").unwrap_or("300").parse().map_err(|_| "bad --seconds")?;
@@ -255,19 +260,56 @@ fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), St
     }
     let t = Instant::now();
     let ticks = (seconds * sim::TICK_HZ as f64) as u64;
+    let mut end = None;
     for _ in 0..ticks {
         if sim.ended() {
             break;
         }
         for e in sim.step() {
-            let show =
-                matches!(e, Event::ScenarioEnd { .. } | Event::PlatoonReport { .. } | Event::Hit { kill: Some(_), .. });
+            if let Event::ScenarioEnd { winner, reason } = &e {
+                end = Some((*winner, format!("{reason:?}")));
+            }
+            let show = !summary
+                && matches!(
+                    e,
+                    Event::ScenarioEnd { .. } | Event::PlatoonReport { .. } | Event::Hit { kill: Some(_), .. }
+                );
             if show {
                 println!("t={:7.1}s  {e:?}", sim.time_s());
             }
         }
     }
     let wall = t.elapsed().as_secs_f64();
+    if summary {
+        // scenario,seed,winner,end_s,reason,losses per side (destroyed or without firepower)
+        let w = sim.truth();
+        let lost = |side: u8| {
+            (0..w.len())
+                .filter(|&k| {
+                    w.side[k].0 == side
+                        && matches!(
+                            w.condition[k],
+                            sim::view::Condition::Destroyed | sim::view::Condition::FirepowerKill
+                        )
+                })
+                .count()
+        };
+        let total = |side: u8| (0..w.len()).filter(|&k| w.side[k].0 == side).count();
+        let (winner, reason) = end.unwrap_or((None, "TimeOut".into()));
+        let name = |wn: Option<SideId>| wn.map_or("none".to_owned(), |s| sim.side_names()[s.0 as usize].clone());
+        println!(
+            "{id},{},{},{:.0},{},{}/{},{}/{}",
+            sc.seed,
+            name(winner),
+            sim.time_s(),
+            reason.split_whitespace().next().unwrap_or(""),
+            lost(0),
+            total(0),
+            lost(1),
+            total(1)
+        );
+        return Ok(());
+    }
     for u in &sim.perceived(blue).own {
         println!(
             "{:<4} pos ({:7.1}, {:7.1})  speed {:4.1} m/s  fuel {:5.1} %",
@@ -305,6 +347,7 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
         .map(|r| r.trim().parse::<f64>().map_err(|_| format!("bad range '{r}'")))
         .collect::<Result<_, _>>()?;
     let side_on = a.get("--aspect") == Some("side");
+    let year: i32 = a.get("--year").unwrap_or("1990").parse().map_err(|_| "bad --year")?;
     let max_r = ranges.iter().copied().fold(0.0, f64::max);
     let h_cells = ((max_r + 800.0) / 4.0) as usize;
     let m = MapManifest {
@@ -333,7 +376,7 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
             let sc = ScenarioDef {
                 id: "duel".into(),
                 name: "duel".into(),
-                date: (1990, 6, 1),
+                date: (year, 6, 1),
                 start_time_s: 10 * 3600,
                 map: MapRef { id: "duel".into(), recipe: String::new(), seed: 1, size_m: 0.0 },
                 seed: trial + 1,

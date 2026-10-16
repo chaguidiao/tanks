@@ -710,7 +710,15 @@ mod tests {
             .filter(|a| a.kind == sim_data::AmmoKind::Apfsds && a.in_service.contains(year))
             .map(|a| penetration_mm(&ds.penetration, a, velocity_at(a, 2000.0)))
             .fold(0.0, f64::max);
-        best / ds.vehicle(target).unwrap().armour.turret_front.get()
+        let t = ds.vehicle(target).unwrap();
+        // Reactive tiles in service add their KE gain over the share of the front they cover.
+        let era = t
+            .armour
+            .era
+            .as_ref()
+            .filter(|e| e.in_service.contains(year))
+            .map_or(0.0, |e| e.coverage.get() * e.ke_gain_mm.get());
+        best / (t.armour.turret_front.get() + era)
     }
 
     #[test]
@@ -725,6 +733,19 @@ mod tests {
         // The 1988+ A1 with the improved sabot outclasses the A, as the historical record shows.
         assert!(front_margin(&ds, "bulwark_a1", "kurgan_a", 1990) > 1.3);
         assert!(front_margin(&ds, "kurgan_a", "bulwark_a1", 1990) < 0.8);
+    }
+
+    #[test]
+    fn modern_pairings_favour_the_better_protected_but_leave_the_t90_a_chance() {
+        // About 2005 at 2 km, turret front: the A2's sabot just defeats the T-90's front with its
+        // reactive armour (margin near 1), while the T-90's sabot does not defeat the A2's front.
+        let ds = ds();
+        let blue = front_margin(&ds, "bulwark_a2", "kurgan_c", 2005);
+        let red = front_margin(&ds, "kurgan_c", "bulwark_a2", 2005);
+        assert!((0.85..1.25).contains(&blue), "M1A2 vs T-90A front: {blue:.2}");
+        assert!(red < 0.85, "T-90A vs M1A2 front: {red:.2}");
+        // The upgraded T-72B (thermal sight from 2005, ERA from 1988) cannot hold the A2 either.
+        assert!(front_margin(&ds, "bulwark_a2", "kurgan_b", 2005) > 1.3);
     }
 
     #[test]
@@ -765,7 +786,16 @@ mod tests {
     #[test]
     fn penetration_matches_reference_values_within_ten_percent() {
         let ds = ds();
-        for id in ["apfsds_120a", "apfsds_125b", "apfsds_120_early", "apfsds_105a", "apfsds_105b", "apfsds_125a"] {
+        for id in [
+            "apfsds_120a",
+            "apfsds_125b",
+            "apfsds_120_early",
+            "apfsds_105a",
+            "apfsds_105b",
+            "apfsds_125a",
+            "apfsds_120b",
+            "apfsds_125c",
+        ] {
             let a = ds.ammo(id).unwrap();
             let p = penetration_mm(&ds.penetration, a, velocity_at(a, 2000.0));
             let reference = a.reference_penetration_2km_mm.as_ref().unwrap().get();
