@@ -1,0 +1,16 @@
+// Fictional 105 mm APFSDS mirroring the M735 class (tungsten, 1979).
+(
+    id: "apfsds_105a",
+    name: "APFSDS 105-A",
+    mirrors: "M735",
+    kind: apfsds,
+    in_service: (from: 1979),
+    muzzle_velocity_mps: (value: 1501.0, source: "Jane's Ammunition Handbook (open editions): M735 muzzle velocity about 1,500 m/s", confidence: medium),
+    velocity_loss_mps_per_km: (value: 70.0, source: "McCoy, Modern Exterior Ballistics (1999), long-rod drag; estimate", confidence: estimate),
+    rod_length_mm: (value: 342.0, source: "fitted so the model reproduces the reference penetration; open sources give no rod geometry", confidence: estimate),
+    rod_diameter_mm: (value: 28.0, source: "estimate", confidence: estimate),
+    rod_density_g_cm3: (value: 17.6, source: "tungsten heavy alloy density", confidence: medium),
+    dispersion_mrad: (value: 0.3, source: "estimate", confidence: estimate),
+    reference_penetration_2km_mm: (value: 320.0, source: "open-source estimates (range ~290-360 mm RHA at 2 km)", confidence: low),
+    preferred_vs: [mbt],
+)

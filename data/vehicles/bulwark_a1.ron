@@ -67,7 +67,7 @@
     ),
     armament: (
         gun: "120 MM SMOOTHBORE",
-        load: [(ammo: "apfsds_120a", count: 24), (ammo: "heat_120a", count: 12), (ammo: "smoke_120", count: 4)],
+        load: [(ammo: "apfsds_120_early", count: 24), (ammo: "apfsds_120a", count: 24), (ammo: "heat_120a", count: 12), (ammo: "smoke_120", count: 4)],
         autoloader: false,
         reload_s: (value: 6.0, source: "estimate", confidence: estimate, notes: "Trained human loader from the ready rack."),
         turret_traverse_rad_s: (value: 0.7, source: "Hunnicutt, Abrams (1990): 360 deg in ~9 s", confidence: medium),

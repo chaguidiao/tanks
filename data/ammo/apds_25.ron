@@ -1,0 +1,16 @@
+// Fictional 25 mm APDS-T autocannon round mirroring the M791 class. One "round" here is a short
+// burst (see the vehicle).
+(
+    id: "apds_25",
+    name: "APDS-T 25",
+    mirrors: "M791 APDS-T",
+    kind: apds,
+    in_service: (from: 1978),
+    muzzle_velocity_mps: (value: 1385.0, source: "Jane's Ammunition Handbook (open editions): about 1,385 m/s", confidence: medium),
+    velocity_loss_mps_per_km: (value: 95.0, source: "estimate", confidence: estimate),
+    flat_penetration_mm: (value: 65.0, source: "open-source estimates for 25 mm APDS (defeats an IFV-class hull at 1-1.5 km, not a tank's front)", confidence: low,
+        notes: "Muzzle figure; scaled by (v/v0)^2 with range."),
+    dispersion_mrad: (value: 0.9, source: "estimate", confidence: estimate, notes: "Burst dispersion folded into one sampled error."),
+    max_range_m: (value: 2000.0, source: "estimate", confidence: estimate),
+    preferred_vs: [ifv, recon],
+)

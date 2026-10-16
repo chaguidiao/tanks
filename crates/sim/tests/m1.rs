@@ -238,6 +238,8 @@ fn same_commands_give_the_same_state_hash() {
     assert_eq!(h1, h2);
     assert_eq!(e1, e2);
     // Golden value: update deliberately (and say why in the commit) when behaviour changes.
-    const GOLDEN: u64 = 0xc28b_a005_d31b_98ef;
+    // M7e Cold War set: the bulwark_a1 loadout gained an early-sabot slot (stock 0 in 1990), which
+    // lengthens the hashed stock array; behaviour is unchanged (the old value returns without it).
+    const GOLDEN: u64 = 0x60d4_0816_c5da_736f;
     assert_eq!(h1, GOLDEN, "state hash changed: {h1:#018x}");
 }

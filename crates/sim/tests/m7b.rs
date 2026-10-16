@@ -18,6 +18,11 @@ fn loadout(ds: &DataSet, v: &str) -> Vec<usize> {
     def.armament.load.iter().map(|l| ds.ammo.iter().position(|a| a.id == l.ammo).unwrap()).collect()
 }
 
+/// Position of an ammunition id in a vehicle's loadout (tests must not rely on list order).
+fn slot(ds: &DataSet, v: &str, ammo: &str) -> usize {
+    ds.vehicle(v).unwrap().armament.load.iter().position(|l| l.ammo == ammo).unwrap()
+}
+
 /// A shot at the target's front from `range`, target facing the shooter.
 fn frontal(range: f64) -> ShotGeometry {
     ShotGeometry {
@@ -99,10 +104,18 @@ fn crews_pick_the_round_by_target_class() {
     let mut held = g.clone();
     held.selected = Some(AmmoKind::Heat);
     assert_eq!(pick("kurgan_b", &held), AmmoKind::Heat, "the commander's choice wins when it is available");
+    // Empty every rack of one kind (the loadout now holds two sabot types for the 1985-89 window).
+    let empty = |g: &mut GunState, kind: AmmoKind| {
+        for (li, &ai) in lo.iter().enumerate() {
+            if ds.ammo[ai].kind == kind {
+                g.stock[li] = 0;
+            }
+        }
+    };
     let mut dry = g.clone();
-    dry.stock[0] = 0;
+    empty(&mut dry, AmmoKind::Apfsds);
     assert_eq!(pick("kurgan_b", &dry), AmmoKind::Heat, "an empty rack forces the other type");
-    held.stock[1] = 0;
+    empty(&mut held, AmmoKind::Heat);
     held.selected = Some(AmmoKind::Heat);
     assert_eq!(pick("kurgan_b", &held), AmmoKind::Apfsds, "a held type with no rounds falls back to auto");
 }
@@ -111,7 +124,9 @@ fn crews_pick_the_round_by_target_class() {
 fn smoke_is_never_selected_against_a_target() {
     let ds = data();
     let lo = loadout(&ds, "bulwark_a1");
-    let mut g = GunState::new(0.0, vec![0, 0, 4]);
+    let mut stock = vec![0; lo.len()];
+    stock[slot(&ds, "bulwark_a1", "smoke_120")] = 4;
+    let mut g = GunState::new(0.0, stock);
     g.selected = Some(AmmoKind::Smoke);
     let geo = frontal(1000.0);
     assert!(
@@ -129,7 +144,7 @@ fn open_sim(blue: Vec<sim_data::UnitDef>, red: Vec<sim_data::UnitDef>) -> Sim {
 fn a_smoke_mission_lays_a_screen_at_the_aim_point_and_spends_rounds() {
     let mut sim = open_sim(vec![unit("B1", "bulwark_a1", [1200.0, 400.0], 0.0, None)], vec![]);
     let id = sim.truth().id[0];
-    let smoke_i = sim.vehicle_defs().iter().position(|v| v.id == "bulwark_a1").map(|_| 2).unwrap();
+    let smoke_i = slot(&data(), "bulwark_a1", "smoke_120");
     let before = sim.truth().gun[0].as_ref().unwrap().stock[smoke_i];
     assert_eq!(before, 4);
     sim.submit_immediate(BLUE, Command::FireSmoke { to: Addressee::Unit(id), at: [1200.0, 1000.0], rounds: 2 });
@@ -152,8 +167,9 @@ fn a_held_round_type_is_the_one_fired() {
     sim.submit_immediate(BLUE, Command::SelectAmmo { to: Addressee::Unit(id), kind: Some(AmmoKind::Heat) });
     run(&mut sim, 60.0);
     let g = sim.truth().gun[0].as_ref().unwrap();
-    assert_eq!(g.stock[0], 24, "no sabot fired");
-    assert!(g.stock[1] < 12, "HEAT fired: {:?}", g.stock);
+    let ds = data();
+    assert_eq!(g.stock[slot(&ds, "bulwark_a1", "apfsds_120a")], 24, "no sabot fired");
+    assert!(g.stock[slot(&ds, "bulwark_a1", "heat_120a")] < 12, "HEAT fired: {:?}", g.stock);
 }
 
 #[test]

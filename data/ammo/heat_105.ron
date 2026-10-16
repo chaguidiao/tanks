@@ -1,0 +1,14 @@
+// Fictional 105 mm HEAT-T mirroring the M456 class (1976).
+(
+    id: "heat_105",
+    name: "HEAT 105",
+    mirrors: "M456A2",
+    kind: heat,
+    in_service: (from: 1976),
+    muzzle_velocity_mps: (value: 1173.0, source: "Jane's Ammunition Handbook (open editions): M456 about 1,170 m/s", confidence: low),
+    velocity_loss_mps_per_km: (value: 55.0, source: "estimate", confidence: estimate),
+    flat_penetration_mm: (value: 400.0, source: "open-source estimates for 105 mm HEAT (range ~380-430 mm RHA)", confidence: low,
+        notes: "Shaped-charge penetration is nearly independent of range."),
+    dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate),
+    preferred_vs: [ifv, recon],
+)

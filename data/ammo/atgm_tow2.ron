@@ -1,0 +1,16 @@
+// Fictional wire-guided anti-tank missile mirroring the TOW-2 (BGM-71D) class (1983).
+(
+    id: "atgm_tow2",
+    name: "ATGM TOW-2",
+    mirrors: "BGM-71D TOW-2",
+    kind: heat,
+    guided: true,
+    in_service: (from: 1983),
+    muzzle_velocity_mps: (value: 280.0, source: "open-source estimates: flight speed about 280 m/s", confidence: low),
+    velocity_loss_mps_per_km: (value: 0.0, source: "a sustained rocket motor holds cruise speed", confidence: low),
+    flat_penetration_mm: (value: 850.0, source: "open-source estimates (800 mm RHA and more for TOW-2)", confidence: low),
+    dispersion_mrad: (value: 0.28, source: "estimate", confidence: estimate, notes: "Same SACLOS tracking behaviour as the SK-5 (see data/ammo/atgm_sk5.ron)."),
+    reload_s: (value: 12.0, source: "estimate", confidence: estimate, notes: "Load the next missile; the gunner must also keep the sight on target to the end of flight."),
+    max_range_m: (value: 3750.0, source: "open-source estimates: 3.75 km", confidence: medium),
+    preferred_vs: [mbt],
+)

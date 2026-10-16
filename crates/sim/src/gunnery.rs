@@ -698,6 +698,35 @@ mod tests {
         sim_data::DataSet::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data")).unwrap()
     }
 
+    /// Best sabot a side fields in `year` against `target`'s front, as penetration / armour at 2 km
+    /// (normal incidence, turret front): the data-level balance check for era pairings.
+    fn front_margin(ds: &sim_data::DataSet, shooter: &str, target: &str, year: i32) -> f64 {
+        let s = ds.vehicle(shooter).unwrap();
+        let best = s
+            .armament
+            .load
+            .iter()
+            .map(|l| ds.ammo(&l.ammo).unwrap())
+            .filter(|a| a.kind == sim_data::AmmoKind::Apfsds && a.in_service.contains(year))
+            .map(|a| penetration_mm(&ds.penetration, a, velocity_at(a, 2000.0)))
+            .fold(0.0, f64::max);
+        best / ds.vehicle(target).unwrap().armour.turret_front.get()
+    }
+
+    #[test]
+    fn cold_war_pairings_are_contestable_and_the_late_eighties_open_a_gap() {
+        // 1985 (M1 vs T-72A, the baseline pair): neither tank's sabot is decisive at 2 km. A margin
+        // near 1 means a hit penetrates about half the time given the shot geometry.
+        let ds = ds();
+        let blue = front_margin(&ds, "bulwark_a0", "kurgan_a", 1985);
+        let red = front_margin(&ds, "kurgan_a", "bulwark_a0", 1985);
+        assert!((0.8..1.3).contains(&blue), "M1 vs T-72A front: {blue:.2}");
+        assert!((0.8..1.3).contains(&red), "T-72A vs M1 front: {red:.2}");
+        // The 1988+ A1 with the improved sabot outclasses the A, as the historical record shows.
+        assert!(front_margin(&ds, "bulwark_a1", "kurgan_a", 1990) > 1.3);
+        assert!(front_margin(&ds, "kurgan_a", "bulwark_a1", 1990) < 0.8);
+    }
+
     #[test]
     fn a_guided_round_has_no_ranging_bias_and_no_lead_error() {
         // A command-guided missile is steered onto the target: superelevation, ballistic bias and
@@ -736,7 +765,7 @@ mod tests {
     #[test]
     fn penetration_matches_reference_values_within_ten_percent() {
         let ds = ds();
-        for id in ["apfsds_120a", "apfsds_125b"] {
+        for id in ["apfsds_120a", "apfsds_125b", "apfsds_120_early", "apfsds_105a", "apfsds_105b", "apfsds_125a"] {
             let a = ds.ammo(id).unwrap();
             let p = penetration_mm(&ds.penetration, a, velocity_at(a, 2000.0));
             let reference = a.reference_penetration_2km_mm.as_ref().unwrap().get();
