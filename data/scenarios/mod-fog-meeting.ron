@@ -4,7 +4,7 @@
 // when the side is not player-controlled (headless runs, tests).
 (
     id: "mod-fog-meeting",
-    name: "FOG AT DAWN",
+    name: "FOG MEETING",
     date: (2005, 10, 3),
     start_time_s: 23400, // 06:30
     map: (id: "demo", recipe: "rolling-farmland", seed: 42, size_m: 8000.0),

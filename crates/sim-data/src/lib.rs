@@ -242,4 +242,18 @@ mod tests {
             assert_eq!(&s.id, id);
         }
     }
+
+    /// The scenario list shows names (and the year), so two scenarios with one name are
+    /// indistinguishable to the player.
+    #[test]
+    fn scenario_names_are_unique() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let mut seen: std::collections::BTreeMap<String, String> = Default::default();
+        for id in DataSet::scenario_ids(&root) {
+            let name = DataSet::load_scenario(&root, &id).unwrap().name;
+            if let Some(other) = seen.insert(name.clone(), id.clone()) {
+                panic!("scenarios {other} and {id} are both named {name:?}");
+            }
+        }
+    }
 }
