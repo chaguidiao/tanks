@@ -82,4 +82,5 @@ Dark, low-saturation tactical display; monospace uppercase labels; NATO symbolog
 ## Workflow
 - Licence: MIT (`LICENSE`). List any bundled third-party asset and its licence in `THIRD_PARTY.md`. Only bundle assets/data with compatible licences; write vehicle data in our own words and tables, citing sources rather than copying them.
 - Small, reviewable commits per subsystem. Update `docs/DESIGN.md` when a design decision changes.
+- Open work is tracked in `docs/TODO.md` (master list). Add new deferrals there, tick items when done, and keep the "Deferred" notes in DESIGN.md §13.1 as history only.
 - When unsure about a doctrinal or physical detail, consult `docs/REFERENCES.md` and say what the source says rather than guessing.

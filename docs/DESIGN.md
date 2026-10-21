@@ -532,6 +532,8 @@ Sparse: radio clicks, squelch, terse synthesised or recorded callouts (optional)
 
 ### 13.1 Implementation status (2026-10-11)
 
+**Open work:** the "Deferred" columns and notes below are history; the live, consolidated list of everything not yet done is `docs/TODO.md`.
+
 | Milestone | Done | Deferred (tracked here) |
 |---|---|---|
 | M0 | Workspace, CI (Linux full + Windows/macOS build/test), GL 3.3 + GL 2.1 client builds, authoring/baked map format, procedural heightfield, contours (5/10/50 m), relief tint + hillshade, pan/zoom, 1 km grid; UI text in IBM Plex Mono (TTF, one atlas per size, sized to the built-in font's advance so layouts hold; falls back to the built-in font) | Contour/layer `RenderTexture` caching per zoom band (direct drawing is fast enough so far) |
