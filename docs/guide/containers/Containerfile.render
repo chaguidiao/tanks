@@ -1,0 +1,5 @@
+# Renders the user guide (Markdown -> HTML -> PDF). Throwaway image: podman rmi localhost/tanks-guide
+FROM docker.io/library/ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends weasyprint python3-markdown python3-pil \
+        fonts-dejavu-core fonts-noto-core poppler-utils && rm -rf /var/lib/apt/lists/*

@@ -1,0 +1,93 @@
+@font-face { font-family: "IBM Plex Mono"; src: url("FONT_DIR/IBMPlexMono-Medium.ttf"); }
+
+@page {
+  size: A4;
+  margin: 20mm 17mm 20mm 17mm;
+  @top-left { content: "TANKS · USER GUIDE"; font: 7.5pt "IBM Plex Mono"; color: #7a7f84; }
+  @top-right { content: string(chapter); font: 7.5pt "IBM Plex Mono"; color: #7a7f84; }
+  @bottom-center { content: counter(page); font: 8pt "IBM Plex Mono"; color: #555; }
+}
+@page cover { margin: 0; @top-left { content: none; } @top-right { content: none; } @bottom-center { content: none; } }
+@page part { @top-left { content: none; } @top-right { content: none; } }
+
+html { font-family: "Noto Sans", "DejaVu Sans", sans-serif; font-size: 9.6pt; line-height: 1.45; color: #1d2125; }
+body { margin: 0; }
+
+h1, h2, h3, h4 { font-family: "IBM Plex Mono", monospace; font-weight: normal; color: #14181c; line-height: 1.2; }
+h1 { font-size: 18pt; text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 6mm; padding-bottom: 2mm;
+     border-bottom: 1.5pt solid #b8892b; page-break-before: always; string-set: chapter content(); }
+h1 .num, h2 .num { color: #b8892b; margin-right: 0.4em; }
+h2 { font-size: 12.5pt; margin: 7mm 0 2.5mm; text-transform: uppercase; page-break-after: avoid; }
+h3 { font-size: 10.5pt; margin: 5mm 0 1.5mm; page-break-after: avoid; color: #2b3b48; }
+h4 { font-size: 9.6pt; margin: 4mm 0 1mm; page-break-after: avoid; }
+p { margin: 0 0 2.6mm; orphans: 2; widows: 2; }
+ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
+li { margin-bottom: 1mm; }
+a { color: inherit; text-decoration: none; }
+code, kbd, .mono { font-family: "IBM Plex Mono", monospace; font-size: 8.6pt; }
+code { background: #eef0f1; padding: 0 2px; border-radius: 2px; }
+kbd { border: 0.6pt solid #8b9196; border-bottom-width: 1.4pt; border-radius: 2.5px; padding: 0 3px;
+      background: #f7f7f5; white-space: nowrap; }
+strong { color: #0f1316; }
+
+table { border-collapse: collapse; width: 100%; margin: 2mm 0 4mm; font-size: 8.8pt; page-break-inside: auto; }
+th, td { border-bottom: 0.5pt solid #cfd3d6; padding: 1.4mm 2mm; text-align: left; vertical-align: top; }
+th { font-family: "IBM Plex Mono", monospace; font-weight: normal; font-size: 8pt; text-transform: uppercase;
+     color: #555; border-bottom: 1pt solid #8b9196; }
+tr { page-break-inside: avoid; }
+
+figure.shot { margin: 3mm auto 5mm; page-break-inside: avoid; }
+figure.shot .frame { position: relative; border: 0.8pt solid #2a3036; line-height: 0; }
+figure.shot img { width: 100%; display: block; }
+figure.shot .pin { position: absolute; width: 5.2mm; height: 5.2mm; margin: -2.6mm 0 0 -2.6mm; border-radius: 50%;
+  background: #f2b230; color: #111; border: 0.9pt solid #111; font: 7.5pt/5.1mm "IBM Plex Mono"; text-align: center; }
+figcaption { font-size: 8.4pt; color: #444; margin-top: 1.5mm; line-height: 1.35; }
+figcaption b { font-family: "IBM Plex Mono"; font-weight: normal; color: #8a6618; }
+
+.pinlist { font-size: 8.8pt; }
+.pinlist td:first-child { width: 7mm; }
+.pinref { display: inline-block; width: 4.4mm; height: 4.4mm; border-radius: 50%; background: #f2b230;
+  border: 0.8pt solid #111; font: 7pt/4.3mm "IBM Plex Mono"; text-align: center; }
+
+.tip, .note, .warn, .doctrine { padding: 2.5mm 3.5mm; margin: 3mm 0 4mm; page-break-inside: avoid; font-size: 9pt; }
+.tip { background: #eef4ee; border-left: 2.5pt solid #5c8a5c; }
+.note { background: #eef1f5; border-left: 2.5pt solid #5b7393; }
+.warn { background: #f8f0e3; border-left: 2.5pt solid #b8892b; }
+.doctrine { background: #f3f1ec; border-left: 2.5pt solid #77705f; }
+.tip p:last-child, .note p:last-child, .warn p:last-child, .doctrine p:last-child { margin-bottom: 0; }
+.label { font-family: "IBM Plex Mono"; font-size: 7.5pt; letter-spacing: 0.08em; text-transform: uppercase;
+  display: block; margin-bottom: 1mm; color: #555; }
+
+.formations { display: flex; flex-wrap: wrap; gap: 2mm; margin: 2mm 0 4mm; page-break-inside: avoid; }
+.fcell { border: 0.5pt solid #cfd3d6; padding: 1mm; }
+.diagram { text-align: center; margin: 3mm 0 4mm; page-break-inside: avoid; }
+.diagram svg { max-width: 100%; }
+.cols { columns: 2; column-gap: 8mm; }
+.small { font-size: 8.4pt; }
+
+/* Cover */
+.cover { page: cover; height: 297mm; background: #0d1215; color: #c9d4cf; position: relative; overflow: hidden; }
+.cover .bg { position: absolute; left: 0; top: 0; width: 210mm; height: 297mm; opacity: 0.55; }
+.cover .t { position: absolute; left: 22mm; top: 78mm; font: 46pt "IBM Plex Mono"; letter-spacing: 0.32em; color: #dfe7e2; }
+.cover .s { position: absolute; left: 23mm; top: 104mm; font: 13pt "IBM Plex Mono"; color: #e3b44f; letter-spacing: 0.06em; }
+.cover .d { position: absolute; left: 23mm; top: 116mm; width: 150mm; font: 10pt "Noto Sans"; color: #aab6b0; line-height: 1.5; }
+.cover .f { position: absolute; left: 23mm; bottom: 20mm; font: 8pt "IBM Plex Mono"; color: #7d8a85; }
+
+/* Part pages */
+.part { page: part; page-break-before: always; padding-top: 85mm; }
+.part .pn { font: 11pt "IBM Plex Mono"; color: #b8892b; letter-spacing: 0.2em; }
+.part .pt { font: 26pt "IBM Plex Mono"; text-transform: uppercase; margin: 3mm 0 6mm; border-bottom: 1.5pt solid #b8892b; padding-bottom: 3mm; }
+.part p { font-size: 10pt; max-width: 140mm; color: #333; }
+
+/* Contents */
+nav.toc { page-break-before: always; }
+nav.toc h1 { page-break-before: avoid; string-set: chapter "CONTENTS"; }
+nav.toc ul { list-style: none; padding: 0; margin: 0; columns: 1; }
+nav.toc li { margin: 0; }
+nav.toc li.t1 { font-family: "IBM Plex Mono"; font-size: 9.4pt; margin-top: 2.2mm; text-transform: uppercase; }
+nav.toc li.t2 { font-size: 8.6pt; padding-left: 9mm; color: #333; }
+nav.toc li a::after { content: leader(".") target-counter(attr(href), page); color: #777; }
+nav.toc .tn { color: #b8892b; display: inline-block; min-width: 9mm; }
+
+.glossary dt { font-family: "IBM Plex Mono"; font-size: 8.8pt; margin-top: 2mm; page-break-after: avoid; color: #14181c; }
+.glossary dd { margin: 0.4mm 0 0 6mm; font-size: 9pt; }

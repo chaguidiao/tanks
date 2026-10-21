@@ -1,0 +1,4 @@
+# Interactive screenshots for the user guide: the dev image plus xdotool and scrot.
+# Throwaway image: podman rmi localhost/tanks-shots
+FROM localhost/tanks-dev:latest
+RUN apt-get update && apt-get install -y --no-install-recommends xdotool scrot && rm -rf /var/lib/apt/lists/*
