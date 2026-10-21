@@ -1,0 +1,20 @@
+// Resupply rates (docs/plans/M8C-LOGISTICS.md). Doctrine describes the methods (FM 17-15 (1996)
+// and ATP 3-20.15 (2025) on tank platoon sustainment: LOGPAC, service-station and tailgate
+// resupply; FM 71-1 (1998) for the company team) but gives no per-minute rates, so the rates
+// are estimates from open descriptions of how the work is done.
+(
+    main_gun_rounds_per_min: (value: 3.0, source: "estimate", confidence: estimate,
+        notes: "Rounds are handed up one by one and racked by the loader; open accounts give roughly 15-20 min to upload a full 40-round tank load, about 2-3 rounds a minute."),
+    autocannon_rounds_per_min: (value: 60.0, source: "estimate", confidence: estimate,
+        notes: "Linked belts in cans: a few minutes per few hundred rounds once the cans are at the vehicle."),
+    missiles_per_min: (value: 0.5, source: "estimate", confidence: estimate,
+        notes: "A missile is lifted from its container and loaded into the launcher or stowed: about 2 min each with the crew."),
+    smoke_salvos_per_min: (value: 0.5, source: "estimate", confidence: estimate,
+        notes: "Reloading a bank of discharger tubes by hand, about 2 min per salvo."),
+    fuel_l_per_min: (value: 200.0, source: "estimate", confidence: estimate,
+        notes: "Tanker trucks pump several hundred litres a minute at most; a practical rate through a field nozzle is lower, so about 200 l/min."),
+    stations: (value: 2.0, source: "estimate", confidence: estimate,
+        notes: "Service-station resupply runs vehicles through fuel and ammunition points in turn; a platoon point serves about two at a time."),
+    point_radius_m: (value: 40.0, source: "estimate", confidence: estimate,
+        notes: "Vehicles pull up next to the trucks; 40 m allows for the dispersion of a resupply point."),
+)

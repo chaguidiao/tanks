@@ -6,6 +6,7 @@
 pub mod combat;
 pub mod doctrine;
 pub mod fires;
+pub mod logistics;
 pub mod scenario;
 pub mod smoke;
 pub mod stat;
@@ -17,6 +18,7 @@ use std::path::{Path, PathBuf};
 pub use combat::*;
 pub use doctrine::*;
 pub use fires::*;
+pub use logistics::*;
 pub use scenario::*;
 pub use smoke::*;
 pub use stat::*;
@@ -60,6 +62,7 @@ pub struct DataSet {
     pub smoke: SmokeModel,
     pub weather: WeatherTable,
     pub fires: FireSupportModel,
+    pub logistics: LogisticsModel,
     pub terrain: TerrainData,
 }
 
@@ -111,6 +114,7 @@ impl DataSet {
             smoke: load_ron(&root.join("combat/smoke.ron"))?,
             weather: load_ron(&root.join("combat/weather.ron"))?,
             fires: load_ron(&root.join("combat/fires.ron"))?,
+            logistics: load_ron(&root.join("combat/logistics.ron"))?,
             terrain,
         };
         for a in &ds.ammo {
@@ -241,6 +245,34 @@ mod tests {
             let s = DataSet::load_scenario(&root, id).unwrap_or_else(|e| panic!("{id}: {e}"));
             assert_eq!(&s.id, id);
         }
+    }
+
+    #[test]
+    fn supply_points_round_trip_and_default_to_empty() {
+        let text = r#"(name: "BLUE", doctrine: "western-combined", units: [],
+            supply_points: [(callsign: "SP 1", position: (100.0, 200.0), fuel_l: 4000.0,
+                rounds: [("apfsds_120a", 80)], smoke_salvos: 8)])"#;
+        let side: SideDef = ron_options().from_str(text).unwrap();
+        let sp = &side.supply_points[0];
+        assert_eq!((sp.callsign.as_str(), sp.fuel_l, sp.smoke_salvos, sp.unlimited), ("SP 1", 4000.0, 8, false));
+        assert_eq!(sp.rounds, vec![("apfsds_120a".to_owned(), 80)]);
+        let back: SideDef = ron_options().from_str(&ron_options().to_string(&side).unwrap()).unwrap();
+        assert_eq!(back.supply_points[0].rounds, sp.rounds);
+        let none: SideDef = ron_options().from_str(r#"(name: "RED", doctrine: "generic-opfor", units: [])"#).unwrap();
+        assert!(none.supply_points.is_empty());
+        let ser = ron_options().to_string(&none).unwrap();
+        assert!(!ser.contains("supply_points"), "omitted when empty, so old files stay unchanged");
+    }
+
+    #[test]
+    fn stow_classes_follow_the_data() {
+        let ds = DataSet::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data")).unwrap();
+        let class = |id: &str| ds.ammo(id).unwrap().stow_class();
+        assert_eq!(class("apfsds_120a"), StowClass::MainGun);
+        assert_eq!(class("apds_25"), StowClass::Autocannon);
+        assert_eq!(class("atgm_tow"), StowClass::Missile);
+        assert_eq!(class("atgm_refleks"), StowClass::MainGun, "gun-launched");
+        assert!(ds.logistics.stations.get() >= 1.0);
     }
 
     /// The scenario list shows names (and the year), so two scenarios with one name are

@@ -233,6 +233,10 @@ pub struct AmmoDef {
     /// gunner's tracking error and the missile's own dispersion remain.
     #[serde(default)]
     pub guided: bool,
+    /// How the round is stowed when resupplied; None = a missile if guided, else a main-gun
+    /// round (autocannon rounds and gun-launched missiles say so in their data).
+    #[serde(default)]
+    pub stow: Option<crate::StowClass>,
     #[serde(default)]
     pub smoke: Option<AmmoSmoke>,
     /// Round-to-round dispersion, 1σ (mrad).
@@ -243,6 +247,11 @@ pub struct AmmoDef {
 }
 
 impl AmmoDef {
+    /// Stow class for resupply (see `stow`).
+    pub fn stow_class(&self) -> crate::StowClass {
+        self.stow.unwrap_or(if self.guided { crate::StowClass::Missile } else { crate::StowClass::MainGun })
+    }
+
     /// Rod length, diameter and density for long-rod rounds.
     pub fn rod(&self) -> Option<(f64, f64, f64)> {
         Some((

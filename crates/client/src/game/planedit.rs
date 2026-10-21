@@ -1491,6 +1491,7 @@ mod tests {
             units,
             ai: None,
             fire_support: vec![],
+            supply_points: vec![],
         };
         let sc = ScenarioDef {
             id: "t".into(),

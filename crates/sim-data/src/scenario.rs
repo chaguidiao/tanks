@@ -171,6 +171,28 @@ pub struct SideDef {
     /// Batteries available to call for fire (not on the map as vehicles).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fire_support: Vec<BatteryAssign>,
+    /// Supply points the side's platoons can be sent to (M8c, service-station resupply).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supply_points: Vec<SupplyPointDef>,
+}
+
+/// A supply point placed for a side: a scenario item with a stock, not an entity
+/// (docs/plans/M8C-LOGISTICS.md). Anything not listed is not stocked, unless `unlimited`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SupplyPointDef {
+    pub callsign: String,
+    /// Local map metres.
+    pub position: [f64; 2],
+    /// Stocks everything without limit (training scenarios).
+    #[serde(default)]
+    pub unlimited: bool,
+    #[serde(default)]
+    pub fuel_l: f64,
+    /// Rounds by ammo id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rounds: Vec<(String, u32)>,
+    #[serde(default)]
+    pub smoke_salvos: u32,
 }
 
 /// A battery placed for a side (`data/combat/fires.ron`).

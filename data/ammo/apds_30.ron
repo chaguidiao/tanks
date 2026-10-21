@@ -4,6 +4,7 @@
     name: "APDS-T 30",
     mirrors: "30 mm APDS-T",
     kind: apds,
+    stow: autocannon,
     in_service: (from: 1975),
     muzzle_velocity_mps: (value: 1120.0, source: "open-source estimates for 30 mm APDS (2A42, RARDEN class)", confidence: low),
     velocity_loss_mps_per_km: (value: 90.0, source: "estimate", confidence: estimate),

@@ -6,6 +6,7 @@
     mirrors: "9M119 Svir/Refleks",
     kind: heat,
     guided: true,
+    stow: main_gun, // racked and loaded like a 125 mm round
     in_service: (from: 1992),
     muzzle_velocity_mps: (value: 350.0, source: "open-source estimates: average flight speed of the order of 300-400 m/s", confidence: low),
     velocity_loss_mps_per_km: (value: 0.0, source: "a sustained rocket motor holds cruise speed", confidence: low),

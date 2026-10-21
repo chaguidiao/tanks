@@ -51,6 +51,7 @@ impl ScenarioEditor {
                 units: Vec::new(),
                 ai: None,
                 fire_support: vec![],
+                supply_points: vec![],
             });
         }
         let vehicle =

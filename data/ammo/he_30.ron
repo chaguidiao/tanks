@@ -4,6 +4,7 @@
     name: "HE-T 30",
     mirrors: "30 mm HE-T",
     kind: he_frag,
+    stow: autocannon,
     in_service: (from: 1975),
     muzzle_velocity_mps: (value: 960.0, source: "open-source estimates", confidence: low),
     velocity_loss_mps_per_km: (value: 120.0, source: "estimate", confidence: estimate),

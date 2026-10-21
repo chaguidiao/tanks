@@ -62,6 +62,7 @@ pub fn scenario(start_time_s: u32, blue: Vec<UnitDef>, red: Vec<UnitDef>) -> Sce
                 units: blue,
                 ai: None,
                 fire_support: vec![],
+                supply_points: vec![],
             },
             SideDef {
                 name: "RED".into(),
@@ -70,6 +71,7 @@ pub fn scenario(start_time_s: u32, blue: Vec<UnitDef>, red: Vec<UnitDef>) -> Sce
                 units: red,
                 ai: None,
                 fire_support: vec![],
+                supply_points: vec![],
             },
         ],
         objectives: vec![],

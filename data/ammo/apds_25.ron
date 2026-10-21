@@ -5,6 +5,7 @@
     name: "APDS-T 25",
     mirrors: "M791 APDS-T",
     kind: apds,
+    stow: autocannon,
     in_service: (from: 1978),
     muzzle_velocity_mps: (value: 1385.0, source: "Jane's Ammunition Handbook (open editions): about 1,385 m/s", confidence: medium),
     velocity_loss_mps_per_km: (value: 95.0, source: "estimate", confidence: estimate),

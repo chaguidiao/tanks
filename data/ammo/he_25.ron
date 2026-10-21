@@ -4,6 +4,7 @@
     name: "HEI-T 25",
     mirrors: "M792 HEI-T",
     kind: he_frag,
+    stow: autocannon,
     in_service: (from: 1978),
     muzzle_velocity_mps: (value: 1100.0, source: "open-source estimates", confidence: low),
     velocity_loss_mps_per_km: (value: 110.0, source: "estimate", confidence: estimate),
