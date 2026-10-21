@@ -33,6 +33,8 @@ pub struct GunState {
     pub turret: f64,
     /// Rounds left per entry of the vehicle's loadout (`armament.load` order).
     pub stock: Vec<u32>,
+    /// Rounds carried when full, per loadout entry (the stock at the start; resupply fills to it).
+    pub capacity: Vec<u32>,
     /// Round type the commander ordered; None = the crew picks by target class.
     pub selected: Option<AmmoKind>,
     /// Smoke shells to fire at a point (a fire mission); takes precedence over targets.
@@ -61,6 +63,7 @@ impl GunState {
     pub fn new(heading: f64, stock: Vec<u32>) -> Self {
         Self {
             turret: heading,
+            capacity: stock.clone(),
             stock,
             selected: None,
             mission: None,

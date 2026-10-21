@@ -84,7 +84,7 @@ Only what infantry needs from buildings; full towns wait for M8h1b.
 - Exit: a scripted test where an RPG team in a village kills a tank from the flank; per-pairing unit tests; balance batch.
 
 ## M8c — Logistics
-- [ ] C1 Vehicle ammunition and fuel resupply; supply point or trucks — §11, §13.1 M7b
+- [ ] C1 Vehicle ammunition and fuel resupply; supply point or trucks — §11, §13.1 M7b. Plan: `docs/plans/M8C-LOGISTICS.md`. **In progress 2026-10-21**: slices 1–2 done (data `logistics.ron`, scenario `supply_points`, `Command::Resupply` service-station resupply with stock accounting, tests `m8c.rs`); next: re-arm events (C4), client (symbol, card button, status, editor), then tailgate trucks
 - [ ] C2 Recovery of immobilised vehicles — §11, §13.2
 - [ ] C3 Battery ammunition resupply, reload and relocation — §13.1 M7d
 - [ ] C4 Scenario re-arm events

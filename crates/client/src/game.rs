@@ -3176,6 +3176,10 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
             match report {
                 PlatoonReport::SetAt { pos } => format!("{cs}: SET AT GRID {}.", format::grid(*pos)),
                 PlatoonReport::NoRoute => format!("{cs}: UNABLE. NO ROUTE."),
+                PlatoonReport::Resupplied { complete: true } => format!("{cs}: RESUPPLY COMPLETE."),
+                PlatoonReport::Resupplied { complete: false } => {
+                    format!("{cs}: RESUPPLY PARTIAL. SUPPLY POINT SHORT.")
+                }
                 PlatoonReport::SetInPosition { hull_down, turret_down, exposed, facing } => format!(
                     "{cs}: SET IN BP. {hull_down} HULL-DOWN, {turret_down} TURRET-DOWN, {exposed} EXPOSED. ORIENTED {} MILS.",
                     format::mils(*facing)

@@ -32,6 +32,14 @@ pub enum PlatoonOrder {
     },
     /// React to contact: halted, fighting from current positions.
     Contact,
+    /// Service-station resupply at supply point `point` (index into the sim's points); members
+    /// wait in a holding line on the `approach` bearing (compass rad from the point) until a
+    /// station is free. One `ServiceState` per member, in platoon order.
+    Resupply {
+        point: usize,
+        approach: f64,
+        members: Vec<crate::logistics::ServiceState>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -177,6 +185,9 @@ impl Platoon {
             PlatoonOrder::Occupy { reported: true, .. } => "SET IN BATTLE POSITION".to_owned(),
             PlatoonOrder::Occupy { .. } => "OCCUPYING BATTLE POSITION".to_owned(),
             PlatoonOrder::Contact => "IN CONTACT".to_owned(),
+            PlatoonOrder::Resupply { members, .. } => {
+                format!("RESUPPLY {}/{}", members.iter().filter(|m| m.done).count(), members.len())
+            }
         };
         let (route, waypoints) = match (&self.order, &self.held) {
             (PlatoonOrder::Move { .. }, _) => self.order.route_view(),

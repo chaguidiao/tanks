@@ -69,6 +69,13 @@ pub enum Command {
         platoon: PlatoonId,
         technique: Technique,
     },
+    /// Service-station resupply (docs/plans/M8C-LOGISTICS.md): the platoon goes to supply point
+    /// `point` (an id from `PerceivedWorld.supply_points`), is served a few vehicles at a time,
+    /// reports and holds there.
+    Resupply {
+        platoon: PlatoonId,
+        point: u32,
+    },
     /// Occupy a battle position (ATP 3-20.15 ch. 5): circle area, threat direction (compass rad).
     OccupyPosition {
         platoon: PlatoonId,
@@ -348,6 +355,10 @@ pub enum PlatoonReport {
         to: u16,
     },
     PlanComplete,
+    /// Resupply finished: `complete` = every vehicle full, else the point ran short.
+    Resupplied {
+        complete: bool,
+    },
     /// Losses: members remaining.
     Strength {
         remaining: u8,

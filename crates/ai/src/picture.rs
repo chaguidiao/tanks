@@ -393,6 +393,19 @@ pub struct BatteryView {
     pub status: BatteryStatus,
 }
 
+/// A supply point of the side (M8c): where platoons are sent to resupply, with what is left.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SupplyPointView {
+    pub id: u32,
+    pub callsign: String,
+    pub pos: Vec2,
+    pub unlimited: bool,
+    pub fuel_l: f64,
+    /// (round label, rounds left) for every round type stocked.
+    pub rounds: Vec<(String, u32)>,
+    pub smoke_salvos: u32,
+}
+
 /// A shell burst seen or heard by the side.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImpactView {
@@ -430,6 +443,7 @@ pub struct PerceivedWorld {
     pub smoke: Vec<SmokeView>,
     pub weather: WeatherView,
     pub fire_support: Vec<BatteryView>,
+    pub supply_points: Vec<SupplyPointView>,
     pub impacts: Vec<ImpactView>,
     pub code_words: Vec<CodeWordView>,
 }
@@ -449,6 +463,7 @@ impl PerceivedWorld {
             smoke: Vec::new(),
             weather: WeatherView::default(),
             fire_support: Vec::new(),
+            supply_points: Vec::new(),
             impacts: Vec::new(),
             code_words: Vec::new(),
         }

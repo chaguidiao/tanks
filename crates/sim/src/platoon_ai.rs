@@ -59,6 +59,11 @@ pub struct Ctx<'a> {
     /// Orders the platoon phase hands to the sim to carry out (smoke, fire support, drills); they
     /// apply right after the phase without radio delay.
     pub sim_cmds: &'a mut Vec<(SideId, Command)>,
+    /// Supply points of every side and the tables resupply needs (M8c).
+    pub supply: &'a mut [crate::logistics::SupplyPoint],
+    pub loadouts: &'a [Vec<usize>],
+    pub ammo: &'a [sim_data::AmmoDef],
+    pub logistics: &'a sim_data::LogisticsModel,
 }
 
 impl Ctx<'_> {
@@ -104,6 +109,7 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
             PlatoonOrder::Move { .. } => move_step(p, ctx, &doctrine),
             PlatoonOrder::Occupy { .. } => occupy_step(p, ctx, &doctrine),
             PlatoonOrder::Contact => contact_step(p, ctx),
+            PlatoonOrder::Resupply { .. } => resupply_step(p, ctx),
             PlatoonOrder::None => {}
         }
     }
@@ -397,6 +403,65 @@ fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
         ctx.report(p, PlatoonReport::SetAt { pos: c });
     } else {
         p.order = PlatoonOrder::Move { destination, via, checkpoints, route, progress, active };
+    }
+}
+
+/// Service-station resupply (FM 17-15 (1996), ATP 3-20.15 (2025) sustainment): the first
+/// `stations` members that still need anything drive into the supply point and are served there;
+/// the rest wait in a holding line on the approach side. When every member is done the platoon
+/// reports and holds. Members that cannot move are skipped.
+fn resupply_step(p: &mut Platoon, ctx: &mut Ctx) {
+    use crate::logistics::{Tables, transfer};
+    let PlatoonOrder::Resupply { point, approach, mut members } = p.order.clone() else { return };
+    let Some(sp_pos) = ctx.supply.get(point).map(|s| s.pos) else {
+        p.order = PlatoonOrder::None;
+        return;
+    };
+    let radius = ctx.logistics.point_radius_m.get();
+    let stations = ctx.logistics.stations.get().max(1.0) as usize;
+    let dt = crate::PLATOON_AI_EVERY as f64 * DT;
+    let (sa, ca) = (libm::sin(approach), libm::cos(approach));
+    let holding = |j: usize| -> Vec2 {
+        let d = radius + 40.0 + 25.0 * j as f64;
+        [sp_pos[0] + sa * d, sp_pos[1] + ca * d]
+    };
+    let mut serving = 0;
+    for (i, &k) in p.members.iter().enumerate() {
+        let st = &mut members[i];
+        if !ctx.world.can_move(k) {
+            st.done = true;
+            continue;
+        }
+        let active = !st.done && serving < stations;
+        if active {
+            serving += 1;
+        }
+        let pos = ctx.world.transform[k].pos;
+        let at_point = dist(pos, sp_pos) <= radius;
+        let slow = ctx.world.mobility[k].as_ref().is_some_and(|m| m.speed.abs() < 0.5);
+        if active && at_point && slow {
+            ctx.world.halt(k);
+            let t = Tables { vehicles: ctx.vehicles, loadouts: ctx.loadouts, ammo: ctx.ammo, model: ctx.logistics };
+            st.done = transfer(ctx.world, k, &mut ctx.supply[point], st, &t, dt);
+            st.short = st.done && crate::logistics::needs_anything(ctx.world, k, &t);
+            continue;
+        }
+        let (goal, arrive) = if active { (sp_pos, radius * 0.5) } else { (holding(i), SLOT_ARRIVE) };
+        let idle = ctx.world.ai[k].as_ref().is_some_and(|a| matches!(a.order, Order::Idle | Order::Face { .. }));
+        let moved = st.goal[0].is_nan() || dist(st.goal, goal) > 1.0;
+        if dist(pos, goal) > arrive && (moved || idle) {
+            if let Some(r) = ctx.route(k, goal) {
+                ctx.world.set_route(k, r, p.speed_limit, None, true, arrive);
+            }
+            st.goal = goal;
+        }
+    }
+    if members.iter().all(|m| m.done) {
+        let complete = !members.iter().any(|m| m.short);
+        p.order = PlatoonOrder::None;
+        ctx.report(p, PlatoonReport::Resupplied { complete });
+    } else {
+        p.order = PlatoonOrder::Resupply { point, approach, members };
     }
 }
 

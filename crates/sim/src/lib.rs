@@ -15,6 +15,7 @@ pub mod command;
 pub mod control;
 pub mod fires;
 pub mod gunnery;
+pub mod logistics;
 pub mod mobility;
 pub mod picture;
 pub mod plan;
@@ -114,6 +115,8 @@ pub struct Sim {
     smoke: smoke::SmokeField,
     weather: weather::Weather,
     batteries: Vec<fires::Battery>,
+    /// Supply points of all sides, in scenario order (M8c).
+    supply: Vec<logistics::SupplyPoint>,
     /// Recent shell bursts (pruned after `IMPACT_KEEP_S`).
     impacts: Vec<fires::Impact>,
     /// Per side: the equipment year (scenario date or the side's tech year).
@@ -293,6 +296,34 @@ impl Sim {
                 batteries.push(b);
             }
         }
+        // Supply-point stocks index the sim's ammo table (the rounds the vehicles carry); a round
+        // stocked that no vehicle carries is added to it so the stock is still shown.
+        for d in scenario.sides.iter().flat_map(|s| &s.supply_points) {
+            for (id, _) in &d.rounds {
+                let round = data.ammo(id).ok_or_else(|| format!("{}: unknown ammo '{id}'", d.callsign))?;
+                if !ammo.iter().any(|a| a.id == round.id) {
+                    ammo.push(round.clone());
+                }
+            }
+        }
+        let mut supply = Vec::new();
+        for (si, side) in scenario.sides.iter().enumerate() {
+            for d in &side.supply_points {
+                let mut rounds = vec![0; ammo.len()];
+                for (id, n) in &d.rounds {
+                    rounds[ammo.iter().position(|a| &a.id == id).expect("added above")] += n;
+                }
+                supply.push(logistics::SupplyPoint {
+                    side: SideId(si as u8),
+                    callsign: d.callsign.clone(),
+                    pos: d.position,
+                    unlimited: d.unlimited,
+                    fuel_l: d.fuel_l,
+                    rounds,
+                    smoke_salvos: d.smoke_salvos,
+                });
+            }
+        }
         let mut sim = Self {
             tick: 0,
             map,
@@ -322,6 +353,7 @@ impl Sim {
             smoke,
             weather,
             batteries,
+            supply,
             impacts: Vec::new(),
             years,
         };
@@ -562,6 +594,10 @@ impl Sim {
                 impacts: &self.impacts,
                 fires: &self.data.fires.suppression,
                 sim_cmds: &mut sim_cmds,
+                supply: &mut self.supply,
+                loadouts: &self.loadouts,
+                ammo: &self.ammo,
+                logistics: &self.data.logistics,
             };
             platoon_ai::step(&mut self.platoons, &mut ctx);
             for (side, cmd) in sim_cmds {
@@ -862,6 +898,7 @@ impl Sim {
         let replaced = match &c.cmd {
             Command::PlatoonMove { platoon, .. }
             | Command::OccupyPosition { platoon, .. }
+            | Command::Resupply { platoon, .. }
             | Command::SetPlan { platoon, .. }
             | Command::BreakContact { platoon } => Some(*platoon),
             Command::Reverse { to: Addressee::Platoon(p), .. } => Some(*p),
@@ -1210,6 +1247,27 @@ impl Sim {
                 });
                 s.picture.triggers = control::views(&s.triggers);
             }
+            Command::Resupply { platoon, point } => {
+                let Some(pi) = logistics::point_of(&self.supply, c.side, *point) else { return };
+                let at = self.supply[pi].pos;
+                let world = &self.world;
+                let Some(p) = self.platoons.iter_mut().find(|p| p.side == c.side && p.id == *platoon) else { return };
+                // Wait on the side the platoon comes from, so the queue does not cross the point.
+                let movers: Vec<usize> = p.members.iter().copied().filter(|&k| world.alive(k)).collect();
+                let n = movers.len().max(1) as f64;
+                let cx = movers.iter().map(|&k| world.transform[k].pos[0]).sum::<f64>() / n;
+                let cy = movers.iter().map(|&k| world.transform[k].pos[1]).sum::<f64>() / n;
+                let approach = if dist([cx, cy], at) > 1.0 { ai::drive::bearing(at, [cx, cy]) } else { 0.0 };
+                p.order = platoon::PlatoonOrder::Resupply {
+                    point: pi,
+                    approach,
+                    members: vec![logistics::ServiceState::new(); p.members.len()],
+                };
+                p.plan = None;
+                p.held = None;
+                p.withdraw = false;
+                events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
+            }
             Command::OccupyPosition { platoon, centre, radius_m, facing, kind } => {
                 let o = platoon::PlatoonOrder::Occupy {
                     centre: *centre,
@@ -1249,6 +1307,27 @@ impl Sim {
                 .enumerate()
                 .filter(|(_, b)| b.side == dst.side)
                 .map(|(i, b)| b.view(i as u32, &self.data.fires.batteries[b.def], self.tick))
+                .collect();
+            dst.supply_points = self
+                .supply
+                .iter()
+                .enumerate()
+                .filter(|(_, sp)| sp.side == dst.side)
+                .map(|(i, sp)| ai::picture::SupplyPointView {
+                    id: i as u32,
+                    callsign: sp.callsign.clone(),
+                    pos: sp.pos,
+                    unlimited: sp.unlimited,
+                    fuel_l: sp.fuel_l,
+                    rounds: sp
+                        .rounds
+                        .iter()
+                        .enumerate()
+                        .filter(|&(_, &n)| n > 0)
+                        .map(|(a, &n)| (self.ammo[a].name.clone(), n))
+                        .collect(),
+                    smoke_salvos: sp.smoke_salvos,
+                })
                 .collect();
             if !self.smoke.is_empty() {
                 let near = |p: Vec2| {
@@ -1291,6 +1370,19 @@ impl Sim {
         }
         for b in &self.batteries {
             b.hash_into(&mut h);
+        }
+        // Supply points and resupply progress (nothing when a scenario has none: old hashes hold).
+        for sp in &self.supply {
+            sp.hash_into(&mut h);
+        }
+        for p in &self.platoons {
+            if let platoon::PlatoonOrder::Resupply { point, members, .. } = &p.order {
+                h.u32(p.id.0);
+                h.u64(*point as u64);
+                for m in members {
+                    m.hash_into(&mut h);
+                }
+            }
         }
         for r in [
             &self.rngs.mobility,
