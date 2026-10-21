@@ -39,11 +39,11 @@ Why:
 - H3 (towns) changes generator output: either put towns on a new recipe/map or re-run the balance batch (Z1) afterwards; decide in Z6.
 
 ## M8-0 — Housekeeping and prerequisites (do first, in this order for Z1–Z3)
-- [ ] Z1 [I7] Balance re-run on seed-7 uplands after the seed fix: scenarios were tuned on that map and are unverified since the 2026-10-21 change; confirm before building on them
+- [x] Z1 [I7] Balance re-run on seed-7 uplands after the seed fix. **Done 2026-10-21** (`run --summary`, seeds 1–4, full scenario length): the four uplands scenarios hold (Blue wins 16/16, 2–5 lost except `cw-hasty-attack` seed 4 with 0 lost). The `demo` scenarios, unaffected by the seed fix, drift from the M7e tuning note: see I8. `run` now defaults to the time limit + 60 s (a cut-off at the limit stopped one tick early and read as TimeOut)
 - [ ] Z2 [J8] Screenshot check of the screens changed on 2026-10-21 (scenario select, database, ADJUST tooltip) — not yet viewed
 - [ ] Z3 [K1, K3] Version string on the title screen, then **cut the first tag** to run the untested Windows and macOS legs of `release.yml` (§13.1 packaging); tag after Z1–Z2 so it is a checked, balanced build
-- [ ] Z4 [F9] **Re-check**: wedge routed through a village spends minutes re-planning trailing slots (`platoon_ai::move_step`, re-routes each slot every 4 s or 25 m); not reproduced yet — §13.1 Plans "Open". Matters once infantry fights in villages; re-check again after H3
-- [ ] Z5 [N6, N2] LOS/viewshed/position-search benchmarks first; then set a budget (entities per side at 4× time compression, incl. projected infantry) and do the LOS speed pass (~50 µs at 4 km vs 20 µs goal) only if the budget is broken
+- [x] Z4 [F9] **Re-check**: wedge routed through a village spends minutes re-planning trailing slots. **Re-checked 2026-10-21**: not reproduced as minutes. A platoon ordered through the village centre (CP) and 700 m beyond: `demo` (101 buildings) wedge/column/line/vee 263–284 s; `uplands` (82 buildings) wedge 295 s, **column 398 s**, the platoon fully halted ≤ 8 s in every run. The smaller effect is real: trailing vehicles detour 100–300 m around buildings and the leader waits for laggards (`max_lag` rule). Likely cause: slots are the leader's point plus a heading-rotated offset (`slot_of`), not points along the route, so in a bending street even a column's trailing slots sit off the street or inside buildings. Fix with H10 (column slots by arc length along the route); re-check again after H3
+- [ ] Z5 [N6, N2] LOS/viewshed/position-search benchmarks first; then set a budget (entities per side at 4× time compression, incl. projected infantry) and do the LOS speed pass (~50 µs at 4 km vs 20 µs goal) only if the budget is broken. **Benchmarks done 2026-10-21** (`tanks-headless bench`, i5-13500T, release): LOS at 4 km mean 30 µs (`demo`) / 18 µs (`uplands`), p95 74 / 58 µs (the old "~50 µs" matches the p95, not the mean); viewshed 3 km/8 m 64–82 ms; BP search 59–73 ms per call (evaluate, threaded); sim 51× real time with 36 entities (`cw-village-defence`), 190× with 17. Projected 60 entities (≈2.8× the LOS pairs) is ≈18× real time here, 4.6× headroom at 4× compression. **Open:** agree the budget (proposal: ≥ 2× headroom at 4× with 60 entities on a 2013 4-core, i.e. ≥ 8× real time there) and measure on old hardware; no LOS speed pass needed on this machine
 - [ ] Z6 Short design plan `docs/plans/M8B-INFANTRY.md` covering infantry **and** buildings: entity model (which components infantry uses from §4.4), detection signature, weapons, orders, foot mobility, what infantry needs from buildings (attributes, identity, occupancy), whether towns go on a new map or existing ones are re-balanced, replay/hash impact and whether old replays must still load. Review before coding.
 - Exit: all above ticked; plan agreed.
 
@@ -52,7 +52,7 @@ Only what infantry needs from buildings; full towns wait for M8h1b.
 - [ ] H7 Building types with wall thickness/height for LOS and cover values (infantry cover, fields of fire)
 - [ ] H8 Building identity in the baked map (ID raster or kept feature list; today only a `building_height` grid): needed by B7, F5, D4
 - [ ] H9 Foot mobility class and planning raster (forest, steep slopes, into/through buildings); `MobilityClass` today derives only from `VehicleDef`
-- [ ] H10 Narrow streets column-only for vehicles (from D4): formations collapse to column in built-up areas
+- [ ] H10 Narrow streets column-only for vehicles (from D4): formations collapse to column in built-up areas; column slots follow the route by arc length so trailing vehicles stay on the street (Z4 finding)
 - Exit: buildings carry type and identity; foot routes through a village; a wedge driving through a village goes to column; baker and hash tests; `BAKER_VERSION` bump.
 
 ## M8h1b — Towns (after M8f1)
@@ -154,6 +154,7 @@ Run alongside the capability phases: each phase ends with at least one scenario 
 - [ ] I4 Campaign ordering and difficulty labels in the scenario list — §13.1 M7e
 - [ ] I5 Database: filter by scenario date, side-by-side comparison, silhouettes — §13.1 database
 - [ ] I6 National doctrine packs as mods (never code branches) — decision #5
+- [ ] I8 Re-check `demo` scenario balance (Z1, 2026-10-21): `mod-dusk-attack` seed 2 is a Red win at the time limit and seed 1 a Blue win with 0 lost; `mod-fog-meeting` seed 3 Blue loses 1/7. The M7e note says Blue's passive AI won all four seeds with 2–5 lost; find out whether M8a (queue, reverse, going) moved it (run the M7e commit for comparison) before re-tuning
 
 ## M8j — Shell, editors, AAR, accessibility
 - [ ] J1 Menus: new map from a recipe, new blank scenario, map preview in select screens — §13.1 shell
