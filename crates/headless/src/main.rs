@@ -16,8 +16,10 @@ const USAGE: &str = "usage: tanks-headless <command> [options]
   info    --map <id>                                                   print map statistics
   probe   --map <id> --at <x,y[;x,y..]>                                terrain at points
   run     --scenario <id> [--seconds <s>] [--move <x,y>] [--seed <n>] [--summary]
-                                                                       run a scenario headless (--summary: one CSV line)
+                                                                       run a scenario headless (--summary: one CSV line;
+                                                                       default --seconds: time limit + 60)
   replay  --file <replay.ron>                                          re-simulate a replay, verify its hash
+  bench   [--samples <n>] [--ticks <n>] [--csv]                        timings: LOS, viewshed, battle-position search, sim throughput
   duel    [--shooter <id>] [--target <id>] [--ranges 500,1000,..] [--trials <n>] [--aspect front|side] [--year <y>]
           [--out <csv>]                                                Monte-Carlo duel validation harness
 
@@ -132,6 +134,7 @@ fn run(cmd: &str, a: Args) -> Result<(), String> {
                 );
             }
         }
+        "bench" => bench(&data, &ds, &a)?,
         "duel" => duel(&ds, &a)?,
         "replay" => replay(&data, &ds, &a)?,
         _ => return Err(format!("unknown command '{cmd}'\n{USAGE}")),
@@ -250,7 +253,12 @@ fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), St
     let summary = a.0.iter().any(|x| x == "--summary");
     let map = Arc::new(workflow::ensure_map(data, ds, &sc.map, |s| eprintln!("{s}")).map_err(|e| e.to_string())?);
     let mut sim = Sim::new(&sc, Arc::new(ds.clone()), map).map_err(|e| e.to_string())?;
-    let seconds: f64 = a.get("--seconds").unwrap_or("300").parse().map_err(|_| "bad --seconds")?;
+    // Default: play past the scenario's time limit so its end condition fires (a cut-off at the
+    // limit itself stops one tick early and reads as a TimeOut); 300 s without a limit.
+    let seconds: f64 = match a.get("--seconds") {
+        Some(s) => s.parse().map_err(|_| "bad --seconds")?,
+        None => sc.victory.as_ref().map_or(300.0, |v| v.time_limit_s + 60.0),
+    };
     let blue = SideId(0);
     if let Some(m) = a.get("--move") {
         let (x, y) = m.split_once(',').ok_or("--move expects x,y")?;
@@ -485,5 +493,283 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
         }
         None => print!("{csv}"),
     }
+    Ok(())
+}
+
+/// One result table: printed aligned for reading, or as CSV (`--csv`, one block per table).
+struct Table {
+    title: &'static str,
+    header: Vec<&'static str>,
+    rows: Vec<Vec<String>>,
+}
+
+fn print_tables(tables: &[Table], csv: bool) {
+    for t in tables {
+        if csv {
+            println!("{}", t.header.join(","));
+            for r in &t.rows {
+                println!("{}", r.join(","));
+            }
+            println!();
+            continue;
+        }
+        println!("{}", t.title);
+        let widths: Vec<usize> = (0..t.header.len())
+            .map(|c| t.rows.iter().map(|r| r[c].len()).chain([t.header[c].len()]).max().unwrap_or(0))
+            .collect();
+        let line = |cells: Vec<&str>| {
+            let parts: Vec<String> = cells.iter().zip(&widths).map(|(c, w)| format!("{c:>w$}", w = *w)).collect();
+            println!("  {}", parts.join("  "));
+        };
+        line(t.header.clone());
+        for r in &t.rows {
+            line(r.iter().map(String::as_str).collect());
+        }
+        println!();
+    }
+}
+
+/// Mean and 95th percentile (nearest rank) of a non-empty sample set.
+fn mean_p95(mut v: Vec<f64>) -> (f64, f64) {
+    v.sort_by(f64::total_cmp);
+    let n = v.len();
+    let mean = v.iter().sum::<f64>() / n as f64;
+    let rank = ((n as f64 * 0.95).ceil() as usize).clamp(1, n);
+    (mean, v[rank - 1])
+}
+
+/// Performance benchmarks (Z5): single LOS rays, viewshed, battle-position search and whole-sim
+/// throughput, on the baked maps the scenarios use. Wall-clock timing is allowed here; sim logic
+/// never reads the clock. Random inputs come from fixed-seed ChaCha streams.
+fn bench(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), String> {
+    use std::hint::black_box;
+    use std::sync::Arc;
+
+    use rand_chacha::ChaCha8Rng;
+    use rand_chacha::rand_core::{Rng, SeedableRng};
+    use sim::{Sim, TICK_HZ};
+    use terrain::{ground::Ground, los};
+
+    let csv = a.0.iter().any(|x| x == "--csv");
+    let samples: usize = a.get("--samples").unwrap_or("4000").parse().map_err(|_| "bad --samples")?;
+    let ticks: u64 = a.get("--ticks").unwrap_or("3000").parse().map_err(|_| "bad --ticks")?;
+    if samples == 0 || ticks == 0 {
+        return Err("--samples and --ticks must be > 0".into());
+    }
+    let profile = if cfg!(debug_assertions) { "DEBUG (use --release)" } else { "release" };
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    eprintln!("bench: build {profile}, {threads} hardware threads");
+
+    // Eye height of the observer (the sim uses the observer's sight height) and the target's
+    // five sample heights, exactly as sensors.rs builds them.
+    let eye = ds.vehicle("bulwark_a0").ok_or("no vehicle bulwark_a0")?.dimensions.sight_height_m.get();
+    let target = ds.vehicle("kurgan_b").ok_or("no vehicle kurgan_b")?;
+    let target_heights = sim::sensors::sample_heights(target);
+
+    // Maps are taken from the scenarios that use them, so the bench loads exactly what the game
+    // loads (generated on first use, like every other subcommand).
+    let mut maps = Vec::new();
+    for sc_id in ["m5-hold-the-village", "cw-village-defence"] {
+        let sc = DataSet::load_scenario(data, sc_id).map_err(|e| e.to_string())?;
+        let map = workflow::ensure_map(data, ds, &sc.map, |s| eprintln!("{s}")).map_err(|e| e.to_string())?;
+        maps.push((sc, Arc::new(map)));
+    }
+
+    // Position-search inputs, as platoon_ai::assign_positions builds them: the objective is the
+    // centre, the client's default radius is 250 m, the threat comes from the north-east.
+    const BP_RADIUS: f64 = 250.0;
+    const BP_FACING: f64 = std::f64::consts::FRAC_PI_4;
+    const VIEWSHED_RADIUS: f64 = 3000.0;
+    const VIEWSHED_STEP: f64 = 8.0;
+
+    let mut los_rows = Vec::new();
+    let mut vs_rows = Vec::new();
+    let mut bp_rows = Vec::new();
+    let mut sim_rows = Vec::new();
+    let shared = Arc::new(ds.clone());
+
+    for (sc, map) in &maps {
+        let g = Ground::new(map, &ds.terrain);
+        let name = map.manifest.id.clone();
+        let (w, h) = (map.manifest.width_m(), map.manifest.height_m());
+        let margin = 50.0;
+        let inside = |p: [f64; 2]| p[0] >= margin && p[1] >= margin && p[0] <= w - margin && p[1] <= h - margin;
+        let objective = sc.objectives.first().map_or([w / 2.0, h / 2.0], |o| o.centre);
+
+        // a) Single LOS ray: random observer, random bearing, fixed range; each call timed alone.
+        let mut rng = ChaCha8Rng::seed_from_u64(0x2_5a7);
+        let unit = |rng: &mut ChaCha8Rng| (rng.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64);
+        for range in [500.0, 1000.0, 2000.0, 4000.0] {
+            let mut times = Vec::with_capacity(samples);
+            let mut visible = 0usize;
+            for _ in 0..samples {
+                let (from, to) = loop {
+                    let from =
+                        [margin + unit(&mut rng) * (w - 2.0 * margin), margin + unit(&mut rng) * (h - 2.0 * margin)];
+                    let bearing = unit(&mut rng) * std::f64::consts::TAU;
+                    let to = [from[0] + range * bearing.sin(), from[1] + range * bearing.cos()];
+                    if inside(to) {
+                        break (from, to);
+                    }
+                };
+                let t = Instant::now();
+                let s = los::sight(black_box(&g), black_box(from), eye, black_box(to), &target_heights);
+                times.push(t.elapsed().as_secs_f64() * 1e6);
+                visible += usize::from(s.any());
+            }
+            let (mean, p95) = mean_p95(times);
+            los_rows.push(vec![
+                name.clone(),
+                format!("{range:.0}"),
+                samples.to_string(),
+                format!("{mean:.1}"),
+                format!("{p95:.1}"),
+                format!("{:.3}", visible as f64 / samples as f64),
+            ]);
+        }
+
+        // b) Viewshed as the client's viewshed tool calls it: 3 km radius, 8 m cells, 2.4 m
+        // target height. Origins: the scenario objective plus three seeded interior points.
+        let mut origins = vec![objective];
+        for _ in 0..3 {
+            origins.push([margin + unit(&mut rng) * (w - 2.0 * margin), margin + unit(&mut rng) * (h - 2.0 * margin)]);
+        }
+        for o in origins {
+            let mut times = Vec::new();
+            for _ in 0..5 {
+                let t = Instant::now();
+                let vs = los::viewshed(black_box(&g), black_box(o), eye, 2.4, VIEWSHED_RADIUS, VIEWSHED_STEP);
+                times.push(t.elapsed().as_secs_f64() * 1e3);
+                black_box(vs);
+            }
+            let (mean, p95) = mean_p95(times);
+            vs_rows.push(vec![
+                name.clone(),
+                format!("{:.0},{:.0}", o[0], o[1]),
+                format!("{VIEWSHED_RADIUS:.0}"),
+                format!("{VIEWSHED_STEP:.0}"),
+                format!("{mean:.1}"),
+                format!("{p95:.1}"),
+            ]);
+        }
+
+        // c) Battle-position search: the first side's first vehicle type, its first four units as
+        // the movers, its doctrine dispersion. Same passability test as platoon_ai.rs.
+        let side = &sc.sides[0];
+        let vehicle_id = &side.units[0].vehicle;
+        let v = ds.vehicle(vehicle_id).ok_or("no BP vehicle")?;
+        let dispersion = ds.doctrine.iter().find(|d| d.id == side.doctrine).ok_or("no doctrine")?.bp_dispersion_m.get();
+        let q = ai::position::BpQuery {
+            centre: objective,
+            radius: BP_RADIUS,
+            facing: BP_FACING,
+            hull_height: v.dimensions.hull_height_m.get(),
+            sight_height: v.dimensions.sight_height_m.get(),
+            gun_depression: -v.gun.depression_rad.get(),
+            turret_down: false,
+        };
+        let layer = map.mobility(vehicle_id).ok_or("no mobility layer for BP vehicle")?;
+        let hf = &map.elevation;
+        let passable = |x: f64, y: f64| {
+            let (i, j) = hf.cell_of(x, y);
+            layer.speed.get(i, j) > 0 && hf.node_slope(i, j) < 0.3
+        };
+        let starts: Vec<[f64; 2]> = side.units.iter().take(4).map(|u| u.position).collect();
+        let (mut eval_ms, mut assign_ms, mut total_ms) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut n_cands, mut n_chosen) = (0, 0);
+        for _ in 0..10 {
+            let t0 = Instant::now();
+            let cands = ai::position::evaluate(&g, black_box(&q), &passable);
+            let t1 = Instant::now();
+            let chosen = ai::position::assign(&cands, starts.len(), dispersion, &starts);
+            let t2 = Instant::now();
+            n_cands = cands.len();
+            n_chosen = chosen.len();
+            eval_ms.push((t1 - t0).as_secs_f64() * 1e3);
+            assign_ms.push((t2 - t1).as_secs_f64() * 1e3);
+            total_ms.push((t2 - t0).as_secs_f64() * 1e3);
+            black_box(chosen);
+        }
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+        let (tot_mean, tot_p95) = mean_p95(total_ms);
+        bp_rows.push(vec![
+            name.clone(),
+            sc.id.clone(),
+            format!("{vehicle_id} x {}", starts.len()),
+            n_cands.to_string(),
+            n_chosen.to_string(),
+            format!("{:.2}", mean(&eval_ms)),
+            format!("{:.3}", mean(&assign_ms)),
+            format!("{tot_mean:.2}"),
+            format!("{tot_p95:.2}"),
+        ]);
+
+        // d) Whole-sim throughput: step the scenario's sim with its own AI for `ticks` ticks.
+        let t = Instant::now();
+        let mut sim = Sim::new(sc, shared.clone(), Arc::clone(map))?;
+        let setup_ms = t.elapsed().as_secs_f64() * 1e3;
+        let w_state = sim.truth();
+        let entities = w_state.len();
+        let side_counts: Vec<String> = sim
+            .side_names()
+            .iter()
+            .enumerate()
+            .map(|(s, n)| format!("{n} {}", (0..entities).filter(|&k| w_state.side[k].0 == s as u8).count()))
+            .collect();
+        let mut run_ticks = 0u64;
+        let t = Instant::now();
+        for _ in 0..ticks {
+            if sim.ended() {
+                break;
+            }
+            black_box(sim.step());
+            run_ticks += 1;
+        }
+        let wall = t.elapsed().as_secs_f64();
+        let tps = run_ticks as f64 / wall.max(1e-9);
+        sim_rows.push(vec![
+            sc.id.clone(),
+            format!("{entities} ({})", side_counts.join(", ")),
+            run_ticks.to_string(),
+            format!("{setup_ms:.0}"),
+            format!("{wall:.2}"),
+            format!("{tps:.0}"),
+            format!("{:.1}", tps / TICK_HZ as f64),
+        ]);
+    }
+
+    let tables = [
+        Table {
+            title: "LOS single ray (terrain::los::sight, 5 target heights, eye 2.3 m, bulwark_a0 -> kurgan_b)",
+            header: vec!["map", "range_m", "pairs", "mean_us", "p95_us", "visible"],
+            rows: los_rows,
+        },
+        Table {
+            title: "Viewshed (terrain::los::viewshed, radius 3000 m, step 8 m, eye 2.3 m, target 2.4 m)",
+            header: vec!["map", "origin_x,y", "radius_m", "step_m", "mean_ms", "p95_ms"],
+            rows: vs_rows,
+        },
+        Table {
+            title: "Battle-position search (ai::position evaluate + assign, radius 250 m, facing 45 deg, 10 calls)",
+            header: vec![
+                "map",
+                "scenario",
+                "vehicle x movers",
+                "cands",
+                "chosen",
+                "eval_ms",
+                "assign_ms",
+                "mean_ms",
+                "p95_ms",
+            ],
+            rows: bp_rows,
+        },
+        Table {
+            title: "Sim throughput (Sim::step with scenario AI; 20 ticks/s = 1x real time)",
+            header: vec!["scenario", "entities (per side)", "ticks", "setup_ms", "wall_s", "ticks_per_s", "x_1x_speed"],
+            rows: sim_rows,
+        },
+    ];
+    print_tables(&tables, csv);
     Ok(())
 }

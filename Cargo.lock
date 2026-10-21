@@ -197,6 +197,8 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 name = "headless"
 version = "0.1.0"
 dependencies = [
+ "ai",
+ "rand_chacha",
  "sim",
  "sim-data",
  "terragen",
