@@ -53,7 +53,11 @@ pub fn bake_map(data: &Path, ds: &DataSet, pkg: &AuthoringPackage) -> Result<Bak
 pub fn ensure_map(data: &Path, ds: &DataSet, map: &MapRef, mut log: impl FnMut(&str)) -> Result<BakedMap> {
     let dir = map_dir(data, &map.id);
     let pkg = if dir.join("map.toml").exists() {
-        AuthoringPackage::load(&dir)?
+        let pkg = AuthoringPackage::load(&dir)?;
+        if let Some(why) = map_mismatch(&pkg.manifest, map) {
+            log(&format!("warning: {why}"));
+        }
+        pkg
     } else {
         log(&format!("map '{}' not found; generating from recipe '{}' seed {}", map.id, map.recipe, map.seed));
         generate_map(data, ds, &map.recipe, &map.id, map.seed, map.size_m, &mut log)?
@@ -65,6 +69,25 @@ pub fn ensure_map(data: &Path, ds: &DataSet, map: &MapRef, mut log: impl FnMut(&
             bake_map(data, ds, &pkg)
         }
     }
+}
+
+/// Describe how an existing map differs from the one a scenario asks for, if it does. An existing
+/// map is always used as is (it may be hand-edited), so a scenario tuned on another seed would
+/// otherwise play on the wrong terrain without notice. Maps without a recipe are imported or
+/// hand-made and are not compared.
+pub fn map_mismatch(have: &terrain::MapManifest, want: &MapRef) -> Option<String> {
+    let recipe = have.recipe.as_deref()?;
+    let mut diffs = Vec::new();
+    if recipe != want.recipe {
+        diffs.push(format!("recipe '{recipe}' (scenario: '{}')", want.recipe));
+    }
+    if have.seed != want.seed {
+        diffs.push(format!("seed {} (scenario: {})", have.seed, want.seed));
+    }
+    if (have.width_m() - want.size_m).abs() > 0.5 {
+        diffs.push(format!("size {:.0} m (scenario: {:.0} m)", have.width_m(), want.size_m));
+    }
+    (!diffs.is_empty()).then(|| format!("map '{}' on disk has {}", want.id, diffs.join(", ")))
 }
 
 fn classes_match(b: &BakedMap, ds: &DataSet) -> bool {
