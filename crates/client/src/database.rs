@@ -390,37 +390,64 @@ fn vehicle_sheet(ds: &DataSet, v: &VehicleDef) -> Sheet {
     }
 }
 
-/// Longest range (to 5 km, 50 m steps) at which `a` still penetrates `armour` mm; None if never.
-fn defeat_range(ds: &DataSet, a: &AmmoDef, armour: f64) -> Option<f64> {
-    (0..=100)
-        .rev()
-        .map(|k| k as f64 * 50.0)
-        .find(|&r| gunnery::penetration_mm(&ds.penetration, a, gunnery::velocity_at(a, r)) >= armour)
+/// Farthest range the sheet scans (m); also the step is 50 m.
+const SCAN_M: f64 = 5000.0;
+
+/// How a target's front meets a round: the armour to beat (mm) and the share of the round's
+/// penetration left after an ERA tile fires (1.0 without ERA).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Front {
+    armour_mm: f64,
+    pen_factor: f64,
 }
 
-fn range_text(r: Option<f64>) -> String {
+/// Longest range (to the round's maximum range or 5 km, 50 m steps) at which `a` still penetrates
+/// `front`; None if never.
+fn defeat_range(ds: &DataSet, a: &AmmoDef, front: Front) -> Option<f64> {
+    let steps = (scan_limit(a) / 50.0) as u32;
+    (0..=steps).rev().map(|k| k as f64 * 50.0).find(|&r| {
+        front.pen_factor * gunnery::penetration_mm(&ds.penetration, a, gunnery::velocity_at(a, r)) >= front.armour_mm
+    })
+}
+
+/// The range the scan stops at: the round's maximum range if it has one, else 5 km.
+fn scan_limit(a: &AmmoDef) -> f64 {
+    a.max_range_m.as_ref().map_or(SCAN_M, |m| m.get().min(SCAN_M))
+}
+
+fn range_text(r: Option<f64>, a: &AmmoDef) -> String {
+    let limit = scan_limit(a);
     match r {
         None => "NO".into(),
-        Some(r) if r >= 5000.0 => "ANY RANGE".into(),
+        Some(r) if r >= (limit / 50.0).floor() * 50.0 => {
+            if limit >= SCAN_M {
+                "ANY RANGE".into()
+            } else {
+                format!("TO {:.1} KM (MAX RANGE)", limit / 1000.0)
+            }
+        }
         Some(r) => format!("TO {:.1} KM", r / 1000.0),
     }
 }
 
-/// Armour as seen by `a`: chemical rounds meet the CE-equivalent thickness (ERA not counted).
-fn armour_vs(a: &AmmoDef, v: &VehicleDef, mm: f64) -> f64 {
-    if a.kind.is_chemical() { mm * v.armour.ce_factor.get() } else { mm }
+/// The front `mm` thick as `a` meets it at normal incidence: chemical rounds meet the CE-equivalent
+/// thickness and, with ERA, lose the share a fired tile removes; kinetic rounds meet the extra
+/// RHA a fired tile adds. This is the case with a tile still on the spot (the sim spends tiles).
+fn front_vs(a: &AmmoDef, v: &VehicleDef, mm: f64) -> Front {
+    let era = v.armour.era.as_ref();
+    if a.kind.is_chemical() {
+        Front { armour_mm: mm * v.armour.ce_factor.get(), pen_factor: era.map_or(1.0, |e| 1.0 - e.ce_defeat.get()) }
+    } else {
+        Front { armour_mm: mm + era.map_or(0.0, |e| e.ke_gain_mm.get()), pen_factor: 1.0 }
+    }
 }
 
 fn defeat_text(ds: &DataSet, a: &AmmoDef, v: &VehicleDef) -> String {
-    format!(
-        "TURRET FRONT {}  ·  HULL FRONT {}",
-        range_text(defeat_range(ds, a, armour_vs(a, v, v.armour.turret_front.get()))),
-        range_text(defeat_range(ds, a, armour_vs(a, v, v.armour.hull_front.get())))
-    )
+    let at = |mm: f64| range_text(defeat_range(ds, a, front_vs(a, v, mm)), a);
+    format!("TURRET FRONT {}  ·  HULL FRONT {}", at(v.armour.turret_front.get()), at(v.armour.hull_front.get()))
 }
 
-const DEFEAT_FORMULA: &str =
-    "PENETRATION AT REMAINING VELOCITY ≥ ARMOUR (CHEMICAL ROUNDS: × CE FACTOR; ERA NOT COUNTED)";
+const DEFEAT_FORMULA: &str = "PENETRATION AT REMAINING VELOCITY ≥ ARMOUR, TO THE ROUND'S MAX RANGE (CHEMICAL ROUNDS: × CE FACTOR; ERA TILE ASSUMED TO FIRE)";
 
 fn ammo_sheet(ds: &DataSet, a: &AmmoDef) -> Sheet {
     let mut l = vec![
@@ -1069,15 +1096,72 @@ mod tests {
         assert_eq!(next_year(Some(2030)), None);
     }
 
+    fn plain(armour_mm: f64) -> Front {
+        Front { armour_mm, pen_factor: 1.0 }
+    }
+
     #[test]
     fn defeat_range_is_monotonic_in_armour() {
         let ds = ds();
-        let a = ds.ammo.iter().find(|a| a.kind == sim_data::AmmoKind::Apfsds).unwrap();
-        let thin = defeat_range(&ds, a, 50.0);
+        let a = ds.ammo.iter().find(|a| a.kind == sim_data::AmmoKind::Apfsds && a.max_range_m.is_none()).unwrap();
+        let thin = defeat_range(&ds, a, plain(50.0));
         assert_eq!(thin, Some(5000.0), "50 mm is defeated at any range");
-        assert_eq!(defeat_range(&ds, a, 5000.0), None);
+        assert_eq!(range_text(thin, a), "ANY RANGE");
+        assert_eq!(defeat_range(&ds, a, plain(5000.0)), None);
         let mid = gunnery::penetration_mm(&ds.penetration, a, gunnery::velocity_at(a, 2000.0));
-        let r = defeat_range(&ds, a, mid).unwrap();
+        let r = defeat_range(&ds, a, plain(mid)).unwrap();
         assert!((r - 2000.0).abs() <= 50.0, "{r}");
+    }
+
+    #[test]
+    fn defeat_range_stops_at_the_rounds_maximum_range() {
+        let ds = ds();
+        let mut a = ds.ammo.iter().find(|a| a.kind == sim_data::AmmoKind::Apfsds).unwrap().clone();
+        a.max_range_m = Some(sim_data::Stat {
+            value: 2000.0,
+            source: "test".into(),
+            confidence: sim_data::Confidence::Estimate,
+            notes: None,
+        });
+        let r = defeat_range(&ds, &a, plain(50.0));
+        assert_eq!(r, Some(2000.0), "never reports a range beyond the maximum");
+        assert_eq!(range_text(r, &a), "TO 2.0 KM (MAX RANGE)");
+        // Armour it only defeats closer than the limit keeps the plain wording.
+        let mid = gunnery::penetration_mm(&ds.penetration, &a, gunnery::velocity_at(&a, 1000.0));
+        assert_eq!(range_text(defeat_range(&ds, &a, plain(mid)), &a), "TO 1.0 KM");
+    }
+
+    #[test]
+    fn every_listed_round_is_capped_by_its_maximum_range() {
+        let ds = ds();
+        for a in ds.ammo.iter().filter(|a| a.max_range_m.is_some()) {
+            if let Some(r) = defeat_range(&ds, a, plain(1.0)) {
+                assert!(r <= a.max_range_m.as_ref().unwrap().get(), "{}: {r}", a.name);
+            }
+        }
+    }
+
+    #[test]
+    fn era_weakens_shaped_charges_and_adds_to_kinetic_armour() {
+        let ds = ds();
+        let v = ds.vehicles.iter().find(|v| v.armour.era.is_some()).expect("an ERA vehicle");
+        let era = v.armour.era.as_ref().unwrap();
+        let ke = ds.ammo.iter().find(|a| a.kind == sim_data::AmmoKind::Apfsds).unwrap();
+        let ce = ds.ammo.iter().find(|a| a.kind.is_chemical()).unwrap();
+        let mm = v.armour.turret_front.get();
+        let f = front_vs(ke, v, mm);
+        assert_eq!((f.armour_mm, f.pen_factor), (mm + era.ke_gain_mm.get(), 1.0));
+        let f = front_vs(ce, v, mm);
+        assert_eq!(f.armour_mm, mm * v.armour.ce_factor.get());
+        assert!((f.pen_factor - (1.0 - era.ce_defeat.get())).abs() < 1e-12);
+        // Without ERA, nothing changes.
+        let mut bare = v.clone();
+        bare.armour.era = None;
+        assert_eq!(front_vs(ce, &bare, mm).pen_factor, 1.0);
+        assert_eq!(front_vs(ke, &bare, mm).armour_mm, mm);
+        // The reach against the ERA front is never longer than against the bare one.
+        let with = defeat_range(&ds, ce, front_vs(ce, v, mm));
+        let without = defeat_range(&ds, ce, front_vs(ce, &bare, mm));
+        assert!(with.unwrap_or(-1.0) <= without.unwrap_or(-1.0), "{with:?} {without:?}");
     }
 }

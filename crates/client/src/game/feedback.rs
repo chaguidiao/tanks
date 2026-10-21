@@ -5,6 +5,20 @@
 use super::ctx::MenuTarget;
 use super::*;
 
+/// Radio and tooltip wording when no burst is in the picture. The window is `sim::IMPACT_VIEW_M`.
+pub(super) const NO_BURST_OBSERVED: &str = "NO ROUNDS OBSERVED TO ADJUST (BURSTS WITHIN 1.5 KM OF OWN UNITS ONLY).";
+
+/// Tooltip of the ADJUST button: says why it is greyed out, else what it does.
+pub(super) fn adjust_tip(burst_seen: bool, battery: bool) -> String {
+    if !battery {
+        "ADJUST FIRE: NO FIRE SUPPORT AVAILABLE".to_owned()
+    } else if !burst_seen {
+        format!("ADJUST FIRE: NO OBSERVED BURSTS (WITHIN {:.1} KM OF OWN UNITS)", sim::IMPACT_VIEW_M / 1000.0)
+    } else {
+        "ADJUST FIRE: CLICK WHERE THE LAST OBSERVED ROUNDS SHOULD HAVE LANDED; THE BATTERY SHIFTS ITS AIM AND FIRES AGAIN WITH A SHORT DELAY".to_owned()
+    }
+}
+
 /// Ring radius (px) and arc segments of the right-button hold ring.
 const RING_R: f32 = 16.0;
 const RING_SEGS: usize = 28;
@@ -228,5 +242,18 @@ impl Game {
         let w = f.text_width(&text, style::FONT_S) + 16.0;
         f.rect(first.x - w - 8.0, first.y, w, first.h, style::PANEL);
         f.text(&text, first.x - w, first.y + 6.0, style::FONT_S, style::AMBER);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adjust_tip_names_the_reason_it_is_unavailable() {
+        assert!(adjust_tip(false, true).contains("NO OBSERVED BURSTS (WITHIN 1.5 KM OF OWN UNITS)"));
+        assert!(adjust_tip(true, false).contains("NO FIRE SUPPORT"));
+        assert!(adjust_tip(true, true).contains("CLICK WHERE"));
+        assert!(NO_BURST_OBSERVED.contains("1.5 KM"), "radio text matches the window");
     }
 }

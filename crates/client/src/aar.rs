@@ -56,6 +56,19 @@ pub struct Recorder {
     pub callsigns: BTreeMap<EntityId, String>,
     /// Code words sent: (time, side, name).
     pub code_words: Vec<(f64, SideId, String)>,
+    /// Side of the shooter whose direct-fire round just destroyed a vehicle (`ShotResult`, which
+    /// the sim emits immediately before the victim's `Hit`); consumed by that `Hit`.
+    direct_killer: Option<usize>,
+}
+
+/// Which side gets the kill for a vehicle lost by `victim`. A direct-fire kill names its shooter
+/// (none for a friendly kill). Without one (artillery, mines) the kill goes to the opponent, which
+/// is only unambiguous in a two-sided scenario.
+pub fn kill_credit(shooter: Option<usize>, victim: usize, n_sides: usize) -> Option<usize> {
+    match shooter {
+        Some(s) => (s != victim).then_some(s),
+        None => (n_sides == 2).then(|| 1 - victim),
+    }
 }
 
 impl Recorder {
@@ -85,11 +98,16 @@ impl Recorder {
                         self.shots.push(Shot { t, side: s, from: *from, to: *to, hit: *hit });
                     }
                 }
+                Event::ShotResult { unit, kill: Some(sim::KillKind::Catastrophic), .. } => {
+                    self.direct_killer = side_of(*unit).map(|s| s.0 as usize);
+                }
                 Event::Hit { unit, kill: Some(sim::KillKind::Catastrophic), .. } => {
+                    let shooter = self.direct_killer.take();
                     if let Some(s) = side_of(*unit) {
                         self.stats[s.0 as usize].losses += 1;
-                        let other = (s.0 as usize + 1) % n_sides;
-                        self.stats[other].kills += 1;
+                        if let Some(k) = kill_credit(shooter, s.0 as usize, n_sides) {
+                            self.stats[k].kills += 1;
+                        }
                     }
                 }
                 Event::SpotReport { side, .. } => {
@@ -276,5 +294,29 @@ impl AarView {
         for (k, (l, c)) in lines.iter().enumerate() {
             f.text(l, px + 8.0, py + 8.0 + k as f32 * 18.0, style::FONT_L - 9, *c);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direct_fire_kills_go_to_the_shooters_side() {
+        // Three sides: side 2 kills a side 0 vehicle; the old (victim + 1) rule credited side 1.
+        assert_eq!(kill_credit(Some(2), 0, 3), Some(2));
+        assert_eq!(kill_credit(Some(1), 0, 2), Some(1));
+    }
+
+    #[test]
+    fn friendly_fire_credits_nobody() {
+        assert_eq!(kill_credit(Some(1), 1, 2), None);
+    }
+
+    #[test]
+    fn indirect_kills_go_to_the_opponent_only_when_there_is_one() {
+        assert_eq!(kill_credit(None, 0, 2), Some(1));
+        assert_eq!(kill_credit(None, 1, 2), Some(0));
+        assert_eq!(kill_credit(None, 0, 3), None, "ambiguous with three sides");
     }
 }

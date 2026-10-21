@@ -2,7 +2,7 @@
 //! briefing, loading, options, the screen menu (Esc) and the unsaved-changes prompt. Buttons are
 //! `hud::Button`s laid out per frame like the rest of the HUD; menus also take Up/Down/Enter.
 
-use sim_data::{MapRef, ScenarioDef};
+use sim_data::{MapRef, ScenarioDef, VehicleClass};
 use terrain::contour::{self, ContourKind, ContourSpec};
 use terrain::{Grid, Heightfield};
 
@@ -63,6 +63,33 @@ pub enum Purpose {
 pub struct ScenarioEntry {
     pub id: String,
     pub def: Result<ScenarioDef, String>,
+    /// Per side, the force by vehicle class (`8 TANKS · 3 IFVS`), see `force_summary`.
+    pub forces: Vec<String>,
+}
+
+/// Count a side's vehicles by class, e.g. `8 TANKS · 3 IFVS`. Classes appear in the order
+/// MBT, IFV, RECON; a vehicle id the data set does not know counts as `UNKNOWN`.
+pub fn force_summary<'a>(
+    vehicles: impl IntoIterator<Item = &'a str>,
+    class_of: impl Fn(&str) -> Option<VehicleClass>,
+) -> String {
+    let mut counts = [0usize; 4];
+    for v in vehicles {
+        counts[match class_of(v) {
+            Some(VehicleClass::Mbt) => 0,
+            Some(VehicleClass::Ifv) => 1,
+            Some(VehicleClass::Recon) => 2,
+            None => 3,
+        }] += 1;
+    }
+    let names = [("TANK", "TANKS"), ("IFV", "IFVS"), ("RECON", "RECON"), ("UNKNOWN", "UNKNOWN")];
+    let parts: Vec<String> = counts
+        .iter()
+        .zip(names)
+        .filter(|(n, _)| **n > 0)
+        .map(|(n, (one, many))| format!("{n} {}", if *n == 1 { one } else { many }))
+        .collect();
+    if parts.is_empty() { "NO VEHICLES".into() } else { parts.join(" · ") }
 }
 
 pub struct ScenarioList {
@@ -512,10 +539,9 @@ impl ScenarioList {
             facts.push((
                 if k == 0 { "SIDES" } else { "" },
                 format!(
-                    "{} · {} TANK{} · {} · {}",
+                    "{} · {} · {} · {}",
                     s.name,
-                    s.units.len(),
-                    if s.units.len() == 1 { "" } else { "S" },
+                    e.forces.get(k).map_or("", String::as_str),
                     s.doctrine.to_uppercase(),
                     role
                 ),
@@ -773,4 +799,31 @@ pub fn draw_confirm(f: &mut Frame, screen: P2) {
     f.rect_lines(r.x, r.y, r.w, r.h, style::AMBER);
     f.text("UNSAVED CHANGES", r.x + 20.0, r.y + 20.0, style::FONT_L, style::AMBER);
     f.text("LEAVING NOW DISCARDS THEM. SAVE FROM THE MENU FIRST.", r.x + 20.0, r.y + 52.0, style::FONT_S, style::TEXT);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn class(id: &str) -> Option<VehicleClass> {
+        match id {
+            "mbt" => Some(VehicleClass::Mbt),
+            "ifv" => Some(VehicleClass::Ifv),
+            "scout" => Some(VehicleClass::Recon),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn force_summary_counts_by_class_not_all_as_tanks() {
+        let blue = ["mbt"; 8].into_iter().chain(["ifv"; 3]);
+        assert_eq!(force_summary(blue, class), "8 TANKS · 3 IFVS");
+        assert_eq!(force_summary(["mbt", "ifv", "scout", "scout"], class), "1 TANK · 1 IFV · 2 RECON");
+    }
+
+    #[test]
+    fn force_summary_handles_empty_and_unknown_vehicles() {
+        assert_eq!(force_summary([], class), "NO VEHICLES");
+        assert_eq!(force_summary(["mbt", "ghost"], class), "1 TANK · 1 UNKNOWN");
+    }
 }

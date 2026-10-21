@@ -95,6 +95,13 @@ impl Default for Settings {
     }
 }
 
+fn replay_dir_for(settings_file: Option<&std::path::Path>) -> PathBuf {
+    match settings_file.and_then(std::path::Path::parent) {
+        Some(d) => d.join("replays"),
+        None => std::env::temp_dir().join("tanks").join("replays"),
+    }
+}
+
 fn on_off(b: bool) -> &'static str {
     if b { "on" } else { "off" }
 }
@@ -110,6 +117,13 @@ impl Settings {
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
             .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))?;
         Some(base.join("tanks").join("settings.cfg"))
+    }
+
+    /// Where replays are saved: `replays/` next to the settings file, so it does not depend on the
+    /// working directory (a packaged game may start from a shortcut or a read-only folder).
+    /// Without a config directory, the system temp folder.
+    pub fn replay_dir() -> PathBuf {
+        replay_dir_for(Self::path().as_deref())
     }
 
     pub fn load() -> Self {
@@ -206,6 +220,14 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replays_go_next_to_the_settings_file_not_the_working_directory() {
+        let dir = replay_dir_for(Some(std::path::Path::new("/home/u/.config/tanks/settings.cfg")));
+        assert_eq!(dir, PathBuf::from("/home/u/.config/tanks/replays"));
+        assert!(replay_dir_for(None).is_absolute(), "fallback is the temp dir");
+        assert!(replay_dir_for(None).ends_with("tanks/replays"));
+    }
 
     #[test]
     fn round_trip() {

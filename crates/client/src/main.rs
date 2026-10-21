@@ -434,7 +434,17 @@ impl App {
             .into_iter()
             .map(|id| {
                 let def = DataSet::load_scenario(&self.data_dir, &id).map_err(|e| e.to_string());
-                ScenarioEntry { id, def }
+                let forces = def.as_ref().map_or(Vec::new(), |d| {
+                    d.sides
+                        .iter()
+                        .map(|s| {
+                            menu::force_summary(s.units.iter().map(|u| u.vehicle.as_str()), |v| {
+                                self.ds.vehicle(v).map(|v| v.class)
+                            })
+                        })
+                        .collect()
+                });
+                ScenarioEntry { id, def, forces }
             })
             .collect();
         ScenarioList { purpose, entries, sel: 0 }

@@ -837,10 +837,12 @@ impl Game {
             a.update(inp, &self.recorder);
             if inp.ctrl && inp.hit(Key::Char('r')) {
                 let rep = sim::Replay::record(&self.sim);
-                let path = format!("out/replay-{}.ron", self.scenario.id);
-                let msg = std::fs::create_dir_all("out")
+                let dir = crate::settings::Settings::replay_dir();
+                let path = dir.join(format!("replay-{}.ron", self.scenario.id));
+                let shown = path.display();
+                let msg = std::fs::create_dir_all(&dir)
                     .and_then(|_| std::fs::write(&path, rep.to_ron()))
-                    .map_or_else(|e| format!("REPLAY SAVE FAILED: {e}"), |_| format!("REPLAY SAVED: {path}"));
+                    .map_or_else(|e| format!("REPLAY SAVE FAILED: {shown}: {e}"), |_| format!("REPLAY SAVED: {shown}"));
                 self.radio(msg);
             }
             return fx;
@@ -1103,7 +1105,7 @@ impl Game {
             }
             Cmd::AdjustFire => {
                 if self.last_burst().is_none() {
-                    self.radio("NO ROUNDS OBSERVED TO ADJUST.".into());
+                    self.radio(feedback::NO_BURST_OBSERVED.into());
                 } else {
                     self.toggle_tool(Tool::AdjustFire);
                 }
@@ -2464,7 +2466,7 @@ impl Game {
                     .key("J")
                     .enabled(self.last_burst().is_some() && self.fire_battery().is_some())
                     .active(self.tool == Tool::AdjustFire)
-                    .tip("ADJUST FIRE: CLICK WHERE THE LAST OBSERVED ROUNDS SHOULD HAVE LANDED; THE BATTERY SHIFTS ITS AIM AND FIRES AGAIN WITH A SHORT DELAY"),
+                    .tip(feedback::adjust_tip(self.last_burst().is_some(), self.fire_battery().is_some())),
             ),
             (19, contingency()),
             (
@@ -2545,10 +2547,7 @@ impl Game {
             }
             let types: Vec<String> = types.iter().map(|(n, k)| format!("{k}× {n}")).collect();
             head.push((format!("PLATOON {}   {}", pv.callsign, types.join(", ")), style::FRIENDLY));
-            head.push((
-                if pv.queued > 0 { format!("{}   +{} QUEUED", pv.task, pv.queued) } else { pv.task.clone() },
-                style::TEXT,
-            ));
+            head.push((pv.task.clone(), style::TEXT));
             head.push((
                 format!(
                     "FORM {}   TECH {}   SPEED {}",

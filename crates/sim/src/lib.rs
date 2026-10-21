@@ -127,7 +127,7 @@ const SMOKE_VIEW_M: f64 = 3000.0;
 /// Shell bursts stay in the pictures and the react-to-indirect-fire drill this long (s).
 const IMPACT_KEEP_S: f64 = 30.0;
 /// Bursts in a side's picture when within this distance of one of its vehicles (m).
-const IMPACT_VIEW_M: f64 = 1500.0;
+pub const IMPACT_VIEW_M: f64 = 1500.0;
 
 impl Sim {
     pub fn new(scenario: &ScenarioDef, data: Arc<DataSet>, map: Arc<BakedMap>) -> Result<Self, String> {
