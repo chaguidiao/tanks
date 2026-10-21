@@ -12,7 +12,7 @@
 //!   the platoon halts, orients on the threat and returns fire; it continues the mission once
 //!   the contact has been quiet for a while.
 
-use ai::formation::{along, length, slot_position};
+use ai::formation::{along, length, route_slot, slot_position};
 use ai::picture::{Condition, ContactReaction, PerceivedWorld, SideId};
 use ai::position::{BpQuery, Candidate, assign, evaluate};
 use sim_data::{DoctrinePack, Technique, VehicleDef};
@@ -307,7 +307,6 @@ fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
             Technique::Traveling | Technique::TravelingOverwatch => progress[0],
             Technique::BoundingOverwatch => progress[sec],
         };
-        let (lead, h) = along(&route, s);
         let mut off = fdef.slots.get(i).copied().unwrap_or((0.0, -(i as f64)));
         off = (off.0 * spacing, off.1 * spacing);
         if p.technique == Technique::TravelingOverwatch && sec == 1 {
@@ -318,7 +317,9 @@ fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
             let base = fdef.slots.get(if sec == 0 { 0 } else { n.div_ceil(2) }).copied().unwrap_or((0.0, 0.0));
             off = (off.0 - base.0 * spacing, off.1 - base.1 * spacing);
         }
-        (slot_position(lead, h, off), h)
+        // Slots are measured along the route, so trailing vehicles stay on it through bends and
+        // village streets (TODO Z4: heading-rotated offsets put them off the street).
+        route_slot(&route, s, off)
     };
     // Laggards slow the platoon down.
     let mut max_lag: f64 = 0.0;

@@ -52,7 +52,7 @@ Only what infantry needs from buildings; full towns wait for M8h1b.
 - [ ] H7 Building types with wall thickness/height for LOS and cover values (infantry cover, fields of fire)
 - [ ] H8 Building identity in the baked map (ID raster or kept feature list; today only a `building_height` grid): needed by B7, F5, D4
 - [ ] H9 Foot mobility class and planning raster (forest, steep slopes, into/through buildings); `MobilityClass` today derives only from `VehicleDef`
-- [ ] H10 Narrow streets column-only for vehicles (from D4): formations collapse to column in built-up areas; column slots follow the route by arc length so trailing vehicles stay on the street (Z4 finding)
+- [ ] H10 Narrow streets column-only for vehicles (from D4): formations collapse to column in built-up areas. (Done 2026-10-21, ahead of the rest: slots follow the route by arc length, `ai::formation::route_slot`, so trailing vehicles stay on the street; column through the uplands village 398 → 232 s; 16-seed balance batch neutral)
 - Exit: buildings carry type and identity; foot routes through a village; a wedge driving through a village goes to column; baker and hash tests; `BAKER_VERSION` bump.
 
 ## M8h1b — Towns (after M8f1)
@@ -154,7 +154,8 @@ Run alongside the capability phases: each phase ends with at least one scenario 
 - [ ] I4 Campaign ordering and difficulty labels in the scenario list — §13.1 M7e
 - [ ] I5 Database: filter by scenario date, side-by-side comparison, silhouettes — §13.1 database
 - [ ] I6 National doctrine packs as mods (never code branches) — decision #5
-- [ ] I8 Re-check `demo` scenario balance (Z1, 2026-10-21): `mod-dusk-attack` seed 2 is a Red win at the time limit and seed 1 a Blue win with 0 lost; `mod-fog-meeting` seed 3 Blue loses 1/7. The M7e note says Blue's passive AI won all four seeds with 2–5 lost; find out whether M8a (queue, reverse, going) moved it (run the M7e commit for comparison) before re-tuning
+- [x] I8 Re-check `demo` scenario balance (Z1). **Done 2026-10-21**: M8a predates the M7e tuning, so it is not the cause. `mod-fog-meeting` is unchanged since tuning (its 1/7 at seed 3 was already there; the "2–5 lost" note was approximate). `mod-dusk-attack` moved from 19:30 in June to 17:30 on 3 October after the batch (9704297, dusk during the fight): at the old time today's build gives Blue 4/4 wins with 2–5 lost, at the new time 3/4 (seed 2 Red at the time limit, seed 1 with 0 lost). Retuning the dusk scenario is a design call: see I9. 16-seed baseline (`out/b16-*.csv`, not committed): Blue wins 11/16 dusk, 14/16 fog, 15–16/16 the rest
+- [ ] I9 Decide whether `mod-dusk-attack` keeps its harder dusk balance (Blue's passive AI lost 1 seed of 4) or is retuned (e.g. earlier start or a smaller Red force); re-run `run --summary` seeds 1–4 after any change
 
 ## M8j — Shell, editors, AAR, accessibility
 - [ ] J1 Menus: new map from a recipe, new blank scenario, map preview in select screens — §13.1 shell
@@ -170,7 +171,7 @@ Run alongside the capability phases: each phase ends with at least one scenario 
 - [ ] K2 Code signing and notarisation; installer; Intel macOS; Linux AppImage — §13.1 packaging
 
 ## ENG — Engine, performance, fidelity (pick up when touched)
-- [ ] N1 Thermal crossover — §13.1 M2
+- [x] N1 Thermal crossover — §13.1 M2. Already built in M7c (`weather::thermal_factor`, `detection.ron` `thermal_crossover`, test `thermal_contrast_dips_at_crossover`); ticked 2026-10-21
 - [ ] N3 Contour/layer `RenderTexture` caching per zoom band — §13.1 M0
 - [ ] N4 Internal component model and spall — §13.1 M3
 - [ ] N5 Raygui-style panels — §13.1 M0.5
