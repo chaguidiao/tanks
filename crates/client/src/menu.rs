@@ -293,8 +293,22 @@ fn backend() -> &'static str {
     if cfg!(feature = "gl21") { "OPENGL 2.1" } else { "OPENGL 3.3" }
 }
 
+/// Version as shown to the player: the Cargo version for a tagged release build, with the build
+/// id appended for any other packaged build (`tools/package.sh` sets `TANKS_BUILD` from
+/// `git describe`), and DEV for a plain `cargo build`.
+fn version_label(version: &str, build: Option<&str>) -> String {
+    match build.map(|b| b.trim_start_matches('v')).filter(|b| !b.is_empty()) {
+        None => format!("{version} DEV"),
+        Some(b) if b == version => version.to_owned(),
+        // "0.1.0-3-g1a2b3c4": commits after the release tag.
+        Some(b) if b.starts_with(version) => b.to_uppercase(),
+        Some(b) => format!("{version}+{}", b.to_uppercase()),
+    }
+}
+
 fn footer(f: &mut Frame, screen: P2) {
-    let l = format!("TANKS {}   ·   {}   ·   MIT LICENCE", env!("CARGO_PKG_VERSION"), backend());
+    let v = version_label(env!("CARGO_PKG_VERSION"), option_env!("TANKS_BUILD"));
+    let l = format!("TANKS {v}   ·   {}   ·   MIT LICENCE", backend());
     f.text(&l, 24.0, screen[1] - 28.0, style::FONT_S, style::TEXT_OFF);
 }
 
@@ -812,6 +826,15 @@ mod tests {
             "scout" => Some(VehicleClass::Recon),
             _ => None,
         }
+    }
+
+    #[test]
+    fn version_label_marks_untagged_and_dev_builds() {
+        assert_eq!(version_label("0.1.0", Some("v0.1.0")), "0.1.0");
+        assert_eq!(version_label("0.1.0", Some("v0.1.0-3-g1a2b3c4")), "0.1.0-3-G1A2B3C4");
+        assert_eq!(version_label("0.1.0", Some("1a2b3c4-dirty")), "0.1.0+1A2B3C4-DIRTY");
+        assert_eq!(version_label("0.1.0", Some("")), "0.1.0 DEV");
+        assert_eq!(version_label("0.1.0", None), "0.1.0 DEV");
     }
 
     #[test]

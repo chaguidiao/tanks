@@ -17,6 +17,11 @@ pkg="tanks-${version}-${name}"
 exe=""
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=".exe" ;; esac
 
+# Build id shown on the title screen: the tag for a release ("v0.1.0"), otherwise a describe
+# string such as "v0.1.0-3-g1a2b3c4" or a bare hash; "" without git.
+TANKS_BUILD="$(git describe --tags --always --dirty 2>/dev/null || true)"
+export TANKS_BUILD
+
 cargo build --release -p client -p headless
 CARGO_TARGET_DIR=target/gl21 cargo build --release -p client --no-default-features --features gl21
 
