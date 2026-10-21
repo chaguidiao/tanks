@@ -415,6 +415,11 @@ fn scan_limit(a: &AmmoDef) -> f64 {
     a.max_range_m.as_ref().map_or(SCAN_M, |m| m.get().min(SCAN_M))
 }
 
+/// Kilometres with one decimal, two when that would round (3750 m reads 3.75, not 3.8).
+fn km(m: f64) -> String {
+    if (m % 100.0).abs() < 1e-6 { format!("{:.1}", m / 1000.0) } else { format!("{:.2}", m / 1000.0) }
+}
+
 fn range_text(r: Option<f64>, a: &AmmoDef) -> String {
     let limit = scan_limit(a);
     match r {
@@ -423,10 +428,10 @@ fn range_text(r: Option<f64>, a: &AmmoDef) -> String {
             if limit >= SCAN_M {
                 "ANY RANGE".into()
             } else {
-                format!("TO {:.1} KM (MAX RANGE)", limit / 1000.0)
+                format!("TO {} KM (MAX RANGE)", km(limit))
             }
         }
-        Some(r) => format!("TO {:.1} KM", r / 1000.0),
+        Some(r) => format!("TO {} KM", km(r)),
     }
 }
 
@@ -1126,6 +1131,9 @@ mod tests {
         let r = defeat_range(&ds, &a, plain(50.0));
         assert_eq!(r, Some(2000.0), "never reports a range beyond the maximum");
         assert_eq!(range_text(r, &a), "TO 2.0 KM (MAX RANGE)");
+        a.max_range_m.as_mut().unwrap().value = 3750.0;
+        assert_eq!(range_text(Some(3750.0), &a), "TO 3.75 KM (MAX RANGE)", "no rounding past the stat");
+        a.max_range_m.as_mut().unwrap().value = 2000.0;
         // Armour it only defeats closer than the limit keeps the plain wording.
         let mid = gunnery::penetration_mm(&ds.penetration, &a, gunnery::velocity_at(&a, 1000.0));
         assert_eq!(range_text(defeat_range(&ds, &a, plain(mid)), &a), "TO 1.0 KM");

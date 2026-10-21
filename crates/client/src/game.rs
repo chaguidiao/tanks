@@ -1104,7 +1104,10 @@ impl Game {
                 }
             }
             Cmd::AdjustFire => {
-                if self.last_burst().is_none() {
+                // Same order of reasons as the button's tooltip (`feedback::adjust_tip`).
+                if self.fire_battery().is_none() {
+                    self.radio(feedback::NO_FIRE_SUPPORT.into());
+                } else if self.last_burst().is_none() {
                     self.radio(feedback::NO_BURST_OBSERVED.into());
                 } else {
                     self.toggle_tool(Tool::AdjustFire);

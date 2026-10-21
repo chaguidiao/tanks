@@ -7,11 +7,12 @@ use super::*;
 
 /// Radio and tooltip wording when no burst is in the picture. The window is `sim::IMPACT_VIEW_M`.
 pub(super) const NO_BURST_OBSERVED: &str = "NO ROUNDS OBSERVED TO ADJUST (BURSTS WITHIN 1.5 KM OF OWN UNITS ONLY).";
+pub(super) const NO_FIRE_SUPPORT: &str = "NO FIRE SUPPORT AVAILABLE.";
 
 /// Tooltip of the ADJUST button: says why it is greyed out, else what it does.
 pub(super) fn adjust_tip(burst_seen: bool, battery: bool) -> String {
     if !battery {
-        "ADJUST FIRE: NO FIRE SUPPORT AVAILABLE".to_owned()
+        format!("ADJUST FIRE: {}", NO_FIRE_SUPPORT.trim_end_matches('.'))
     } else if !burst_seen {
         format!("ADJUST FIRE: NO OBSERVED BURSTS (WITHIN {:.1} KM OF OWN UNITS)", sim::IMPACT_VIEW_M / 1000.0)
     } else {
