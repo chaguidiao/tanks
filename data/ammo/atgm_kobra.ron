@@ -1,0 +1,21 @@
+// Fictional gun-launched radio-command missile mirroring the 9M112 Kobra class, fired from the
+// 125 mm gun of the T-64B and T-80B classes. Guided (SACLOS): the gunner holds the sight on the
+// target and the missile is steered onto it, so there is no ballistic or lead error.
+(
+    id: "atgm_kobra",
+    name: "ATGM KB-1 (GUN-LAUNCHED)",
+    mirrors: "9M112 Kobra",
+    kind: heat,
+    guided: true,
+    stow: main_gun, // two-part round racked in the carousel like a 125 mm round
+    in_service: (from: 1976),
+    muzzle_velocity_mps: (value: 380.0, source: "open-source summaries (Wikipedia, 9M112 Kobra, 2026): average 350-400 m/s, about 9-10 s to 4 km", confidence: low,
+        notes: "Modelled as a constant mean flight speed; the real missile leaves the gun at about 125 m/s and accelerates."),
+    velocity_loss_mps_per_km: (value: 0.0, source: "a sustained rocket motor holds cruise speed", confidence: low),
+    flat_penetration_mm: (value: 600.0, source: "open-source summaries (Wikipedia, 9M112 Kobra, 2026): about 600 mm RHA for the base missile", confidence: low),
+    dispersion_mrad: (value: 0.28, source: "estimate", confidence: estimate,
+        notes: "Same SACLOS tracking behaviour as the SK-5 (see data/ammo/atgm_sk5.ron); open sources quote about 0.8 hit probability at 4 km, close to what this value gives on a tank-sized target."),
+    reload_s: (value: 8.0, source: "estimate", confidence: estimate, notes: "Autoloader cycle plus the gunner holding the sight to impact; same as the gun-launched RF-1 (data/ammo/atgm_refleks.ron)."),
+    max_range_m: (value: 4000.0, source: "open-source summaries (Wikipedia, 9M112 Kobra, 2026): 100-4,000 m", confidence: medium),
+    preferred_vs: [mbt],
+)

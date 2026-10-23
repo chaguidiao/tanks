@@ -1,0 +1,99 @@
+// Fictional Red wheeled reconnaissance vehicle mirroring the BRDM-2 (1962): four-wheel armoured
+// scout car with a 14.5 mm heavy machine gun, the vehicle of Soviet regimental and divisional
+// reconnaissance in the early 1980s (FM 100-2-3, 1991) and still widely used in the 2000s, so it
+// has no end date. One "round" of machine-gun ammunition is a burst.
+// The sim has no wheeled running gear: the vehicle moves under the same going model as tracked
+// hulls, which flatters it on soft ground; the "track" fields below are an equivalent tyre
+// contact patch that only feeds the ground-pressure figure on the data sheet.
+// Values from public sources; most are open-source summaries (confidence low) or estimates.
+(
+    id: "korsak_r2",
+    name: "KORSAK R2",
+    mirrors: "BRDM-2",
+    in_service: (from: 1962),
+    class: recon,
+    dimensions: (
+        hull_length_m: (value: 5.75, source: "open-source summaries (Wikipedia, BRDM-2, 2026)", confidence: medium),
+        width_m: (value: 2.37, source: "open-source summaries (Wikipedia, BRDM-2, 2026)", confidence: medium),
+        height_m: (value: 2.31, source: "open-source summaries (Wikipedia, BRDM-2, 2026): to the turret roof", confidence: medium),
+        hull_height_m: (value: 1.8, source: "estimate from published side views", confidence: estimate,
+            notes: "Boat-shaped hull with high ground clearance (430 mm); the small turret adds about 0.5 m."),
+        sight_height_m: (value: 2.2, source: "estimate from published side views", confidence: estimate,
+            notes: "Gunner's sight in the turret front, just below the roof."),
+    ),
+    mobility: (
+        combat_mass_kg: (value: 7000.0, source: "open-source summaries (Wikipedia, BRDM-2, 2026): 7 t", confidence: medium),
+        engine_power_w: (value: 104000.0, source: "open-source summaries (Wikipedia, BRDM-2, 2026): GAZ-41 petrol V8, 140 hp", confidence: medium),
+        drivetrain_efficiency: (value: 0.80, source: "estimate", confidence: estimate,
+            notes: "Manual gearbox and transfer case to four wheels; no steering losses of a skid-steer hull."),
+        max_speed_road_mps: (value: 27.8, source: "open-source summaries (Wikipedia, BRDM-2, 2026): 100 km/h", confidence: medium),
+        max_speed_cross_country_mps: (value: 11.0, source: "estimate", confidence: estimate,
+            notes: "About 40 km/h: a light wheeled vehicle is fast on firm going but its suspension limits cross-country speed to that of the tracked vehicles it scouts for."),
+        max_speed_reverse_mps: (value: 5.0, source: "estimate", confidence: estimate, notes: "Reverse gear of a truck-type gearbox, about 18 km/h."),
+        max_slope: (value: 0.58, source: "estimate", confidence: estimate, notes: "30 deg, a usual figure for 4x4 scout cars of the period."),
+        max_side_slope: (value: 0.36, source: "estimate", confidence: estimate, notes: "20 deg: a narrow, high wheeled vehicle tips sooner than a tank."),
+        fording_depth_m: (value: 1.2, source: "estimate", confidence: estimate,
+            notes: "The vehicle swims with a water jet (Wikipedia, BRDM-2, 2026), but swimming is not modelled; a wading depth is used."),
+        vertical_step_m: (value: 0.4, source: "estimate", confidence: estimate, notes: "About the wheel radius."),
+        trench_width_m: (value: 1.2, source: "estimate", confidence: estimate,
+            notes: "Lowered belly wheels help it over ditches (Wikipedia, BRDM-2, 2026); no width is published."),
+        track_ground_contact_m: (value: 0.5, source: "estimate", confidence: estimate,
+            notes: "Equivalent contact patch of four tyres (two per side) at road pressure, so the data sheet's ground pressure reads about 230 kPa; not used by the sim."),
+        track_width_m: (value: 0.3, source: "estimate", confidence: estimate, notes: "Tyre width; see the contact length."),
+        max_yaw_rate_rad_s: (value: 0.35, source: "estimate", confidence: estimate,
+            notes: "Wheeled steering cannot pivot; the sim's yaw-rate limit is lowered to keep turns wide."),
+        max_lateral_accel_mps2: (value: 4.0, source: "estimate", confidence: estimate, notes: "Tyres grip better sideways than skid-steered tracks; the high centre of gravity limits it."),
+        braking_decel_mps2: (value: 5.0, source: "estimate", confidence: estimate, notes: "~0.5 g, drum brakes of a light truck."),
+        fuel_capacity_l: (value: 290.0, source: "open-source summaries (Wikipedia, BRDM-2, 2026)", confidence: medium),
+        fuel_idle_lph: (value: 4.0, source: "estimate", confidence: estimate, notes: "Small petrol V8 at idle."),
+        fuel_per_kwh_l: (value: 0.45, source: "estimate", confidence: estimate, notes: "Carburettor petrol engine, SFC ~330 g/kWh, density 0.74 kg/L."),
+    ),
+    gun: (
+        depression_rad: (value: -0.0873, source: "open-source summaries (Wikipedia, BRDM-2, 2026): -5 deg", confidence: low),
+        elevation_rad: (value: 0.5236, source: "open-source summaries (Wikipedia, BRDM-2, 2026): +30 deg (late production +60 deg)", confidence: low),
+    ),
+    crew: 4,
+    sensors: [
+        (name: "COMMANDER (UNBUTTONED/PERISCOPES)", kind: optical, in_service: (from: 1962),
+            cycles_per_mrad: (value: 1.5, source: "estimate", confidence: estimate, notes: "Same as the other vehicles; scouts observe from open hatches.")),
+        (name: "GUNNER DAY SIGHT 2.6X", kind: optical, in_service: (from: 1962),
+            cycles_per_mrad: (value: 2.5, source: "estimate", confidence: estimate,
+                notes: "Low-power machine-gun telescope of the PP-61 class; resolving power scaled from the 6x sights (5.5) by magnification.")),
+        (name: "TKN-1 ACTIVE IR (COMMANDER)", kind: night_channel, in_service: (from: 1962),
+            cycles_per_mrad: (value: 0.5, source: "estimate", confidence: estimate, notes: "Commander's active IR viewer with an IR spotlight (Wikipedia, BRDM-2, 2026)."),
+            max_range_m: (value: 400.0, source: "estimate", confidence: estimate,
+                notes: "A small spotlight lights a few hundred metres; shorter than a tank's searchlight (800-1000 m, FM 100-2-3).")),
+    ],
+    fire_control: (
+        laser_rangefinder: false,
+        laser_range_error_m: (value: 20.0, source: "estimate", confidence: estimate, notes: "Unused: no laser rangefinder."),
+        estimated_range_error_fraction: (value: 0.12, source: "Ogorkiewicz (1991), stadiametric ranging", confidence: estimate,
+            notes: "Stadiametric reticle, as the other vehicles without a laser."),
+        ballistic_error_mrad: (value: 0.6, source: "estimate", confidence: estimate, notes: "Machine-gun reticle with range marks only."),
+        aim_error_mrad: (value: 0.4, source: "estimate", confidence: estimate, notes: "Manual traverse and elevation by handwheels."),
+        moving_error_mrad: (value: 2.0, source: "estimate", confidence: estimate, notes: "No stabilisation on a sprung wheeled hull."),
+        lead_error_fraction: (value: 0.35, source: "estimate", confidence: estimate, notes: "Lead by reticle estimate."),
+        lay_time_s: (value: 3.0, source: "estimate", confidence: estimate, notes: "Light turret, as the other light vehicles."),
+        lase_time_s: (value: 1.5, source: "estimate", confidence: estimate, notes: "Unused: no laser rangefinder."),
+    ),
+    armament: (
+        gun: "14.5 MM HMG",
+        load: [(ammo: "api_145", count: 100)],
+        autoloader: true,
+        reload_s: (value: 2.0, source: "estimate", confidence: estimate, notes: "One burst of about five rounds (500 rounds carried, Wikipedia, BRDM-2, 2026) plus laying."),
+        turret_traverse_rad_s: (value: 0.5, source: "estimate", confidence: estimate, notes: "Hand-cranked one-man turret."),
+        max_engagement_range_m: (value: 1500.0, source: "estimate", confidence: estimate, notes: "Effective range of the 14.5 mm round against light armour."),
+    ),
+    armour: (
+        ce_factor: (value: 1.0, source: "estimate: thin steel armour has no special CE protection", confidence: estimate),
+        turret_front: (value: 10.0, source: "open-source summaries (Wikipedia, BRDM-2, 2026): 10 mm", confidence: low),
+        turret_side: (value: 7.0, source: "open-source summaries (Wikipedia, BRDM-2, 2026): 7 mm", confidence: low),
+        turret_rear: (value: 7.0, source: "open-source summaries (Wikipedia, BRDM-2, 2026): 7 mm", confidence: low),
+        hull_front: (value: 14.0, source: "open-source summaries (Wikipedia, BRDM-2, 2026): 14 mm nose plate", confidence: low,
+            notes: "The upper front plate is thinner (5 mm) but sloped; the nose figure is used."),
+        hull_side: (value: 7.0, source: "open-source summaries (Wikipedia, BRDM-2, 2026): 7 mm", confidence: low),
+        hull_rear: (value: 7.0, source: "open-source summaries (Wikipedia, BRDM-2, 2026): 7 mm", confidence: low),
+    ),
+    ammo_stowage: isolated, // machine-gun belts only, no main-gun rounds to cook off
+    // No smoke grenade launchers and no engine smoke system.
+)

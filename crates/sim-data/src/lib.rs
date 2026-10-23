@@ -265,6 +265,18 @@ mod tests {
     }
 
     #[test]
+    fn logistics_events_round_trip_and_default_to_empty() {
+        let text = r#"[(at_s: 1800.0, side: 0, platoons: ["1"], kind: Rearm(fraction: 0.5)),
+            (at_s: 2400.0, side: 1, kind: Battery(callsign: "HAMMER", he: 60))]"#;
+        let ev: Vec<LogisticsEventDef> = ron_options().from_str(text).unwrap();
+        assert_eq!(ev[0].kind, LogisticsKind::Rearm { fraction: 0.5 });
+        assert!(ev[1].platoons.is_empty(), "empty = every platoon");
+        assert_eq!(ev[1].kind, LogisticsKind::Battery { callsign: "HAMMER".into(), he: 60, smoke: 0 });
+        let back: Vec<LogisticsEventDef> = ron_options().from_str(&ron_options().to_string(&ev).unwrap()).unwrap();
+        assert_eq!(back, ev);
+    }
+
+    #[test]
     fn stow_classes_follow_the_data() {
         let ds = DataSet::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data")).unwrap();
         let class = |id: &str| ds.ammo(id).unwrap().stow_class();

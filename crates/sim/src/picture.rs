@@ -311,6 +311,8 @@ impl SideState {
                 speed,
                 fuel_fraction,
                 ammo,
+                full_load: w.gun[k].as_ref().map_or(0, |g| g.capacity.iter().sum()),
+                service: None,
                 rounds,
                 ammo_selected,
                 era_left: w.era[k],

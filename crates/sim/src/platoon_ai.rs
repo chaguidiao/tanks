@@ -412,6 +412,7 @@ fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
 /// reports and holds. Members that cannot move are skipped.
 fn resupply_step(p: &mut Platoon, ctx: &mut Ctx) {
     use crate::logistics::{Tables, transfer};
+    use ai::picture::ServiceStage;
     let PlatoonOrder::Resupply { point, approach, mut members } = p.order.clone() else { return };
     let Some(sp_pos) = ctx.supply.get(point).map(|s| s.pos) else {
         p.order = PlatoonOrder::None;
@@ -430,6 +431,7 @@ fn resupply_step(p: &mut Platoon, ctx: &mut Ctx) {
         let st = &mut members[i];
         if !ctx.world.can_move(k) {
             st.done = true;
+            st.stage = ServiceStage::Done;
             continue;
         }
         let active = !st.done && serving < stations;
@@ -444,8 +446,14 @@ fn resupply_step(p: &mut Platoon, ctx: &mut Ctx) {
             let t = Tables { vehicles: ctx.vehicles, loadouts: ctx.loadouts, ammo: ctx.ammo, model: ctx.logistics };
             st.done = transfer(ctx.world, k, &mut ctx.supply[point], st, &t, dt);
             st.short = st.done && crate::logistics::needs_anything(ctx.world, k, &t);
+            st.stage = if st.done { ServiceStage::Done } else { ServiceStage::Served };
             continue;
         }
+        st.stage = match (st.done, active) {
+            (true, _) => ServiceStage::Done,
+            (false, true) => ServiceStage::ToPoint,
+            (false, false) => ServiceStage::Waiting,
+        };
         let (goal, arrive) = if active { (sp_pos, radius * 0.5) } else { (holding(i), SLOT_ARRIVE) };
         let idle = ctx.world.ai[k].as_ref().is_some_and(|a| matches!(a.order, Order::Idle | Order::Face { .. }));
         let moved = st.goal[0].is_nan() || dist(st.goal, goal) > 1.0;

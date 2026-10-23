@@ -78,6 +78,7 @@ pub fn scenario(start_time_s: u32, blue: Vec<UnitDef>, red: Vec<UnitDef>) -> Sce
         victory: None,
         weather: Default::default(),
         briefing: None,
+        logistics: vec![],
     }
 }
 

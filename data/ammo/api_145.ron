@@ -1,0 +1,19 @@
+// Fictional 14.5 mm armour-piercing incendiary heavy machine-gun round mirroring the B-32 class
+// (KPVT). One "round" here is a short burst (see the vehicle). A full-calibre bullet with a hard
+// core, modelled with the APDS rule (flat penetration scaled by (v/v0)^2 with range).
+(
+    id: "api_145",
+    name: "API 14.5",
+    mirrors: "14.5 mm B-32 API",
+    kind: apds,
+    stow: autocannon, // linked belts
+    in_service: (from: 1950),
+    muzzle_velocity_mps: (value: 976.0, source: "open-source summaries (Wikipedia, KPV heavy machine gun, 2026): B-32 at 976 m/s", confidence: medium),
+    velocity_loss_mps_per_km: (value: 150.0, source: "estimate", confidence: estimate,
+        notes: "A 64 g bullet sheds speed much faster than an autocannon sabot; about 150 m/s per km over the first kilometre."),
+    flat_penetration_mm: (value: 38.0, source: "open-source summaries (Wikipedia, KPV heavy machine gun, 2026): 32 mm RHA at 500 m", confidence: low,
+        notes: "Muzzle figure back-calculated from 32 mm at 500 m with the (v/v0)^2 rule and the velocity loss above: v(500 m) ~ 900 m/s, 32 x (976/900)^2 ~ 38 mm."),
+    dispersion_mrad: (value: 1.2, source: "estimate", confidence: estimate, notes: "Burst dispersion of an unstabilised heavy machine gun, folded into one sampled error."),
+    max_range_m: (value: 1500.0, source: "estimate", confidence: estimate, notes: "Effective range against light armour; the gun's quoted effective range (3 km) is against area targets."),
+    preferred_vs: [ifv, recon],
+)

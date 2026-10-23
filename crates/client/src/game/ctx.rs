@@ -151,6 +151,14 @@ impl Game {
             item("REVERSE 100 M", "D", Cmd::Reverse, sel),
             self.posture_item(Posture::Ammo, "Q"),
             item("BREAK CONTACT", "X", Cmd::BreakContact, self.sel_platoon.is_some()),
+            {
+                let it = MenuItem::new("RESUPPLY", MenuAct::Cmd(Cmd::Resupply)).key("R");
+                match self.sel_platoon {
+                    _ if self.picture().supply_points.is_empty() => it.disabled("NO SUPPLY POINT"),
+                    None => it.disabled("NO PLATOON SELECTED"),
+                    Some(_) => it,
+                }
+            },
         ]
     }
 

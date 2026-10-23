@@ -11,7 +11,7 @@ Added 2026-10-21. Remove a line when it is decided, and record the decision on t
 - **Z6 infantry and buildings plan**: review `docs/plans/M8B-INFANTRY.md` §9 (7 decisions with recommendations). Blocks M8h1a and M8b.
 - **I9 dusk attack balance**: keep `mod-dusk-attack` harder at dusk (Blue's passive AI loses about 1 in 3: 5 of 16 seeds) or retune it.
 - **M8c defaults**: `docs/plans/M8C-LOGISTICS.md` §6 (supply points as scenario items, transfer at data rates, re-arm events as their own list, repaired vehicles return). Work continues on these defaults unless changed.
-- **Z3 release check**: tag `v0.1.0` pushed 2026-10-21; look at the GitHub Actions "Release" run (Windows and macOS legs run for the first time) and the draft of the release page. The repository is private, so the session cannot see the run: paste failing logs to fix them.
+- **Z3 release check**: the 2026-10-21 tag never ran: `release.yml` was invalid YAML (fixed in 10dc32b, with the Windows client link fix; CI green on all three OSes 2026-10-23). Move tag `v0.1.0` to a fixed commit and force-push it (the session is not allowed to force-push a tag), then check the "Release" run and the draft release page. The session reads Actions runs with `gh`; the token cannot read releases (needs Contents: read).
 
 ## Phase map (v1.x = M8, v1.5 = M9, then v2+)
 
@@ -91,10 +91,10 @@ Only what infantry needs from buildings; full towns wait for M8h1b.
 - Exit: a scripted test where an RPG team in a village kills a tank from the flank; per-pairing unit tests; balance batch.
 
 ## M8c — Logistics
-- [ ] C1 Vehicle ammunition and fuel resupply; supply point or trucks — §11, §13.1 M7b. Plan: `docs/plans/M8C-LOGISTICS.md`. **In progress 2026-10-21**: slices 1–2 done (data `logistics.ron`, scenario `supply_points`, `Command::Resupply` service-station resupply with stock accounting, tests `m8c.rs`); next: re-arm events (C4), client (symbol, card button, status, editor), then tailgate trucks
+- [ ] C1 Vehicle ammunition and fuel resupply; supply point or trucks — §11, §13.1 M7b. Plan: `docs/plans/M8C-LOGISTICS.md`. **In progress 2026-10-21**: slices 1–4 done (data `logistics.ron`, scenario `supply_points`, `Command::Resupply` service-station resupply with stock accounting, re-arm events (C4), tests `m8c.rs`; client 2026-10-24: supply point symbol, RESUPPLY card button (R), resupply stage on the platoon/vehicle cards, supply point placement in the scenario editor); still open in the client: radio `AT SUPPLY POINT`, roster ammo/fuel warnings, choosing a point other than the nearest, re-arm events in the editor; next: tailgate trucks (slice 6)
 - [ ] C2 Recovery of immobilised vehicles — §11, §13.2
 - [ ] C3 Battery ammunition resupply, reload and relocation — §13.1 M7d
-- [ ] C4 Scenario re-arm events
+- [x] C4 Scenario re-arm events — 2026-10-23: `ScenarioDef.logistics` (rearm / refuel fraction per platoon, battery rounds) applied at their time as generated `Command::Logpac`; tests `m8c.rs`. Editing events in the scenario editor is not done (plain RON for now)
 - Note: no hard dependency on infantry (trucks and recovery vehicles are vehicles); placed here by priority and could move earlier.
 - Exit: a long scenario where ammunition decides the outcome; stock accounting tests.
 
@@ -155,7 +155,7 @@ M8g1 (with M8f1): G8 and G9. M8g2: G1–G7 after M8f2.
 
 ## M8i — Content and scenarios
 Run alongside the capability phases: each phase ends with at least one scenario that exercises it.
-- [ ] I1 Vehicles: T-64/T-80 classes (BMP-1 moved to B17), early-1980s Red and Blue recon, modern recon — §13.1 M7e (data only, sourced, duel harness re-run)
+- [x] I1 Vehicles: T-64/T-80 classes (BMP-1 moved to B17), early-1980s Red and Blue recon, modern recon — §13.1 M7e (data only, sourced, duel harness re-run). **Done 2026-10-24**: `kholm_b` (T-64B/BV, 1976–95), `uval_b` (T-80B/BV, 1978-), `korsak_r2` (BRDM-2), `ward_m3` (M3 CFV, 1983-, M3A3 sensors from 2000), `filin_r3` (BRM-3K, 1995-); rounds `atgm_kobra`, `api_145`. Not wired into any scenario. Limits: no wheeled running gear (the BRDM-2 uses the tracked going model), no radar sensor (BRM-3K), armour not dated (M3A2 appliqué)
 - [ ] I2 Scenarios for dismounts, engineers, UAS, logistics once those exist; more on `demo` and `uplands`
 - [ ] I3 Mutual-engagement duel mode — §13.1 M7e
 - [ ] I4 Campaign ordering and difficulty labels in the scenario list — §13.1 M7e
@@ -187,6 +187,9 @@ Run alongside the capability phases: each phase ends with at least one scenario 
 - [ ] N5 Raygui-style panels — §13.1 M0.5
 - [ ] N8 Trees detonating HEAT prematurely (moved from D5) — TERRAIN.md §5.3
 - N2 (LOS speed) and N6 (benchmarks): tracked as Z5.
+- [ ] N9 Round selection never reaches a gun-launched missile: in the I1 duels (1985, `kholm_b`/`uval_b`/`kurgan_a` vs `bulwark_a0`) the three Red tanks score identically and `atgm_kobra` is never fired, as `select_round` seems to take the first in-service sabot. Check range-based choice of the missile (related to B6, which is the AI preference proper) — found 2026-10-24 (I1)
+- [ ] N10 Check why a T-72A-class tank kills `bulwark_a0` only ~0.81 within 120 s at 0.5 km although penetration given a hit is 1.0 (I1 duels, 1985, front aspect): likely the damage tables (non-kill penetrations), not a bug; confirm and cite — found 2026-10-24 (I1)
+- [ ] N11 Ammunition stowage is not dated: a vehicle whose sabot changes mid-service carries both rounds in the overlap years (`kholm_b`/`uval_b` from 1986, `bulwark_a1` 1988–89), overstating the newer round; give loadouts in-service dates — found 2026-10-24 (I1)
 - [ ] N7 Offline tuning of utility weights with the headless harness (possible, optional) — §9.5
 
 ## M9 — Tier 3 (speculative; data/era packs, never code branches; `estimate` + "speculative" note)

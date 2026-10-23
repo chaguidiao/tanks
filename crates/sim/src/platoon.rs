@@ -213,6 +213,10 @@ impl Platoon {
             plan: self.plan.as_ref().map(|s| s.view()),
             contact_reaction: self.contact_reaction,
             queued: self.queue.len() as u8,
+            resupply_at: match &self.order {
+                PlatoonOrder::Resupply { point, .. } => Some(*point as u32),
+                _ => None,
+            },
         }
     }
 
