@@ -91,7 +91,7 @@ Only what infantry needs from buildings; full towns wait for M8h1b.
 - Exit: a scripted test where an RPG team in a village kills a tank from the flank; per-pairing unit tests; balance batch.
 
 ## M8c — Logistics
-- [ ] C1 Vehicle ammunition and fuel resupply; supply point or trucks — §11, §13.1 M7b. Plan: `docs/plans/M8C-LOGISTICS.md`. **In progress 2026-10-21**: slices 1–3 done (data `logistics.ron`, scenario `supply_points`, `Command::Resupply` service-station resupply with stock accounting, re-arm events (C4), tests `m8c.rs`); next: client (symbol, card button, status, editor), then tailgate trucks
+- [ ] C1 Vehicle ammunition and fuel resupply; supply point or trucks — §11, §13.1 M7b. Plan: `docs/plans/M8C-LOGISTICS.md`. **In progress 2026-10-21**: slices 1–4 done (data `logistics.ron`, scenario `supply_points`, `Command::Resupply` service-station resupply with stock accounting, re-arm events (C4), tests `m8c.rs`; client 2026-10-24: supply point symbol, RESUPPLY card button (R), resupply stage on the platoon/vehicle cards, supply point placement in the scenario editor); still open in the client: radio `AT SUPPLY POINT`, roster ammo/fuel warnings, choosing a point other than the nearest, re-arm events in the editor; next: tailgate trucks (slice 6)
 - [ ] C2 Recovery of immobilised vehicles — §11, §13.2
 - [ ] C3 Battery ammunition resupply, reload and relocation — §13.1 M7d
 - [x] C4 Scenario re-arm events — 2026-10-23: `ScenarioDef.logistics` (rearm / refuel fraction per platoon, battery rounds) applied at their time as generated `Command::Logpac`; tests `m8c.rs`. Editing events in the scenario editor is not done (plain RON for now)
