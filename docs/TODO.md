@@ -170,9 +170,9 @@ Run alongside the capability phases: each phase ends with at least one scenario 
 - [ ] J3 Key rebinding, UI scaling, colour-blind-safe check — §11 accessibility
 - [ ] J4 Audio (none yet): radio clicks, squelch, distant fire, volume option — §10.5
 - [x] J5 Scenario editor: weather / date / time / wind / latitude / moon, fire support batteries per side, victory conditions (editor pages UNITS, TIME / WX, FIRES, VICTORY); graphics and contingencies edited after placement in the game (move / resize / turn a graphic, re-time / re-attach / cancel a contingency) — §13.1 scenario editor completion, §14 #28
-- [ ] J8 Weather changing during a scenario (needs a sim weather timeline; then a schedule in the editor) — split from J5, §13.1 M7c
-- [ ] J9 Author commander AI plans in the scenario editor (`SideDef.ai`: tasks, missions, axes, battle positions, release on contact); still hand-edited RON — split from J5, §13.1 M6
-- [ ] J10 Scenario editor: edit side names, objective names, briefing text and the scenario name (needs a text field widget) — found during J5
+- [ ] J11 Weather changing during a scenario (needs a sim weather timeline; then a schedule in the editor) — split from J5, §13.1 M7c
+- [ ] J12 Author commander AI plans in the scenario editor (`SideDef.ai`: tasks, missions, axes, battle positions, release on contact); still hand-edited RON — split from J5, §13.1 M6
+- [ ] J13 Scenario editor: edit side names, objective names, briefing text and the scenario name (needs a text field widget) — found during J5
 - [ ] J6 AAR: replay by re-simulation (frames are recorded live), graphics in the AAR, PL-relative report text — §13.1 M6
 - [ ] J7 Localisation-ready strings — §11
 
