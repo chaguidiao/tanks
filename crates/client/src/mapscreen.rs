@@ -364,14 +364,15 @@ impl MapScreen {
                 "SCENARIOS ON THIS MAP LOAD THE SAVED MAP THE NEXT TIME THEY START.",
             ],
             Mode::Scenario { .. } => &[
-                "SCENARIO EDITOR: UNITS, OBJECTIVES, DATE, TIME AND WEATHER.   ESC / F10 MENU",
+                "SCENARIO EDITOR: UNITS, OBJECTIVES, DATE, TIME, WEATHER AND FIRE SUPPORT.   ESC / F10 MENU",
                 "",
                 MAP,
-                "PANEL    1-2 PAGES (UNITS, TIME / WX)  CLICK A ROW OR + NEXT VALUE, - PREVIOUS",
+                "PANEL    1-3 PAGES (UNITS, TIME / WX, FIRES)  CLICK A ROW OR + NEXT VALUE, - PREVIOUS",
                 "         PGUP / PGDN FOCUS A ROW, - / = STEP IT",
                 "UNITS    P PLACE AT CURSOR  LMB SELECT / DRAG  R ROTATE 45°  DEL REMOVE",
                 "         TAB SIDE  V VEHICLE (IN SERVICE AT THE DATE)  N NEW PLATOON",
                 "OBJ      O OBJECTIVE AT CURSOR  [ ] RADIUS OF THE SELECTED OBJECTIVE",
+                "FIRES    B BATTERY OF THE SIDE AT CURSOR (DRAG MOVES, DEL REMOVES); TYPE AND STOCKS ON PAGE 3",
                 "DATE     Y / U YEAR -/+   T START TIME +30 MIN",
                 "FILE     CTRL+S SAVE (AS <ID>-CUSTOM)   F9 PLAY TEST",
             ],
@@ -665,7 +666,7 @@ impl MapScreen {
         match &self.mode {
             Mode::Game { game, .. } => game.draw_world(f, cam, inp.mouse),
             Mode::Terrain { editor, .. } => editor.draw_world(f, cam, inp.mouse),
-            Mode::Scenario { editor } => editor.draw_world(f, cam),
+            Mode::Scenario { editor } => editor.draw_world(f, cam, ds),
         }
         // Top bar (game state text is drawn by the game's own UI on top of it).
         f.rect(0.0, 0.0, inp.screen[0], hud::TOP_H, style::PANEL);

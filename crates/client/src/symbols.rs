@@ -24,6 +24,22 @@ pub fn hostile_armour(f: &mut Frame, p: P2, c: Rgba) {
     f.ellipse_lines(p, r * 0.45, r * 0.28, c);
 }
 
+/// Field artillery: friendly rectangle or hostile diamond frame with a filled dot (APP-6D).
+pub fn field_artillery(f: &mut Frame, p: P2, c: Rgba, friendly: bool) {
+    if friendly {
+        f.rect(p[0] - W / 2.0, p[1] - H / 2.0, W, H, Rgba(10, 18, 24, 200));
+        f.rect_lines(p[0] - W / 2.0, p[1] - H / 2.0, W, H, c);
+        f.rect_lines(p[0] - W / 2.0 + 1.0, p[1] - H / 2.0 + 1.0, W - 2.0, H - 2.0, c);
+    } else {
+        let r = H * 0.9;
+        let pts = [[p[0], p[1] - r], [p[0] + r, p[1]], [p[0], p[1] + r], [p[0] - r, p[1]]];
+        for k in 0..4 {
+            f.line(pts[k], pts[(k + 1) % 4], 2.0, c);
+        }
+    }
+    f.circle(p, 3.5, c);
+}
+
 /// Direction-of-movement staff from the symbol centre.
 pub fn heading_staff(f: &mut Frame, p: P2, heading: f64, len: f32, c: Rgba) {
     let (s, co) = (heading.sin() as f32, heading.cos() as f32);

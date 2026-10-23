@@ -6,7 +6,7 @@
 //! the rows and `-` / `=` step the focused one. The panel is built by [`ScenarioEditor::buttons`]
 //! (the same layout for hit-testing and drawing) and every hotkey issues the same [`EdAction`].
 
-use sim_data::{DataSet, ObjectiveDef, ScenarioDef, SideDef, UnitDef};
+use sim_data::{BatteryAssign, DataSet, ObjectiveDef, ScenarioDef, SideDef, UnitDef};
 
 use crate::format;
 use crate::hud::{Button, Look, Rect};
@@ -24,6 +24,8 @@ const PLATOON_SIZE: usize = 4;
 enum Sel {
     Unit(usize, usize),
     Objective(usize),
+    /// A fire-support battery: (side, index in `fire_support`).
+    Battery(usize, usize),
 }
 
 #[derive(Debug, Default)]
@@ -41,15 +43,17 @@ pub struct Effects {
 pub enum Page {
     Units,
     Weather,
+    Fires,
 }
 
 impl Page {
-    pub const ALL: [Page; 2] = [Page::Units, Page::Weather];
+    pub const ALL: [Page; 3] = [Page::Units, Page::Weather, Page::Fires];
 
     fn label(self) -> &'static str {
         match self {
             Page::Units => "UNITS",
             Page::Weather => "TIME / WX",
+            Page::Fires => "FIRES",
         }
     }
 
@@ -57,6 +61,7 @@ impl Page {
         match self {
             Page::Units => "1",
             Page::Weather => "2",
+            Page::Fires => "3",
         }
     }
 
@@ -64,6 +69,7 @@ impl Page {
         match self {
             Page::Units => "SIDES, DOCTRINE, VEHICLES AND PLATOONS",
             Page::Weather => "DATE, START TIME, WEATHER PRESET, WIND, LATITUDE AND MOON",
+            Page::Fires => "FIRE SUPPORT: BATTERIES PER SIDE (B PLACES ONE AT THE CURSOR)",
         }
     }
 
@@ -71,6 +77,7 @@ impl Page {
         use Field as F;
         match self {
             Page::Units => &[F::Side, F::Doctrine, F::TechYear, F::Vehicle, F::Platoon],
+            Page::Fires => &[F::Side, F::Battery, F::BatteryType, F::BatteryHe, F::BatterySmoke],
             Page::Weather => {
                 &[F::Year, F::Month, F::Day, F::Start, F::Preset, F::WindFrom, F::WindSpeed, F::Latitude, F::Moon]
             }
@@ -95,6 +102,10 @@ pub enum Field {
     WindSpeed,
     Latitude,
     Moon,
+    Battery,
+    BatteryType,
+    BatteryHe,
+    BatterySmoke,
 }
 
 /// What a panel button or an editor hotkey does.
@@ -213,6 +224,14 @@ impl ScenarioEditor {
                 }
             }
         }
+        for (si, side) in self.def.sides.iter().enumerate() {
+            for (k, b) in side.fire_support.iter().enumerate() {
+                let dist = d(b.position);
+                if dist < PICK_PX && best.is_none_or(|(b, _)| dist < b) {
+                    best = Some((dist, Sel::Battery(si, k)));
+                }
+            }
+        }
         if best.is_none() {
             for (k, o) in self.def.objectives.iter().enumerate() {
                 if d(o.centre) < PICK_PX {
@@ -322,6 +341,7 @@ impl ScenarioEditor {
             match self.sel {
                 Some(Sel::Unit(s, u)) => self.def.sides[s].units[u].position = m,
                 Some(Sel::Objective(k)) => self.def.objectives[k].centre = m,
+                Some(Sel::Battery(s, k)) => self.def.sides[s].fire_support[k].position = m,
                 None => {}
             }
             self.unsaved = true;
@@ -329,6 +349,9 @@ impl ScenarioEditor {
 
         if inp.hit(Key::Char('p')) && !over_ui {
             self.place(m);
+        }
+        if inp.hit(Key::Char('b')) && !over_ui {
+            self.place_battery(m, ds);
         }
         if inp.hit(Key::Char('o')) && !over_ui {
             let name = format!("OBJ {}", self.def.objectives.len() + 1);
@@ -383,6 +406,10 @@ impl ScenarioEditor {
             Some(Sel::Objective(k)) => {
                 let gone = self.def.objectives.remove(k);
                 self.status = format!("REMOVED {}", gone.name);
+            }
+            Some(Sel::Battery(s, k)) => {
+                let gone = self.def.sides[s].fire_support.remove(k);
+                self.status = format!("REMOVED {}", gone.callsign);
             }
             None => return,
         }
@@ -487,6 +514,11 @@ impl ScenarioEditor {
                 let l = &mut self.def.weather.latitude_deg;
                 *l = (*l + 5.0 * d).clamp(-70.0, 70.0);
             }
+            Field::Battery | Field::BatteryType | Field::BatteryHe | Field::BatterySmoke => {
+                if !self.step_fires(f, dir, ds) {
+                    return;
+                }
+            }
             Field::Moon => {
                 let m = &mut self.def.weather.moon_phase;
                 *m = (*m + 0.25 * d).clamp(0.0, 1.0);
@@ -516,6 +548,10 @@ impl ScenarioEditor {
             Field::WindSpeed => "WIND SPEED",
             Field::Latitude => "LATITUDE",
             Field::Moon => "MOON",
+            Field::Battery => "BATTERY",
+            Field::BatteryType => "TYPE",
+            Field::BatteryHe => "HE ROUNDS",
+            Field::BatterySmoke => "SMOKE ROUNDS",
         }
     }
 
@@ -537,6 +573,10 @@ impl ScenarioEditor {
             Field::WindSpeed => "WIND SPEED: HOW FAST SMOKE DRIFTS",
             Field::Latitude => "LATITUDE OF THE MAP: SUN ELEVATION, DAWN AND DUSK",
             Field::Moon => "MOON ILLUMINATION AT NIGHT (0 NEW, 1 FULL)",
+            Field::Battery => "SELECT THE NEXT BATTERY OF THE SIDE (B PLACES A NEW ONE AT THE CURSOR, DEL REMOVES)",
+            Field::BatteryType => "BATTERY TYPE (DATA/COMBAT/FIRES.RON), IN SERVICE AT THE SIDE'S YEAR",
+            Field::BatteryHe => "HE ROUNDS IN STOCK; TYPE = THE TYPE'S OWN STOCK",
+            Field::BatterySmoke => "SMOKE ROUNDS IN STOCK; TYPE = THE TYPE'S OWN STOCK",
         }
     }
 
@@ -560,6 +600,7 @@ impl ScenarioEditor {
                 format!("{:.0}° {}", w.latitude_deg.abs(), if w.latitude_deg < 0.0 { "S" } else { "N" })
             }
             Field::Moon => format!("{:.2}", w.moon_phase),
+            Field::Battery | Field::BatteryType | Field::BatteryHe | Field::BatterySmoke => self.fires_value(f, ds),
         }
     }
 
@@ -618,6 +659,7 @@ impl ScenarioEditor {
                 ));
             }
             Page::Weather => lines.extend(self.weather_lines(ds)),
+            Page::Fires => lines.extend(self.fires_lines(ds)),
         }
         lines.push((if self.unsaved { "UNSAVED  CTRL+S".to_owned() } else { "SAVED".to_owned() }, style::TEXT_DIM));
         for p in self.problems(ds).into_iter().take(4) {
@@ -677,11 +719,21 @@ impl ScenarioEditor {
                     _ => {}
                 }
             }
+            for b in &s.fire_support {
+                match ds.fires.battery(&b.battery) {
+                    Some(d) if !d.in_service.contains(year) => {
+                        out.push(format!("{} {} NOT IN SERVICE {year}", b.callsign, d.name.to_uppercase()))
+                    }
+                    None => out.push(format!("{}: UNKNOWN BATTERY", b.callsign)),
+                    _ => {}
+                }
+            }
         }
         out
     }
 
-    pub fn draw_world(&self, f: &mut Frame, cam: &Camera) {
+    pub fn draw_world(&self, f: &mut Frame, cam: &Camera, ds: &DataSet) {
+        self.draw_batteries(f, cam, ds);
         for (k, o) in self.def.objectives.iter().enumerate() {
             let c = if self.sel == Some(Sel::Objective(k)) { style::SELECT } else { style::AMBER };
             let p = cam.to_screen(o.centre);
@@ -723,6 +775,7 @@ impl ScenarioEditor {
         let help = match self.page {
             Page::Units => "P PLACE  LMB SELECT/DRAG  R ROTATE  DEL REMOVE  O OBJECTIVE ([ ] RADIUS)",
             Page::Weather => "CLICK OR + NEXT VALUE  - PREVIOUS  PGUP/PGDN FOCUS, - / = STEP",
+            Page::Fires => "B PLACE BATTERY AT CURSOR  LMB SELECT/DRAG  DEL REMOVE",
         };
         f.text(
             &format!("{help}   1-{} PAGES  CTRL+S SAVE  F9 PLAY TEST  ESC MENU", Page::ALL.len()),
@@ -736,6 +789,153 @@ impl ScenarioEditor {
 
     pub fn over_ui(&self, s: P2, ds: &DataSet) -> bool {
         self.panel_rect(ds).contains(s)
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Fire support (M7d): batteries per side, `SideDef.fire_support`.
+// ---------------------------------------------------------------------------------------------
+
+/// Rounds step of the HE and smoke stock rows.
+const ROUNDS_STEP: u32 = 10;
+
+impl ScenarioEditor {
+    /// The selected battery, if it belongs to the side being edited.
+    fn battery_sel(&self) -> Option<usize> {
+        match self.sel {
+            Some(Sel::Battery(s, k)) if s == self.side => Some(k),
+            _ => None,
+        }
+    }
+
+    /// Place a battery of the side at `at`: the type of the selected one, else the first type in
+    /// service at the side's year.
+    fn place_battery(&mut self, at: [f64; 2], ds: &DataSet) {
+        let year = self.year();
+        let kind = self
+            .battery_sel()
+            .map(|k| self.def.sides[self.side].fire_support[k].battery.clone())
+            .or_else(|| ds.fires.batteries.iter().find(|b| b.in_service.contains(year)).map(|b| b.id.clone()))
+            .or_else(|| ds.fires.batteries.first().map(|b| b.id.clone()));
+        let Some(battery) = kind else {
+            self.status = "NO BATTERY TYPES IN DATA".into();
+            return;
+        };
+        let taken = |c: &str| self.def.sides.iter().flat_map(|s| &s.fire_support).any(|b| b.callsign == c);
+        let callsign = (1..).map(|n| format!("ARTY {n}")).find(|c| !taken(c)).expect("a free callsign");
+        let side = &mut self.def.sides[self.side];
+        side.fire_support.push(BatteryAssign {
+            callsign: callsign.clone(),
+            battery,
+            position: at,
+            he_rounds: None,
+            smoke_rounds: None,
+        });
+        self.sel = Some(Sel::Battery(self.side, side.fire_support.len() - 1));
+        self.page = Page::Fires;
+        self.focus = 1;
+        self.status = format!("PLACED {callsign}");
+        self.unsaved = true;
+    }
+
+    /// Step a battery row. False if nothing changed.
+    fn step_fires(&mut self, f: Field, dir: i8, ds: &DataSet) -> bool {
+        let s = self.side;
+        if f == Field::Battery {
+            let n = self.def.sides[s].fire_support.len();
+            if n == 0 {
+                self.status = "NO BATTERY: B PLACES ONE AT THE CURSOR".into();
+                return false;
+            }
+            let k = self.battery_sel().map_or(0, |k| (k as i64 + i64::from(dir)).rem_euclid(n as i64) as usize);
+            self.sel = Some(Sel::Battery(s, k));
+            return false;
+        }
+        let Some(k) = self.battery_sel() else {
+            self.status = "SELECT A BATTERY FIRST".into();
+            return false;
+        };
+        let b = &mut self.def.sides[s].fire_support[k];
+        let def = ds.fires.battery(&b.battery);
+        let step = |cur: Option<u32>, stock: u32| {
+            let v = i64::from(cur.unwrap_or(stock)) + i64::from(dir) * i64::from(ROUNDS_STEP);
+            let v = v.clamp(0, 999) as u32;
+            (v != stock).then_some(v)
+        };
+        match f {
+            Field::BatteryType => {
+                let list: Vec<&str> = ds.fires.batteries.iter().map(|b| b.id.as_str()).collect();
+                if list.is_empty() {
+                    return false;
+                }
+                b.battery = list[cycle(&list, &b.battery.as_str(), dir)].to_owned();
+            }
+            Field::BatteryHe => b.he_rounds = step(b.he_rounds, def.map_or(0, |d| d.he_rounds)),
+            Field::BatterySmoke => b.smoke_rounds = step(b.smoke_rounds, def.map_or(0, |d| d.smoke_rounds)),
+            _ => return false,
+        }
+        true
+    }
+
+    fn fires_value(&self, f: Field, ds: &DataSet) -> String {
+        let Some(k) = self.battery_sel() else {
+            return if f == Field::Battery {
+                format!("{} OF THE SIDE", self.def.sides[self.side].fire_support.len())
+            } else {
+                "-".into()
+            };
+        };
+        let b = &self.def.sides[self.side].fire_support[k];
+        let def = ds.fires.battery(&b.battery);
+        let rounds = |n: Option<u32>, stock: u32| n.map_or(format!("TYPE {stock}"), |n| n.to_string());
+        match f {
+            Field::Battery => b.callsign.clone(),
+            Field::BatteryType => def.map_or(b.battery.to_uppercase(), |d| d.name.to_uppercase()),
+            Field::BatteryHe => rounds(b.he_rounds, def.map_or(0, |d| d.he_rounds)),
+            Field::BatterySmoke => rounds(b.smoke_rounds, def.map_or(0, |d| d.smoke_rounds)),
+            _ => String::new(),
+        }
+    }
+
+    fn fires_lines(&self, ds: &DataSet) -> Vec<(String, Rgba)> {
+        let counts: Vec<String> =
+            self.def.sides.iter().map(|s| format!("{} {}", s.name, s.fire_support.len())).collect();
+        let mut v = vec![(format!("BATTERIES   {}", counts.join("   ")), style::TEXT_DIM)];
+        let sel = self.battery_sel().and_then(|k| ds.fires.battery(&self.def.sides[self.side].fire_support[k].battery));
+        match sel {
+            Some(d) => v.push((
+                format!(
+                    "{} TUBES   RANGE {} - {}",
+                    d.tubes,
+                    format::distance(d.min_range_m.get()),
+                    format::distance(d.max_range_m.get())
+                ),
+                style::TEXT_DIM,
+            )),
+            None => v.push(("B PLACES A BATTERY AT THE CURSOR".into(), style::TEXT_DIM)),
+        }
+        v
+    }
+
+    /// Batteries on the map (field artillery: frame with a filled dot); the selected one shows
+    /// its minimum and maximum range.
+    fn draw_batteries(&self, f: &mut Frame, cam: &Camera, ds: &DataSet) {
+        for (si, side) in self.def.sides.iter().enumerate() {
+            let c = if si == 0 { style::FRIENDLY } else { style::HOSTILE };
+            for (k, b) in side.fire_support.iter().enumerate() {
+                let p = cam.to_screen(b.position);
+                symbols::field_artillery(f, p, c, si == 0);
+                f.text(&b.callsign, p[0] + 18.0, p[1] - 6.0, style::FONT_L - 10, c);
+                if self.sel == Some(Sel::Battery(si, k)) {
+                    symbols::selection(f, p);
+                    if let Some(d) = ds.fires.battery(&b.battery) {
+                        for r in [d.min_range_m.get(), d.max_range_m.get()] {
+                            f.circle_lines(p, (r / cam.mpp) as f32, style::TEXT_DIM);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -817,6 +1017,14 @@ mod tests {
         ] {
             ed.act(EdAction::Step(f, d), &ds);
         }
+        ed.place_battery([3000.0, 2000.0], &ds);
+        ed.act(EdAction::Step(Field::BatteryHe, -1), &ds);
+        ed.act(EdAction::Step(Field::BatteryType, 1), &ds);
+        ed.side = 1;
+        ed.place_battery([5000.0, 6000.0], &ds);
+        ed.act(EdAction::Step(Field::BatterySmoke, 1), &ds);
+        assert_eq!(ed.def.sides[1].fire_support[0].callsign, "ARTY 2");
+        assert!(ed.def.sides[0].fire_support[0].he_rounds.is_some());
         ed.prepare_save();
         DataSet::save_scenario(&tmp, &ed.def).unwrap();
         let back = DataSet::load_scenario(&tmp, &ed.def.id).unwrap();
