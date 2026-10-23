@@ -8,6 +8,7 @@
 //!         [--pl -:<x>,<y>,<x>,<y>..] [--plan <platoon>:<x>,<y>,..|@<plan.ron> [--plan-draft]]
 //!         [--advance <s>] [--code-word <name>] [--advance <s>].. [--aar] [--save-replay <ron>]
 //!         [--zoom <m-per-px>] [--center <x>,<y>] [--layer relief|slope|traffic|cover]]
+//!         [--rclick <x>,<y>[,<hold_s>]] [--click <x>,<y>] [--keys <k>,..]
 //! ```
 //! Any game or editor option starts that screen directly (scripted checks); `--pause` opens
 //! its menu. `--keys enter,wait30,down,esc` injects one key per frame (menu-flow checks).
@@ -72,6 +73,8 @@ struct Opts {
     keys: Option<String>,
     /// `--rclick x,y[,hold_s]`: right click at a screen position (held = context menu).
     rclick: Option<([f32; 2], f32)>,
+    /// `--click x,y`: left click at a screen position (after `--rclick`, before `--keys`).
+    click: Option<[f32; 2]>,
 }
 
 impl Opts {
@@ -93,6 +96,7 @@ impl Opts {
             || self.center.is_some()
             || self.layer.is_some()
             || self.rclick.is_some()
+            || self.click.is_some()
     }
 }
 
@@ -164,6 +168,10 @@ fn opts() -> Result<Opts, String> {
                     _ => return Err("--rclick needs x,y[,hold_s]".into()),
                 }
             }
+        },
+        click: match get("--click") {
+            None => None,
+            Some(v) => Some(parse_xy(&v).map(|p| [p[0] as f32, p[1] as f32]).ok_or("--click needs x,y")?),
         },
     })
 }
@@ -248,6 +256,8 @@ struct App {
     script_keys: std::collections::VecDeque<Option<Key>>,
     /// `--rclick`: (screen position, seconds held, frames run).
     script_rclick: Option<([f32; 2], f32, u32)>,
+    /// `--click`: (screen position, frames run).
+    script_click: Option<([f32; 2], u32)>,
     script_shift: bool,
     script_mouse: Option<[f32; 2]>,
     gfx: Gfx,
@@ -339,6 +349,7 @@ fn run() -> Result<(), String> {
         last_input: Input::default(),
         script_keys: o.keys.as_deref().map(parse_keys).transpose()?.unwrap_or_default(),
         script_rclick: o.rclick.map(|(p, h)| (p, h, 0)),
+        script_click: o.click.map(|p| (p, 0)),
         script_shift: o.shift,
         script_mouse: None,
         gfx,
@@ -602,11 +613,26 @@ impl App {
                 self.script_rclick = None;
             }
         }
+        if self.script_rclick.is_none()
+            && let Some((pos, frame)) = &mut self.script_click
+            && matches!(self.screen, Screen::Map(_))
+        {
+            *frame += 1;
+            let f = *frame;
+            self.script_mouse = Some(*pos);
+            inp.left_pressed = f == 3;
+            inp.left_down = f == 3;
+            inp.left_released = f == 4;
+            if f > 4 {
+                self.script_click = None;
+            }
+        }
         if let Some(m) = self.script_mouse {
             inp.mouse = m;
         }
         if !matches!(self.screen, Screen::Loading(_))
             && self.script_rclick.is_none()
+            && self.script_click.is_none()
             && let Some(Some(k)) = self.script_keys.pop_front()
         {
             inp.pressed.push(k);

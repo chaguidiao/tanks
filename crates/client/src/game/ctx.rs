@@ -5,6 +5,7 @@
 
 use ai::picture::{ContactId, ContactReaction};
 
+use super::gfxedit::GfxEdit;
 use super::planedit::PlanEdit;
 use super::posture::{Posture, PostureVal, Scope};
 use super::*;
@@ -31,6 +32,8 @@ pub enum MenuTarget {
     PlanCp(u16),
     /// The leg that ends at checkpoint `id`.
     PlanLeg(u16),
+    /// A contingency order (opened from its row in the selection panel).
+    Trigger(u32),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -53,6 +56,8 @@ pub enum MenuAct {
     RemoveGraphic(u32),
     Plan(PlanEdit),
     Posture(Scope, PostureVal),
+    /// Edit a graphic or a contingency after placement.
+    Gfx(GfxEdit),
 }
 
 pub(super) fn reaction_name(r: ContactReaction) -> &'static str {
@@ -257,16 +262,18 @@ impl Game {
             MenuTarget::Graphic(id) => {
                 let label = self.picture().graphic(id).map_or("GRAPHIC".into(), |g| g.label.clone());
                 let mv = MenuItem::new("MOVE TO", MenuAct::MoveHere(self.current_speed()));
-                let v = vec![
+                let mut v = vec![
                     if sel.is_some() { mv } else { mv.disabled(no_unit) },
                     self.fire_item("CALL FOR FIRE ON"),
                     MenuItem::new("LOS FROM HERE", MenuAct::LosFrom),
-                    MenuItem::new("DELETE", MenuAct::RemoveGraphic(id)),
                 ];
+                v.extend(self.graphic_edit_items(id));
+                v.push(MenuItem::new("DELETE", MenuAct::RemoveGraphic(id)));
                 (label, v)
             }
             MenuTarget::PlanCp(id) => self.plan_cp_menu(id),
             MenuTarget::PlanLeg(id) => self.plan_leg_menu(id),
+            MenuTarget::Trigger(id) => self.trigger_menu(id),
         }
     }
 
@@ -342,6 +349,7 @@ impl Game {
             }
             MenuAct::Plan(e) => self.run_plan_edit(e, at),
             MenuAct::Posture(scope, val) => self.apply_posture(scope, val),
+            MenuAct::Gfx(e) => self.run_gfx_edit(e),
         }
     }
 

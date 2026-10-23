@@ -445,15 +445,8 @@ impl Sim {
     /// measures draw no random numbers, so a replay that applies them in `step` at the same
     /// tick reaches the same state.
     pub fn settle(&mut self) {
-        let (control, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.incoming).into_iter().partition(|c| {
-            matches!(
-                c.cmd,
-                Command::AddGraphic { .. }
-                    | Command::RemoveGraphic { .. }
-                    | Command::AddTrigger { .. }
-                    | Command::CodeWord { .. }
-            )
-        });
+        let (control, rest): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut self.incoming).into_iter().partition(|c| c.cmd.is_control());
         self.incoming = rest;
         let mut events = Vec::new();
         for c in control {
@@ -492,13 +485,7 @@ impl Sim {
 
         // 1. Orders: draw radio delays in submission order, then deliver due orders.
         for c in std::mem::take(&mut self.incoming) {
-            let control = matches!(
-                c.cmd,
-                Command::AddGraphic { .. }
-                    | Command::RemoveGraphic { .. }
-                    | Command::AddTrigger { .. }
-                    | Command::CodeWord { .. }
-            );
+            let control = c.cmd.is_control();
             let delay = if c.immediate || control {
                 0
             } else {
@@ -1234,10 +1221,32 @@ impl Sim {
             Command::RemoveGraphic { id } => {
                 self.sides[c.side.0 as usize].picture.graphics.retain(|g| g.id != *id);
             }
+            Command::UpdateGraphic { id, graphic } => {
+                let s = &mut self.sides[c.side.0 as usize];
+                if let Some(g) = s.picture.graphics.iter_mut().find(|g| g.id == *id) {
+                    g.label = graphic.label.clone();
+                    g.kind = graphic.kind.clone();
+                }
+            }
+            Command::RemoveTrigger { id } => {
+                let s = &mut self.sides[c.side.0 as usize];
+                s.triggers.retain(|t| t.id != *id || t.fired);
+                s.picture.triggers = control::views(&s.triggers);
+            }
+            Command::UpdateTrigger { id, condition } => {
+                let s = &mut self.sides[c.side.0 as usize];
+                let sign = control::reference_sign(&s.picture, condition);
+                if let Some(t) = s.triggers.iter_mut().find(|t| t.id == *id && !t.fired) {
+                    t.condition = condition.clone();
+                    t.reference_sign = sign;
+                }
+                s.picture.triggers = control::views(&s.triggers);
+            }
             Command::AddTrigger { condition, then } => {
                 let s = &mut self.sides[c.side.0 as usize];
                 let sign = control::reference_sign(&s.picture, condition);
-                let id = s.triggers.len() as u32 + 1;
+                // Ids stay unique after a cancel (same as len + 1 while none was removed).
+                let id = s.triggers.iter().map(|t| t.id).max().unwrap_or(0) + 1;
                 s.triggers.push(control::Trigger {
                     id,
                     condition: condition.clone(),

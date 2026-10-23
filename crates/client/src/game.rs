@@ -29,6 +29,7 @@ use crate::view::{Camera, Minimap};
 mod codewords;
 mod ctx;
 mod feedback;
+mod gfxedit;
 mod planedit;
 mod posture;
 mod refs;
@@ -83,6 +84,10 @@ pub enum Tool {
         id: u16,
         release: bool,
         pick: Pick,
+    },
+    /// A drawn graphic picked up from its menu: the next left click puts it down there.
+    MoveGraphic {
+        id: u32,
     },
 }
 
@@ -168,6 +173,8 @@ pub enum GameAction {
     PlanRow(u8),
     /// Send code word `word` (the doctrine pack's list index).
     CodeWord(u8),
+    /// Selection panel: open the menu of contingency order `id`.
+    Contingency(u32),
 }
 
 const PL_NAMES: [&str; 8] = ["RED", "BLUE", "GREEN", "AMBER", "BLACK", "WHITE", "GOLD", "SILVER"];
@@ -922,6 +929,10 @@ impl Game {
                     let r = self.los(a, world);
                     self.tool = Tool::Los { a: Some(a), b: Some(world), result: Some(r) };
                 }
+                Tool::MoveGraphic { id } => {
+                    self.place_moved_graphic(id, world);
+                    self.tool = Tool::None;
+                }
                 Tool::Graphic { kind, mut points } => match kind {
                     DrawKind::PhaseLine => {
                         points.push(world);
@@ -964,6 +975,7 @@ impl Game {
                 | Tool::AdjustFire
                 | Tool::BattlePosition { .. }
                 | Tool::Graphic { .. }
+                | Tool::MoveGraphic { .. }
                 | Tool::PlanCp
                 | Tool::PlanPick { .. } => {
                     self.tool = Tool::None;
@@ -1047,6 +1059,7 @@ impl Game {
                 }
             }
             GameAction::CodeWord(w) => self.send_code_word(w),
+            GameAction::Contingency(id) => self.menu_request = Some((MenuTarget::Trigger(id), Vec::new(), None)),
         }
     }
 
@@ -2122,6 +2135,7 @@ impl Game {
                     .into()
             }
             Tool::PlanPick { pick, .. } => format!("PLAN: {}   (RIGHT CLICK / ESC CANCEL)", pick.prompt()),
+            Tool::MoveGraphic { .. } => "MOVE GRAPHIC: CLICK ITS NEW POSITION   (RIGHT CLICK / ESC CANCEL)".into(),
         }
     }
 
@@ -2632,13 +2646,9 @@ impl Game {
             cy += 22.0;
         }
         let mut foot: Vec<(String, Rgba)> = Vec::new();
-        for t in pic.triggers.iter().rev().take(3) {
-            let cond = self.condition_text(&t.condition);
-            foot.push((
-                format!("CONT {}: {cond} -> {}{}", t.id, t.order, if t.fired { " (DONE)" } else { "" }),
-                style::TEXT_DIM,
-            ));
-        }
+        let (trigger_rows, ny) = self.trigger_rows(x, cy, W, &mut foot);
+        rows.extend(trigger_rows);
+        cy = ny;
         foot.push((
             format!(
                 "CONTACTS {}   KILLS {}",

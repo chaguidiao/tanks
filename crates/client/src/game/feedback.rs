@@ -60,6 +60,10 @@ impl Game {
         }
         let tool = match &self.tool {
             Tool::Move => Some("LMB MOVE HERE · RMB / ESC CANCEL".to_owned()),
+            Tool::MoveGraphic { id } => Some(format!(
+                "LMB PUT {} DOWN HERE · RMB / ESC CANCEL",
+                self.picture().graphic(*id).map_or("THE GRAPHIC".into(), |g| g.label.clone())
+            )),
             Tool::Engage => Some("LMB ENGAGE CONTACT · RMB / ESC CANCEL".to_owned()),
             Tool::SmokeRound => Some("LMB FIRE SMOKE ROUND HERE · RMB / ESC CANCEL".to_owned()),
             Tool::CallFire => Some(format!(
@@ -102,7 +106,8 @@ impl Game {
                 Some(w) => format!("RMB CONTACT MENU · CTRL+RMB {w} ENGAGE"),
                 None => "RMB CONTACT MENU".into(),
             },
-            MenuTarget::Graphic(_) => "RMB GRAPHIC MENU: MOVE TO, CALL FIRE, DELETE".into(),
+            MenuTarget::Graphic(_) => "RMB GRAPHIC MENU: MOVE TO, CALL FIRE, MOVE / RESIZE / TURN, DELETE".into(),
+            MenuTarget::Trigger(_) => String::new(),
             MenuTarget::Ground => match who {
                 None => "LMB SELECT · LMB DRAG BOX SELECT · RMB MENU".into(),
                 Some(w) => {

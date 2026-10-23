@@ -164,3 +164,47 @@ fn planning_phase_measures_show_at_once_and_replay_identically() {
     back.play(&mut again, |_, _| {});
     assert_eq!(again.state_hash(), rec.final_hash, "replay diverged");
 }
+
+/// Graphics and contingencies can be changed after placement (TODO J5): a moved graphic keeps
+/// its id, a re-timed trigger fires at the new time, a cancelled one never fires, and the
+/// edits replay identically.
+#[test]
+fn graphics_and_triggers_edit_after_placement() {
+    let (ds, m, sc) = setup();
+    let mut sim = Sim::new(&sc, ds.clone(), m.clone()).unwrap();
+    sim.set_ai_enabled(RED, false);
+    let pl = |y: f64| Graphic {
+        id: 0,
+        label: "PL AMBER".into(),
+        kind: GraphicKind::PhaseLine { points: vec![[0.0, y], [1600.0, y]] },
+    };
+    let halt = || Box::new(Command::Halt { to: Addressee::Platoon(PlatoonId(1)) });
+    let at = |t: f64| TriggerCondition::AtTime { time_s: t };
+    sim.submit_immediate(BLUE, Command::AddGraphic { graphic: pl(1800.0) });
+    for t in [20.0, 30.0] {
+        sim.submit_immediate(BLUE, Command::AddTrigger { condition: at(t), then: halt() });
+    }
+    sim.settle();
+    let id = sim.perceived(BLUE).graphics[0].id;
+    sim.submit_immediate(BLUE, Command::UpdateGraphic { id, graphic: pl(2200.0) });
+    sim.submit_immediate(BLUE, Command::RemoveTrigger { id: 1 });
+    sim.submit_immediate(BLUE, Command::UpdateTrigger { id: 2, condition: at(60.0) });
+    sim.submit_immediate(BLUE, Command::AddTrigger { condition: at(5.0), then: halt() });
+    sim.settle();
+    let pic = sim.perceived(BLUE);
+    assert_eq!(pic.graphics.len(), 1);
+    assert_eq!(pic.graphics[0].id, id, "the moved graphic keeps its id");
+    assert!(matches!(&pic.graphics[0].kind, GraphicKind::PhaseLine { points } if points[0][1] == 2200.0));
+    let ids: Vec<u32> = pic.triggers.iter().map(|t| t.id).collect();
+    assert_eq!(ids, vec![2, 3], "cancelled trigger gone, new ids stay unique");
+    run(&mut sim, 40.0);
+    let fired = |s: &Sim, id: u32| s.perceived(BLUE).triggers.iter().any(|t| t.id == id && t.fired);
+    assert!(fired(&sim, 3) && !fired(&sim, 2), "re-timed trigger waits for its new time");
+    run(&mut sim, 30.0);
+    assert!(fired(&sim, 2));
+    let rec = Replay::record(&sim);
+    let back = Replay::from_ron(&rec.to_ron()).unwrap();
+    let mut again = Sim::new(&sc, ds, m).unwrap();
+    back.play(&mut again, |_, _| {});
+    assert_eq!(again.state_hash(), rec.final_hash, "replay diverged");
+}

@@ -172,11 +172,42 @@ pub enum Command {
     RemoveGraphic {
         id: u32,
     },
+    /// Change a drawn control measure in place (moved, resized, turned); keeps its id, so
+    /// triggers and plans that refer to it follow it.
+    UpdateGraphic {
+        id: u32,
+        graphic: Graphic,
+    },
     /// Contingency order: `then` is executed without radio delay when the condition is met.
     AddTrigger {
         condition: TriggerCondition,
         then: Box<Command>,
     },
+    /// Cancel a contingency order that has not fired.
+    RemoveTrigger {
+        id: u32,
+    },
+    /// Change the condition of a contingency order that has not fired.
+    UpdateTrigger {
+        id: u32,
+        condition: TriggerCondition,
+    },
+}
+
+impl Command {
+    /// Control measures (graphics, triggers, code words): applied at once, no radio delay.
+    pub fn is_control(&self) -> bool {
+        matches!(
+            self,
+            Command::AddGraphic { .. }
+                | Command::RemoveGraphic { .. }
+                | Command::UpdateGraphic { .. }
+                | Command::AddTrigger { .. }
+                | Command::RemoveTrigger { .. }
+                | Command::UpdateTrigger { .. }
+                | Command::CodeWord { .. }
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

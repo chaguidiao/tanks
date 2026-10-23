@@ -1838,4 +1838,35 @@ mod tests {
         g.press(Cmd::Trp);
         assert!(matches!(g.tool, Tool::Graphic { kind: DrawKind::Trp, .. }));
     }
+
+    /// TODO J5: a graphic is moved, resized and turned from its menu (same id), and a
+    /// contingency re-timed and cancelled from its panel row.
+    #[test]
+    fn graphics_and_contingencies_edit_after_placement() {
+        use super::gfxedit::GfxEdit;
+        let mut g = game();
+        let bp = SimGraphic::BattlePosition { centre: [800.0, 800.0], radius: 200.0, facing: 0.0 };
+        g.add_graphic("BP 1".into(), bp);
+        let id = g.picture().graphics[0].id;
+        g.run_menu_act(MenuAct::Gfx(GfxEdit::Move(id)), [0.0, 0.0], &mut GameFx::default());
+        assert_eq!(g.tool, Tool::MoveGraphic { id });
+        g.place_moved_graphic(id, [900.0, 1000.0]);
+        g.run_gfx_edit(GfxEdit::Radius(id, 1));
+        g.run_gfx_edit(GfxEdit::Turn(id));
+        let gr = g.picture().graphic(id).expect("same id");
+        let SimGraphic::BattlePosition { centre, radius, facing } = gr.kind else { panic!("still a BP") };
+        assert_eq!((centre, radius), ([900.0, 1000.0], 300.0));
+        assert!((facing - std::f64::consts::FRAC_PI_4).abs() < 1e-12);
+
+        g.order_mode = OrderMode::InFiveMinutes;
+        g.order_one(Command::Halt { to: Addressee::Platoon(PlatoonId(1)) });
+        let t = g.picture().triggers[0].id;
+        let mut fx = GameFx::default();
+        g.act(GameAction::Contingency(t), &mut fx);
+        assert_eq!(g.menu_request.as_ref().map(|r| r.0), Some(MenuTarget::Trigger(t)));
+        g.run_gfx_edit(GfxEdit::Retime(t, 1));
+        assert!(matches!(g.picture().triggers[0].condition, TriggerCondition::AtTime { time_s } if time_s == 600.0));
+        g.run_gfx_edit(GfxEdit::CancelTrigger(t));
+        assert!(g.picture().triggers.is_empty());
+    }
 }
