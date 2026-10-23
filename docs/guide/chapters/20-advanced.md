@@ -147,7 +147,7 @@ A code word counts only if it is sent *after* the platoon started waiting. Sendi
 
 ::fig x-pl-tool | crop=380,30,960,340 | w=80 | Drawing a phase line: three points placed, the fourth follows the mouse.
 
-RMB on a graphic opens its menu: **MOVE TO**, **CALL FOR FIRE ON**, **LOS FROM HERE**, **DELETE**.
+RMB on a graphic opens its menu: **MOVE TO** (orders the selection there), **CALL FOR FIRE ON**, **LOS FROM HERE**, **MOVE GRAPHIC** (the next left click puts it down there), **RADIUS +100 M** / **RADIUS -100 M** (objectives and battle positions), **TURN 45°** (battle positions), **DELETE**. A changed graphic keeps its name, and contingencies and plan waits that use it follow it.
 
 ## Contingency orders (TIMING)
 
@@ -163,6 +163,10 @@ The setting applies to one order and then returns to NOW. The radio confirms `CO
 
 **Example:** a platoon in a forward battle position should fall back when Red reaches PL RED. Select it, press <kbd>K</kbd> until **ON CROSSING** shows, then right-click the fall-back position.
 
+Contingencies that have not fired are listed at the bottom of the selection panel (`CONT 1: ENEMY X PL RED -> MOVE`). Click one to change it: **5 MIN LATER** / **5 MIN EARLIER** for a timed one, **PHASE LINE** ▸ another line for a crossing one, or **CANCEL**.
+
+::fig g-cont-menu | crop=1270,30,330,260 | w=50 | A contingency's menu, opened from its row in the selection panel.
+
 # The context menu
 
 Right-click with a short press moves the selection. **Hold** the right button for a quarter of a second (a ring fills around the cursor), or right-click an *object*, and a menu opens instead. Its items do the same as the command card buttons, at the point you clicked.
@@ -174,7 +178,7 @@ Right-click with a short press moves the selection. **Hold** the right button fo
 | Ground | **MOVE HERE** (with the current speed), **MOVE HERE AT** ▸ speed, **ADD CP**, **BATTLE POSITION HERE**, **SMOKE ROUNDS HERE**, **CALL FOR FIRE** ▸ HE / smoke, **DRAW** ▸ phase line / objective / TRP, **LOS FROM HERE**, **VIEWSHED HERE**, **NEXT ORDER** ▸ timing, **ORDERS** ▸ halt, posture lists, smoke, reverse, ammunition, break contact |
 | Own vehicle | **SELECT PLATOON**, **SELECT VEHICLE**, **DATA SHEET**, **EDIT PLAN**, **CLEAR PLAN**, **ORDERS** ▸ |
 | Contact | **ENGAGE**, **CALL FOR FIRE ON**, **SMOKE ROUNDS ON**, **LOS TO** |
-| Graphic | **MOVE TO**, **CALL FOR FIRE ON**, **LOS FROM HERE**, **DELETE** |
+| Graphic | **MOVE TO**, **CALL FOR FIRE ON**, **LOS FROM HERE**, **MOVE GRAPHIC**, **RADIUS** ±100 M, **TURN 45°**, **DELETE** |
 | Plan checkpoint / leg | The checkpoint menu ({{ch:Checkpoint plans}}) / **INSERT CP HERE** and the leg settings |
 
 ::fig h-ctx-unit | crop=600,540,400,160 | w=55 | The menu on an own vehicle.
@@ -364,7 +368,22 @@ A replay file holds the scenario, the seed and your orders. `tanks-headless repl
 
 ## Scenario editor
 
-**SCENARIO EDITOR** on the main menu opens a scenario on its map. You can place, drag, rotate and remove units, make new platoons, choose vehicle types (only those in service at the date), place objectives and set the date and start time.
+**SCENARIO EDITOR** on the main menu opens a scenario on its map. You can place, drag, rotate and remove units, make new platoons, choose vehicle types (only those in service at the date), place objectives, and set the date, time, weather, fire support and victory conditions.
+
+The panel on the left has four pages (<kbd>1</kbd>–<kbd>4</kbd> or click the tab). Each row is a value: click it or its **+** for the next value, **-** for the previous one. From the keyboard, <kbd>PgUp</kbd> / <kbd>PgDn</kbd> move the highlight over the rows and <kbd>-</kbd> / <kbd>=</kbd> step the highlighted one.
+
+| Page | Rows |
+|---|---|
+| **1 UNITS** | Side, doctrine pack, tech year (pretend the side lives in another year), vehicle type, platoon |
+| **2 TIME / WX** | Year, month, day, start time (30 min steps), weather preset (clear, haze, overcast, rain, fog, dust), wind direction and speed (drifts smoke), latitude, moon. Below: visibility, sun elevation and light at the start |
+| **3 FIRES** | The side's batteries: <kbd>B</kbd> places one at the cursor, LMB selects and drags it, <kbd>Del</kbd> removes it; rows pick the battery, its type and its HE and smoke stock. The selected battery shows its minimum and maximum range |
+| **4 VICTORY** | On / off, time limit, the objective the attacker must seize (alone on it for 2 minutes), the attacking side, and the share of its vehicles at which a side loses |
+
+::fig g-scened-wx | crop=0,30,360,340 | w=45 | The TIME / WX page: fog at dawn, with the visibility and light it gives.
+
+::fig g-scened-fires | crop=0,30,1240,860 | w=80 | The FIRES page: the selected battery and its minimum range ring.
+
+Anything that would stop the scenario from starting (a side with no units, a vehicle or battery not in service at the side's year, a victory objective that no longer exists) is listed in red in the panel.
 
 ::fig g-scened | crop=0,0,1600,900 | w=90 | The scenario editor on HOLD THE VILLAGE.
 
@@ -379,11 +398,14 @@ A replay file holds the scenario, the seed and your orders. `tanks-headless repl
 | <kbd>N</kbd> | New platoon |
 | <kbd>O</kbd> | Objective at the cursor; <kbd>[</kbd> <kbd>]</kbd> radius |
 | <kbd>Y</kbd> / <kbd>U</kbd> | Year −/+ |
-| <kbd>T</kbd> | Start time +3 h |
+| <kbd>T</kbd> | Start time +30 min |
+| <kbd>B</kbd> | Battery of the side at the cursor |
+| <kbd>1</kbd>–<kbd>4</kbd> | Panel page |
+| <kbd>PgUp</kbd> / <kbd>PgDn</kbd>, <kbd>-</kbd> / <kbd>=</kbd> | Highlight a row, step its value |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save as `data/scenarios/<id>-custom.ron` |
 | <kbd>F9</kbd> | Play test, and back |
 
-Enemy AI plans, weather, fire support and victory conditions are edited in the scenario file itself for now.
+Enemy AI plans (the computer side's tasks), side and objective names and the briefing text are edited in the scenario file itself for now. Phase lines, TRPs and contingencies are not part of a scenario: you draw them in the game.
 
 ## Terrain editor
 

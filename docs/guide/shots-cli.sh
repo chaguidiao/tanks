@@ -51,6 +51,9 @@ shot g-pause $S $V --pause
 shot g-dbvehicle $S $V --select 1-2 --keys wait3,i --frames 10
 shot g-aar $S $BPS --advance 720 --aar
 shot g-scened --scenario m5-hold-the-village --scenario-editor --zoom 4 --center 5200,5200
+shot g-scened-wx --scenario m7c-fog-at-dawn --scenario-editor --keys 2 --frames 20
+shot g-scened-fires --scenario m7d-fire-support --scenario-editor --keys 3,pgdn,= --frames 20
+shot g-cont-menu $S --zoom 2 --center 2000,2400 --pl -:1200,2400,2800,2400 --select 1 --press K,H --click 1430,217 --frames 30
 shot g-terrained --map demo --edit --zoom 2.4 --center 4600,4400
 shot g-night --scenario m7c-night-attack --zoom 3 --center 4900,4700
 shot g-fog --scenario mod-fog-meeting --zoom 3 --center 4900,4700

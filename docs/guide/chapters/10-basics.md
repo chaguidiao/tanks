@@ -62,7 +62,7 @@ The game opens on a title screen: press any key. The **main menu** has six entri
 | Entry | Opens |
 |---|---|
 | **PLAY SCENARIO** | The scenario list and briefing (next section) |
-| **SCENARIO EDITOR** | Place units and objectives, set the date and time, then play-test ({{ch:The editors}}) |
+| **SCENARIO EDITOR** | Place units, objectives and batteries, set the date, time, weather and victory conditions, then play-test ({{ch:The editors}}) |
 | **TERRAIN EDITOR** | Raise and lower ground, draw rivers, roads, forests and buildings ({{ch:The editors}}) |
 | **DATABASE** | Every vehicle, round, terrain type, doctrine and combat model the simulation uses, with sources ({{ch:The database}}) |
 | **OPTIONS** | Display and control settings (below) |
