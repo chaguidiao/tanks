@@ -11,7 +11,7 @@ Added 2026-10-21. Remove a line when it is decided, and record the decision on t
 - **Z6 infantry and buildings plan**: review `docs/plans/M8B-INFANTRY.md` §9 (7 decisions with recommendations). Blocks M8h1a and M8b.
 - **I9 dusk attack balance**: keep `mod-dusk-attack` harder at dusk (Blue's passive AI loses about 1 in 3: 5 of 16 seeds) or retune it.
 - **M8c defaults**: `docs/plans/M8C-LOGISTICS.md` §6 (supply points as scenario items, transfer at data rates, re-arm events as their own list, repaired vehicles return). Work continues on these defaults unless changed.
-- **Z3 release check**: tag `v0.1.0` pushed 2026-10-21; look at the GitHub Actions "Release" run (Windows and macOS legs run for the first time) and the draft of the release page. The repository is private, so the session cannot see the run: paste failing logs to fix them.
+- **Z3 release check**: the 2026-10-21 tag never ran: `release.yml` was invalid YAML (fixed in 10dc32b, with the Windows client link fix; CI green on all three OSes 2026-10-23). Move tag `v0.1.0` to a fixed commit and force-push it (the session is not allowed to force-push a tag), then check the "Release" run and the draft release page. The session reads Actions runs with `gh`; the token cannot read releases (needs Contents: read).
 
 ## Phase map (v1.x = M8, v1.5 = M9, then v2+)
 
@@ -184,6 +184,9 @@ Run alongside the capability phases: each phase ends with at least one scenario 
 - [ ] N5 Raygui-style panels — §13.1 M0.5
 - [ ] N8 Trees detonating HEAT prematurely (moved from D5) — TERRAIN.md §5.3
 - N2 (LOS speed) and N6 (benchmarks): tracked as Z5.
+- [ ] N9 Round selection never reaches a gun-launched missile: in the I1 duels (1985, `kholm_b`/`uval_b`/`kurgan_a` vs `bulwark_a0`) the three Red tanks score identically and `atgm_kobra` is never fired, as `select_round` seems to take the first in-service sabot. Check range-based choice of the missile (related to B6, which is the AI preference proper) — found 2026-10-24 (I1)
+- [ ] N10 Check why a T-72A-class tank kills `bulwark_a0` only ~0.81 within 120 s at 0.5 km although penetration given a hit is 1.0 (I1 duels, 1985, front aspect): likely the damage tables (non-kill penetrations), not a bug; confirm and cite — found 2026-10-24 (I1)
+- [ ] N11 Ammunition stowage is not dated: a vehicle whose sabot changes mid-service carries both rounds in the overlap years (`kholm_b`/`uval_b` from 1986, `bulwark_a1` 1988–89), overstating the newer round; give loadouts in-service dates — found 2026-10-24 (I1)
 - [ ] N7 Offline tuning of utility weights with the headless harness (possible, optional) — §9.5
 
 ## M9 — Tier 3 (speculative; data/era packs, never code branches; `estimate` + "speculative" note)

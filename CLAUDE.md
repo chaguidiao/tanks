@@ -84,3 +84,10 @@ Dark, low-saturation tactical display; monospace uppercase labels; NATO symbolog
 - Small, reviewable commits per subsystem. Update `docs/DESIGN.md` when a design decision changes.
 - Open work is tracked in `docs/TODO.md` (master list). Add new deferrals there, tick items when done, and keep the "Deferred" notes in DESIGN.md §13.1 as history only.
 - When unsure about a doctrinal or physical detail, consult `docs/REFERENCES.md` and say what the source says rather than guessing.
+
+## Subagents (model choice)
+Always set `model` explicitly when starting a subagent; never leave it to inherit the session model.
+- **opus**: design-heavy or sim-changing work (new sim behaviour, determinism/hash impact, AI and doctrine), and judgement-heavy data work (sourcing vehicle/ammo stats, confidence levels, balance or tuning calls).
+- **sonnet** (default): implementation against a clear spec or plan, client/UI and editor work, tests, docs updates.
+- **haiku**: quick mechanical jobs only (codebase searches, log summaries, bulk renames); never for work where the architecture, data or doctrine rules above apply.
+- Parallel agents work in their own git worktrees, commit only to their branch and never push; the session reviews and merges into `main` one branch at a time (sim branches conflict on the golden hash in `crates/sim/tests/m1.rs`).
