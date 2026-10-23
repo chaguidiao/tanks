@@ -3,7 +3,7 @@
 <div class="t">TANKS</div>
 <div class="s">USER GUIDE · TANK COMMAND SIMULATION</div>
 <div class="d">From your first right click to synchronised attacks on a code word. Covers the screens and controls, the simulation underneath them, and the tactics and doctrine the game is built on. Written for players with no military or wargaming background.</div>
-<div class="f">TANKS 0.1.0 · M7E · OCTOBER 2026 · MIT LICENCE</div>
+<div class="f">TANKS 0.1.1 · M8 · OCTOBER 2026 · MIT LICENCE</div>
 </div>
 
 <h1 class="nonum" style="page-break-before: always">About this guide</h1>
@@ -30,7 +30,7 @@ That is what makes the game different, and it can feel strange at first. You nev
 
 <div class="note" markdown="1">
 <span class="label">Screenshots</span>
-Every screenshot was taken from the real game (version 0.1.0) at 1600 × 900 using the scripts in `docs/guide/`. Your screen may differ slightly with another window size or scenario seed.
+Every screenshot was taken from the real game (version 0.1.1) at 1600 × 900 using the scripts in `docs/guide/`. Your screen may differ slightly with another window size or scenario seed.
 </div>
 
 [[TOC]]
