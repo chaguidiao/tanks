@@ -155,7 +155,7 @@ M8g1 (with M8f1): G8 and G9. M8g2: G1–G7 after M8f2.
 
 ## M8i — Content and scenarios
 Run alongside the capability phases: each phase ends with at least one scenario that exercises it.
-- [ ] I1 Vehicles: T-64/T-80 classes (BMP-1 moved to B17), early-1980s Red and Blue recon, modern recon — §13.1 M7e (data only, sourced, duel harness re-run)
+- [x] I1 Vehicles: T-64/T-80 classes (BMP-1 moved to B17), early-1980s Red and Blue recon, modern recon — §13.1 M7e (data only, sourced, duel harness re-run). **Done 2026-10-24**: `kholm_b` (T-64B/BV, 1976–95), `uval_b` (T-80B/BV, 1978-), `korsak_r2` (BRDM-2), `ward_m3` (M3 CFV, 1983-, M3A3 sensors from 2000), `filin_r3` (BRM-3K, 1995-); rounds `atgm_kobra`, `api_145`. Not wired into any scenario. Limits: no wheeled running gear (the BRDM-2 uses the tracked going model), no radar sensor (BRM-3K), armour not dated (M3A2 appliqué)
 - [ ] I2 Scenarios for dismounts, engineers, UAS, logistics once those exist; more on `demo` and `uplands`
 - [ ] I3 Mutual-engagement duel mode — §13.1 M7e
 - [ ] I4 Campaign ordering and difficulty labels in the scenario list — §13.1 M7e
