@@ -13,7 +13,7 @@ use crate::editor::{self, BakeEvent, BakeQueue, Editor};
 use crate::game::{Game, GameAction};
 use crate::hud::{self, Button, Look, Rect};
 use crate::render::{Frame, Gfx, Input, Key, P2};
-use crate::scenedit::ScenarioEditor;
+use crate::scenedit::{EdAction, ScenarioEditor};
 use crate::settings::Settings;
 use crate::style;
 use crate::view::{BaseLayer, Camera, MapView, Minimap, build_layer};
@@ -48,6 +48,15 @@ pub enum ScreenAction {
 enum Clicked {
     Screen(ScreenAction),
     Game(GameAction),
+    Scenario(EdAction),
+}
+
+/// Every button of a map screen: top bar and end panel, game card and panels, scenario editor
+/// panel.
+struct Buttons {
+    screen: Vec<Button<ScreenAction>>,
+    game: Vec<Button<GameAction>>,
+    scenario: Vec<Button<EdAction>>,
 }
 
 /// What a map screen asks the app to do.
@@ -245,7 +254,7 @@ impl MapScreen {
     }
 
     /// Top-bar and panel buttons of the screen, and every game-mode button.
-    fn buttons(&self, screen: P2) -> (Vec<Button<ScreenAction>>, Vec<Button<GameAction>>) {
+    fn buttons(&self, screen: P2, ds: &DataSet) -> Buttons {
         let z = Rect::new(0.0, 0.0, 0.0, 0.0);
         let b = |l: &str, a: ScreenAction| Button::new(z, Look::Bar, l, a);
         let base = self.view.base;
@@ -315,7 +324,11 @@ impl MapScreen {
             Mode::Game { game, .. } => game.buttons(screen),
             _ => Vec::new(),
         };
-        (out, game)
+        let scenario = match &self.mode {
+            Mode::Scenario { editor } => editor.buttons(ds),
+            _ => Vec::new(),
+        };
+        Buttons { screen: out, game, scenario }
     }
 
     pub fn help_lines(&self) -> &'static [&'static str] {
@@ -351,13 +364,15 @@ impl MapScreen {
                 "SCENARIOS ON THIS MAP LOAD THE SAVED MAP THE NEXT TIME THEY START.",
             ],
             Mode::Scenario { .. } => &[
-                "SCENARIO EDITOR: UNITS, OBJECTIVES, DATE AND START TIME.   ESC / F10 MENU",
+                "SCENARIO EDITOR: UNITS, OBJECTIVES, DATE, TIME AND WEATHER.   ESC / F10 MENU",
                 "",
                 MAP,
+                "PANEL    1-2 PAGES (UNITS, TIME / WX)  CLICK A ROW OR + NEXT VALUE, - PREVIOUS",
+                "         PGUP / PGDN FOCUS A ROW, - / = STEP IT",
                 "UNITS    P PLACE AT CURSOR  LMB SELECT / DRAG  R ROTATE 45°  DEL REMOVE",
                 "         TAB SIDE  V VEHICLE (IN SERVICE AT THE DATE)  N NEW PLATOON",
                 "OBJ      O OBJECTIVE AT CURSOR  [ ] RADIUS OF THE SELECTED OBJECTIVE",
-                "DATE     Y / U YEAR -/+   T START TIME +3 H",
+                "DATE     Y / U YEAR -/+   T START TIME +30 MIN",
                 "FILE     CTRL+S SAVE (AS <ID>-CUSTOM)   F9 PLAY TEST",
             ],
         }
@@ -478,7 +493,8 @@ impl MapScreen {
         if inp.hit(Key::F(10)) || (inp.hit(Key::Escape) && !self.esc_in_use()) {
             return Some(Request::Menu);
         }
-        let (mut screen_buttons, mut game_buttons) = self.buttons(inp.screen);
+        let Buttons { screen: mut screen_buttons, game: mut game_buttons, scenario: scen_buttons } =
+            self.buttons(inp.screen, ctx.ds);
         // Buttons under an open context menu are not reachable.
         if let Mode::Game { game, .. } = &mut self.mode {
             game.pause_on_menu = ctx.settings.pause_on_menu;
@@ -491,7 +507,8 @@ impl MapScreen {
         }
         let clicked = hud::clicked(&screen_buttons, inp.mouse, inp.left_pressed)
             .map(Clicked::Screen)
-            .or_else(|| hud::clicked(&game_buttons, inp.mouse, inp.left_pressed).map(Clicked::Game));
+            .or_else(|| hud::clicked(&game_buttons, inp.mouse, inp.left_pressed).map(Clicked::Game))
+            .or_else(|| hud::clicked(&scen_buttons, inp.mouse, inp.left_pressed).map(Clicked::Scenario));
         if let Some(Clicked::Screen(a)) = clicked
             && let Some(r) = self.act(a, ctx)
         {
@@ -503,11 +520,12 @@ impl MapScreen {
             || inp.mouse[1] > inp.screen[1] - hud::STATUS_H
             || hud::hovered(&game_buttons, inp.mouse).is_some()
             || hud::hovered(&screen_buttons, inp.mouse).is_some()
+            || hud::hovered(&scen_buttons, inp.mouse).is_some()
             || self.end_panel(inp.screen).is_some_and(|r| r.contains(inp.mouse))
             || match &self.mode {
                 Mode::Game { game, .. } => game.panels(inp.screen).iter().any(|r| r.contains(inp.mouse)),
                 Mode::Terrain { editor, .. } => editor.over_ui(inp.mouse),
-                Mode::Scenario { editor } => editor.over_ui(inp.mouse),
+                Mode::Scenario { editor } => editor.over_ui(inp.mouse, ctx.ds),
             };
         // Minimap: click or drag to move the view.
         if let Some(m) = minimap
@@ -538,6 +556,10 @@ impl MapScreen {
 
         let game_click = match clicked {
             Some(Clicked::Game(a)) => Some(a),
+            _ => None,
+        };
+        let scen_click = match clicked {
+            Some(Clicked::Scenario(a)) => Some(a),
             _ => None,
         };
         let mut req = None;
@@ -576,7 +598,7 @@ impl MapScreen {
                 }
             }
             Mode::Scenario { editor } => {
-                let fx = editor.update(inp, &self.cam, ctx.ds, over_ui);
+                let fx = editor.update(inp, &self.cam, ctx.ds, over_ui, scen_click);
                 if fx.save {
                     self.save(ctx);
                 }
@@ -634,7 +656,8 @@ impl MapScreen {
     }
 
     pub fn draw(&self, f: &mut Frame, inp: &Input, ds: &DataSet) {
-        let (screen_buttons, game_buttons) = self.buttons(inp.screen);
+        let Buttons { screen: screen_buttons, game: game_buttons, scenario: scen_buttons } =
+            self.buttons(inp.screen, ds);
         let minimap = self.minimap(inp.screen);
         let (cam, view, map) = (&self.cam, &self.view, &self.map);
         f.clear(style::BG);
@@ -674,6 +697,7 @@ impl MapScreen {
             }
         }
         hud::draw(f, &game_buttons, inp.mouse);
+        hud::draw(f, &scen_buttons, inp.mouse);
         hud::draw(f, &screen_buttons, inp.mouse);
         status_line(f, inp, cam, map, ds, view.base);
         let menu = match &self.mode {
@@ -685,6 +709,7 @@ impl MapScreen {
         } else {
             hud::tooltip(f, &screen_buttons, inp.mouse, inp.screen);
             hud::tooltip(f, &game_buttons, inp.mouse, inp.screen);
+            hud::tooltip(f, &scen_buttons, inp.mouse, inp.screen);
         }
     }
 }

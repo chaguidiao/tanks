@@ -266,6 +266,13 @@ fn parse_keys(s: &str) -> Result<std::collections::VecDeque<Option<Key>>, String
             "right" => Key::Right,
             "space" => Key::Space,
             "tab" => Key::Tab,
+            "pgup" => Key::PageUp,
+            "pgdn" => Key::PageDown,
+            "minus" | "-" => Key::Minus,
+            "equal" | "=" => Key::Equal,
+            "del" => Key::Delete,
+            "lbracket" => Key::LeftBracket,
+            "rbracket" => Key::RightBracket,
             w if w.starts_with("wait") => {
                 let n: usize = w[4..].parse().map_err(|_| format!("bad --keys token {t}"))?;
                 out.extend(std::iter::repeat_n(None, n));
