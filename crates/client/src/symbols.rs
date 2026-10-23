@@ -107,6 +107,38 @@ pub fn battle_position(
     f.text(label, a[0] + 6.0, a[1] + 6.0, style::FONT, c);
 }
 
+/// Supply point (MIL-STD-2525D / APP-6D sustainment control-measure point, simplified): a pin
+/// frame whose apex marks the location, "SP" inside, the callsign to the right and, when zoomed
+/// in far enough to matter, the dashed circle a vehicle must be inside to be served. `c` is the
+/// affiliation colour (friendly).
+pub fn supply_point(f: &mut Frame, cam: &Camera, pos: [f64; 2], radius_m: f64, label: &str, c: Rgba) {
+    let p = cam.to_screen(pos);
+    let r = (radius_m / cam.mpp) as f32;
+    if r > 10.0 {
+        let n = 32;
+        let pts: Vec<P2> = (0..=n)
+            .map(|k| {
+                let a = k as f64 / n as f64 * std::f64::consts::TAU;
+                cam.to_screen([pos[0] + radius_m * a.sin(), pos[1] + radius_m * a.cos()])
+            })
+            .collect();
+        for w in pts.windows(2).step_by(2) {
+            f.line(w[0], w[1], 1.0, c);
+        }
+    }
+    let (w, h, tip) = (24.0, 15.0, 9.0);
+    let (x0, x1, y1) = (p[0] - w / 2.0, p[0] + w / 2.0, p[1] - tip);
+    let y0 = y1 - h;
+    f.rect(x0, y0, w, h, Rgba(10, 18, 24, 200));
+    let outline = [[x0, y0], [x1, y0], [x1, y1], [p[0], p[1]], [x0, y1]];
+    for k in 0..outline.len() {
+        f.line(outline[k], outline[(k + 1) % outline.len()], 1.5, c);
+    }
+    let tw = f.text_width("SP", style::FONT);
+    f.text("SP", p[0] - tw / 2.0, y0 + 3.0, style::FONT, c);
+    f.text(label, x1 + 4.0, y0 + 3.0, style::FONT, c);
+}
+
 /// Hull footprint at true scale (drawn when zoomed in) with the gun line along the turret.
 #[allow(clippy::too_many_arguments)]
 pub fn hull(f: &mut Frame, cam: &Camera, pos: [f64; 2], heading: f64, turret: f64, length: f64, width: f64, c: Rgba) {

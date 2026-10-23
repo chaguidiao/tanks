@@ -998,6 +998,7 @@ fn script(g: &mut Game, o: &Opts) -> Result<(), String> {
                 "Z" => g.press(Cmd::Smoke),
                 "E" => g.press(Cmd::EngineSmoke),
                 "X" => g.press(Cmd::BreakContact),
+                "R" => g.press(Cmd::Resupply),
                 "D" => g.press(Cmd::Reverse),
                 "K" => g.press(Cmd::Contingency),
                 "Q" => g.press(Cmd::Ammo),

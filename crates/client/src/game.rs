@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use sim::view::{
     Condition, ContactLevel, Graphic, GraphicKind as SimGraphic, GunActivity, OwnUnit, PerceivedWorld, PlatoonId,
-    StepAction, Task, TriggerCondition, WeaponsStatus,
+    ServiceStage, StepAction, Task, TriggerCondition, WeaponsStatus,
 };
 use sim::{
     Addressee, Command, DenyReason, EndReason, EntityId, Event, FireKind, FireReport, KillKind, PlatoonReport,
@@ -123,6 +123,8 @@ pub enum Cmd {
     Reverse,
     Ammo,
     BreakContact,
+    /// Service-station resupply at the supply point nearest the platoon.
+    Resupply,
     Contingency,
     NextPlatoon,
     PhaseLine,
@@ -542,7 +544,9 @@ impl Game {
             {
                 *platoon = p;
             }
-            Command::SetContactReaction { platoon, .. } if *platoon == primary => *platoon = p,
+            Command::SetContactReaction { platoon, .. } | Command::Resupply { platoon, .. } if *platoon == primary => {
+                *platoon = p
+            }
             Command::Halt { to }
             | Command::Resume { to }
             | Command::SetSpeed { to, .. }
@@ -741,6 +745,7 @@ impl Game {
             (Key::Char('d'), C::Reverse),
             (Key::Char('q'), C::Ammo),
             (Key::Char('x'), C::BreakContact),
+            (Key::Char('r'), C::Resupply),
             (Key::Char('h'), C::Halt),
             (Key::Char('m'), C::Move),
             (Key::Char('a'), C::Engage),
@@ -1170,6 +1175,16 @@ impl Game {
                     self.radio(format!("TO {cs}: BREAK CONTACT."));
                 }
             }
+            Cmd::Resupply => {
+                if let Some(p) = self.sel_platoon
+                    && let Some((id, sp)) = self.resupply_point(p).map(|sp| (sp.id, sp.callsign.clone()))
+                {
+                    let cs = self.platoon_cs(p);
+                    self.remember_replaced(p);
+                    self.order(Command::Resupply { platoon: p, point: id });
+                    self.radio(format!("TO {cs}: RESUPPLY AT {sp}."));
+                }
+            }
             Cmd::Contingency => {
                 self.order_mode = match self.order_mode {
                     OrderMode::Now => OrderMode::OnEnemyCrossing,
@@ -1456,6 +1471,18 @@ impl Game {
             shift[1].abs().round(),
             shift[0].abs().round()
         ));
+    }
+
+    /// The supply point a RESUPPLY order sends platoon `p` to: the one it is already going to,
+    /// else the nearest to the platoon.
+    fn resupply_point(&self, p: PlatoonId) -> Option<&sim::view::SupplyPointView> {
+        let pic = self.picture();
+        if let Some(id) = pic.platoon(p).and_then(|v| v.resupply_at) {
+            return pic.supply_points.iter().find(|sp| sp.id == id);
+        }
+        let at = self.platoon_centre(p)?;
+        let d = |q: [f64; 2]| (q[0] - at[0]).powi(2) + (q[1] - at[1]).powi(2);
+        pic.supply_points.iter().min_by(|a, b| d(a.pos).total_cmp(&d(b.pos)))
     }
 
     fn smoke_salvos(&self, to: Addressee) -> u32 {
@@ -1853,6 +1880,11 @@ impl Game {
             if r > 12.0 {
                 f.text("SMOKE", p[0] - 16.0, p[1] - 5.0, style::FONT, Rgba(205, 205, 205, 190));
             }
+        }
+        // Supply points (M8c).
+        let sp_radius = self.sim.data().logistics.point_radius_m.get();
+        for sp in &pic.supply_points {
+            symbols::supply_point(f, cam, sp.pos, sp_radius, &sp.callsign, style::FRIENDLY);
         }
         // Fire support: bursts fade over their 30 s life; a mission shows its aim point.
         for i in &pic.impacts {
@@ -2494,6 +2526,24 @@ impl Game {
                     .active(is(&Tool::Los { a: None, b: None, result: None }))
                     .tip("LINE OF SIGHT BETWEEN TWO POINTS"),
             ),
+            (23, {
+                let sp = self.sel_platoon.and_then(|p| self.resupply_point(p));
+                b("RESUPPLY", Cmd::Resupply)
+                    .key("R")
+                    .value(sp.map_or(String::new(), |sp| sp.callsign.clone()))
+                    .enabled(sp.is_some())
+                    .tip(match sp {
+                        Some(sp) => format!(
+                            "SERVICE-STATION RESUPPLY AT THE NEAREST SUPPLY POINT: THE PLATOON DRIVES THERE, IS SERVED A FEW VEHICLES AT A TIME, REPORTS AND HOLDS ({}: {})",
+                            sp.callsign,
+                            stock_text(sp)
+                        ),
+                        None if self.picture().supply_points.is_empty() => {
+                            "SERVICE-STATION RESUPPLY AT A SUPPLY POINT (THIS SIDE HAS NONE)".into()
+                        }
+                        None => "SERVICE-STATION RESUPPLY AT THE NEAREST SUPPLY POINT (SELECT A PLATOON)".into(),
+                    })
+            }),
         ];
         cells
             .into_iter()
@@ -2501,7 +2551,7 @@ impl Game {
                 let group = match i / hud::CARD_COLS {
                     0 => &orders,
                     1 => &posture,
-                    _ => "FIRES / STAFF",
+                    _ => "FIRES / SUPPORT / STAFF",
                 };
                 btn.tip = format!("{group}: {}", btn.tip);
                 (i, btn)
@@ -2578,10 +2628,38 @@ impl Game {
                 .map(|u| u.fuel_fraction)
                 .fold(f64::INFINITY, f64::min);
             let fuel = if fuel.is_finite() { format!("{:.0} %", fuel * 100.0) } else { "-".into() };
+            let full: u32 = members.iter().filter(|u| u.condition != Condition::Destroyed).map(|u| u.full_load).sum();
             head.push((
-                format!("UP {up}/{}   MAIN GUN {rounds} RDS   FUEL LOW {fuel}", members.len()),
+                format!("UP {up}/{}   MAIN GUN {rounds}/{full} RDS   FUEL LOW {fuel}", members.len()),
                 if up < members.len() { style::AMBER } else { style::TEXT },
             ));
+            if let Some(sp) = pv.resupply_at.and_then(|id| pic.supply_points.iter().find(|sp| sp.id == id)) {
+                let n = |s: ServiceStage| members.iter().filter(|u| u.service == Some(s)).count();
+                head.push((
+                    format!(
+                        "RESUPPLY AT {}: {} SERVED, {} QUEUED, {} DONE",
+                        sp.callsign,
+                        n(ServiceStage::Served),
+                        n(ServiceStage::Waiting) + n(ServiceStage::ToPoint),
+                        n(ServiceStage::Done)
+                    ),
+                    style::AMBER,
+                ));
+                if sp.unlimited {
+                    head.push((format!("{} STOCK UNLIMITED", sp.callsign), style::TEXT_DIM));
+                } else {
+                    head.push((
+                        format!("{} LEFT   {:.0} L   SMOKE SALVOS {}", sp.callsign, sp.fuel_l, sp.smoke_salvos),
+                        style::TEXT_DIM,
+                    ));
+                    let rounds: Vec<String> =
+                        sp.rounds.iter().map(|(l, n)| format!("{} {n}", l.to_uppercase())).collect();
+                    head.push((
+                        format!("  {}", if rounds.is_empty() { "NO ROUNDS".into() } else { rounds.join(" · ") }),
+                        style::TEXT_DIM,
+                    ));
+                }
+            }
         } else if let Some(u) = self.sel_unit.and_then(|id| pic.unit(id)) {
             head = self.unit_card(u, pic);
             if let Some(p) = u.platoon {
@@ -2694,7 +2772,7 @@ impl Game {
             def.map_or(String::new(), |d| format!("   {:.0} L", u.fuel_fraction * d.mobility.fuel_capacity_l.get()));
         let fuel_c = if u.fuel_fraction < 0.25 { style::AMBER } else { style::TEXT };
         out.push((row("FUEL", format!("{:.0} %{litres}", u.fuel_fraction * 100.0)), fuel_c));
-        let load: u32 = def.map_or(0, |d| d.armament.load.iter().map(|l| l.count).sum());
+        let load = u.full_load;
         let gun = match (u.condition, u.gun) {
             (Condition::FirepowerKill | Condition::Destroyed, _) => "OUT OF ACTION",
             (_, GunActivity::Ready) => "READY",
@@ -2929,7 +3007,7 @@ impl Game {
             let rows = [
                 ("ORDERS", self.scope_lines(false)),
                 ("POSTURE", self.scope_lines(true)),
-                ("FIRES", ["STAFF".into(), String::new()]),
+                ("FIRES", ["SUPPORT".into(), "STAFF".into()]),
             ];
             for (k, (label, [head, tail])) in rows.iter().enumerate() {
                 let r = hud::card_cell(screen, k * hud::CARD_COLS);
@@ -3031,12 +3109,32 @@ fn short_task(u: &sim::view::OwnUnit) -> String {
         Task::Overwatch => "OVERWATCH".into(),
         Task::Occupying => "OCCUPYING".into(),
     };
+    let t = match (u.service, &u.task) {
+        (_, Task::Engaging) | (None, _) => t,
+        (Some(ServiceStage::ToPoint), _) => "RESUPPLY: TO POINT".into(),
+        (Some(ServiceStage::Waiting), _) => "RESUPPLY: WAITING".into(),
+        (Some(ServiceStage::Served), _) => "RESUPPLY: SERVED".into(),
+        (Some(ServiceStage::Done), _) => "RESUPPLIED".into(),
+    };
     match u.condition {
         Condition::Operational => t,
         Condition::MobilityKill => "M-KILL".into(),
         Condition::FirepowerKill => "F-KILL".into(),
         Condition::Destroyed => "DESTROYED".into(),
     }
+}
+
+/// What a supply point has left: "UNLIMITED" or "1200 L · APFSDS 120-A 40 · SMOKE SALVOS 4".
+pub fn stock_text(sp: &sim::view::SupplyPointView) -> String {
+    if sp.unlimited {
+        return "UNLIMITED".into();
+    }
+    let mut parts = vec![format!("{:.0} L", sp.fuel_l)];
+    parts.extend(sp.rounds.iter().map(|(l, n)| format!("{} {n}", l.to_uppercase())));
+    if sp.smoke_salvos > 0 {
+        parts.push(format!("SMOKE SALVOS {}", sp.smoke_salvos));
+    }
+    parts.join(" · ")
 }
 
 fn short_technique(t: Technique) -> &'static str {
