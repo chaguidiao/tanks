@@ -739,6 +739,28 @@ mod tests {
     }
 
     #[test]
+    fn t64_and_t80_classes_are_contestable_in_the_mid_eighties() {
+        // 1985 at 2 km, turret front (data only, TODO I1): the M1's 105 mm sabot meets the T-64B
+        // about as it meets the T-72A, and the better-armoured T-80B a little worse; their 125 mm
+        // sabot of the time (3BM22 class) meets the M1 as the T-72A's does.
+        let ds = ds();
+        let vs_t72a = front_margin(&ds, "bulwark_a0", "kurgan_a", 1985);
+        let vs_t64 = front_margin(&ds, "bulwark_a0", "kholm_b", 1985);
+        let vs_t80 = front_margin(&ds, "bulwark_a0", "uval_b", 1985);
+        assert!((0.8..1.3).contains(&vs_t64), "M1 vs T-64B front: {vs_t64:.2}");
+        assert!((0.8..1.3).contains(&vs_t80), "M1 vs T-80B front: {vs_t80:.2}");
+        assert!(vs_t80 < vs_t64 && vs_t64 <= vs_t72a + 0.05, "{vs_t72a:.2} {vs_t64:.2} {vs_t80:.2}");
+        for red in ["kholm_b", "uval_b"] {
+            let m = front_margin(&ds, red, "bulwark_a0", 1985);
+            assert!((0.8..1.3).contains(&m), "{red} vs M1 front: {m:.2}");
+        }
+        // 1987: the M1A1's early 120 mm sabot still defeats the T-80BV about half the time, while
+        // the 3BM42 class does not reliably defeat the A1 (as for the T-72B).
+        assert!(front_margin(&ds, "bulwark_a1", "uval_b", 1987) > 0.9);
+        assert!(front_margin(&ds, "uval_b", "bulwark_a1", 1987) < 1.0);
+    }
+
+    #[test]
     fn modern_pairings_favour_the_better_protected_but_leave_the_t90_a_chance() {
         // About 2005 at 2 km, turret front: the A2's sabot just defeats the T-90's front with its
         // reactive armour (margin near 1), while the T-90's sabot does not defeat the A2's front.
