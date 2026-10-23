@@ -1,0 +1,96 @@
+// Fictional Blue cavalry scout vehicle mirroring the M3 Bradley Cavalry Fighting Vehicle (1983):
+// the M2's hull and turret re-stowed for two scouts, with more 25 mm rounds and TOW missiles
+// (Wikipedia, M3 Bradley, 2026: 1,500 rounds and 12 missiles). It is Blue's reconnaissance vehicle
+// from the early 1980s on; era is data, so the same file is the M3A3 of the 2000s through its
+// dated sensors (second-generation thermal from 2000, as on ward_m2). The M3A2's added armour
+// (1988 on) is not modelled because armour is not dated in the data.
+// Everything not listed below is the M2's (data/vehicles/ward_m2.ron), with its sources.
+// Scouts are not modelled yet: only the vehicle's own weapons count. One "round" of autocannon
+// ammunition is a burst.
+(
+    id: "ward_m3",
+    name: "WARD M3",
+    mirrors: "M3 Bradley CFV",
+    in_service: (from: 1983),
+    class: recon,
+    dimensions: (
+        hull_length_m: (value: 6.45, source: "open editions of Jane's Armour and Artillery: M2 length", confidence: medium),
+        width_m: (value: 3.20, source: "open editions of Jane's Armour and Artillery: M2 width", confidence: medium),
+        height_m: (value: 2.97, source: "open editions of Jane's Armour and Artillery: to the turret roof", confidence: medium),
+        hull_height_m: (value: 1.9, source: "estimate from published side views", confidence: estimate),
+        sight_height_m: (value: 2.5, source: "estimate from published side views", confidence: estimate),
+    ),
+    mobility: (
+        combat_mass_kg: (value: 22500.0, source: "open editions of Jane's Armour and Artillery: M2 combat weight about 22.5 t", confidence: medium),
+        engine_power_w: (value: 373000.0, source: "open editions of Jane's Armour and Artillery: Cummins VTA-903T, 500 hp", confidence: medium),
+        drivetrain_efficiency: (value: 0.70, source: "Ogorkiewicz, Technology of Tanks (1991)", confidence: estimate),
+        max_speed_road_mps: (value: 18.3, source: "open editions of Jane's Armour and Artillery: 66 km/h", confidence: medium),
+        max_speed_cross_country_mps: (value: 11.1, source: "estimate: about 40 km/h cross-country", confidence: estimate),
+        max_speed_reverse_mps: (value: 5.0, source: "estimate", confidence: estimate),
+        max_slope: (value: 0.60, source: "open editions of Jane's Armour and Artillery: 60 % gradient", confidence: medium),
+        max_side_slope: (value: 0.40, source: "open editions of Jane's Armour and Artillery: 40 % side slope", confidence: low),
+        fording_depth_m: (value: 1.1, source: "open editions of Jane's Armour and Artillery: unprepared fording; the vehicle also swims with a flotation screen", confidence: low),
+        vertical_step_m: (value: 0.91, source: "open editions of Jane's Armour and Artillery: 36 in", confidence: medium),
+        trench_width_m: (value: 2.54, source: "open editions of Jane's Armour and Artillery: 8 ft", confidence: medium),
+        track_ground_contact_m: (value: 3.6, source: "estimate", confidence: estimate),
+        track_width_m: (value: 0.53, source: "estimate", confidence: estimate),
+        max_yaw_rate_rad_s: (value: 0.9, source: "estimate", confidence: estimate),
+        max_lateral_accel_mps2: (value: 3.5, source: "Wong, Theory of Ground Vehicles (5th ed.), skid-steering", confidence: estimate),
+        braking_decel_mps2: (value: 4.0, source: "estimate", confidence: estimate),
+        fuel_capacity_l: (value: 662.0, source: "open editions of Jane's Armour and Artillery: 175 US gal", confidence: low),
+        fuel_idle_lph: (value: 8.0, source: "estimate", confidence: estimate),
+        fuel_per_kwh_l: (value: 0.29, source: "estimate", confidence: estimate, notes: "Diesel SFC ~240 g/kWh, density 0.84 kg/L."),
+    ),
+    gun: (
+        depression_rad: (value: -0.1396, source: "open editions of Jane's Armour and Artillery: -8 deg", confidence: low),
+        elevation_rad: (value: 1.0472, source: "open editions of Jane's Armour and Artillery: +60 deg", confidence: low),
+    ),
+    crew: 3,
+    sensors: [
+        (name: "COMMANDER (UNBUTTONED/PERISCOPES)", kind: optical, in_service: (from: 1970),
+            cycles_per_mrad: (value: 1.5, source: "estimate", confidence: estimate)),
+        (name: "GUNNER ISU DAY SIGHT 8X", kind: optical, in_service: (from: 1981),
+            cycles_per_mrad: (value: 6.5, source: "estimate", confidence: estimate, notes: "Integrated sight unit, 4x/12x optic; mid value.")),
+        (name: "ISU THERMAL (EARLY)", kind: thermal, in_service: (from: 1981),
+            cycles_per_mrad: (value: 2.5, source: "estimate", confidence: estimate,
+                notes: "Early integrated sight unit with a first-generation imager for TOW; open sources are unclear on its performance, so this is an estimate.")),
+        (name: "IBAS THERMAL (GEN 2)", kind: thermal, in_service: (from: 2000),
+            cycles_per_mrad: (value: 5.0, source: "Vollmerhausen & Jacobs (2004); second-generation imager of the improved Bradley acquisition upgrade", confidence: estimate)),
+    ],
+    fire_control: (
+        laser_rangefinder: false,
+        laser_range_error_m: (value: 20.0, source: "estimate", confidence: estimate, notes: "Unused: no laser rangefinder."),
+        estimated_range_error_fraction: (value: 0.12, source: "Ogorkiewicz (1991), stadiametric ranging", confidence: estimate),
+        ballistic_error_mrad: (value: 0.4, source: "estimate", confidence: estimate),
+        aim_error_mrad: (value: 0.3, source: "estimate", confidence: estimate),
+        moving_error_mrad: (value: 1.2, source: "estimate", confidence: estimate, notes: "Stabilised, with a simple sight link."),
+        lead_error_fraction: (value: 0.3, source: "estimate", confidence: estimate),
+        lay_time_s: (value: 3.0, source: "estimate", confidence: estimate),
+        lase_time_s: (value: 1.5, source: "estimate", confidence: estimate),
+    ),
+    armament: (
+        gun: "25 MM AUTOCANNON + TOW",
+        load: [(ammo: "atgm_tow2", count: 12), (ammo: "he_25", count: 200), (ammo: "apds_25", count: 100)], // 1,500 rounds in bursts of about five; TOW-2 from 1983, as the vehicle
+        autoloader: true,
+        reload_s: (value: 1.8, source: "estimate", confidence: estimate, notes: "One burst of about four rounds at the cyclic rate, plus laying."),
+        turret_traverse_rad_s: (value: 0.6, source: "estimate", confidence: estimate),
+        max_engagement_range_m: (value: 4000.0, source: "estimate", confidence: estimate, notes: "The missile's reach; each round type carries its own limit."),
+    ),
+    armour: (
+        ce_factor: (value: 1.0, source: "estimate: aluminium armour has no special CE protection", confidence: estimate),
+        turret_front: (value: 38.0, source: "open-source estimates: welded aluminium turret (the M2A0 has no applique armour)", confidence: low),
+        turret_side: (value: 25.0, source: "estimate", confidence: estimate),
+        turret_rear: (value: 20.0, source: "estimate", confidence: estimate),
+        hull_front: (value: 40.0, source: "open-source estimates: sloped aluminium glacis, steel-equivalent", confidence: low),
+        hull_side: (value: 25.0, source: "estimate", confidence: estimate),
+        hull_rear: (value: 20.0, source: "estimate", confidence: estimate),
+    ),
+    ammo_stowage: exposed,
+    smoke_launcher: (
+        kinds: ["grenade"],
+        salvos: 1,
+        clouds_per_salvo: 3,
+        range_m: (value: 30.0, source: "estimate: two banks of four grenade launchers on the turret", confidence: estimate),
+        arc_deg: (value: 60.0, source: "estimate", confidence: estimate),
+    ),
+)
