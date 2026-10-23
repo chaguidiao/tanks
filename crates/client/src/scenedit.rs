@@ -1,7 +1,7 @@
 //! Scenario editor (DESIGN.md §10.4, §11): place and orient units, group them into platoons, set
-//! objectives, date and start time, then save to `data/scenarios/<id>.ron` and play.
+//! objectives, supply points (M8c), date and start time, then save to `data/scenarios/<id>.ron` and play.
 
-use sim_data::{DataSet, ObjectiveDef, ScenarioDef, SideDef, UnitDef};
+use sim_data::{DataSet, ObjectiveDef, ScenarioDef, SideDef, SupplyPointDef, UnitDef};
 
 use crate::format;
 use crate::render::{Frame, Input, Key, P2};
@@ -18,6 +18,8 @@ const PLATOON_SIZE: usize = 4;
 enum Sel {
     Unit(usize, usize),
     Objective(usize),
+    /// Supply point (side, index).
+    Supply(usize, usize),
 }
 
 #[derive(Debug, Default)]
@@ -37,6 +39,8 @@ pub struct ScenarioEditor {
     dragging: bool,
     pub unsaved: bool,
     pub status: String,
+    /// Serving radius of a supply point (`logistics.ron`), for drawing.
+    point_radius_m: f64,
 }
 
 impl ScenarioEditor {
@@ -59,7 +63,17 @@ impl ScenarioEditor {
                 ds.vehicles_in_service(def.date.0).next().map_or_else(String::new, |v| v.id.clone())
             });
         let platoon = def.sides.iter().map(|s| s.units.last().and_then(|u| u.platoon.clone())).collect();
-        Self { def, side: 0, vehicle, platoon, sel: None, dragging: false, unsaved: false, status: String::new() }
+        Self {
+            def,
+            side: 0,
+            vehicle,
+            platoon,
+            sel: None,
+            dragging: false,
+            unsaved: false,
+            status: String::new(),
+            point_radius_m: ds.logistics.point_radius_m.get(),
+        }
     }
 
     fn year(&self) -> i32 {
@@ -77,6 +91,15 @@ impl ScenarioEditor {
                 let dist = d(u.position);
                 if dist < PICK_PX && best.is_none_or(|(b, _)| dist < b) {
                     best = Some((dist, Sel::Unit(si, ui)));
+                }
+            }
+        }
+        for (si, side) in self.def.sides.iter().enumerate() {
+            for (k, sp) in side.supply_points.iter().enumerate() {
+                // The symbol's pin stands above its point.
+                let dist = d(sp.position).min(d([sp.position[0], sp.position[1] + 16.0 * cam.mpp]));
+                if dist < PICK_PX && best.is_none_or(|(b, _)| dist < b) {
+                    best = Some((dist, Sel::Supply(si, k)));
                 }
             }
         }
@@ -129,6 +152,45 @@ impl ScenarioEditor {
         self.unsaved = true;
     }
 
+    /// A new supply point for the current side, stocked for one refill of a four-tank platoon of
+    /// each vehicle type the side fields (a starting point to edit: [ ] halve / double it).
+    fn place_supply(&mut self, at: [f64; 2], ds: &DataSet) {
+        let side = self.side;
+        let year = self.year();
+        let mut rounds: Vec<(String, u32)> = Vec::new();
+        let (mut fuel, mut smoke) = (0.0f64, 0u32);
+        let mut types: Vec<&str> = self.def.sides[side].units.iter().map(|u| u.vehicle.as_str()).collect();
+        types.sort_unstable();
+        types.dedup();
+        for v in types.iter().filter_map(|id| ds.vehicle(id)) {
+            fuel = fuel.max(v.mobility.fuel_capacity_l.get() * PLATOON_SIZE as f64);
+            smoke = smoke.max(v.smoke_launcher.as_ref().map_or(0, |l| l.salvos) * PLATOON_SIZE as u32);
+            for l in &v.armament.load {
+                if !ds.ammo(&l.ammo).is_some_and(|a| a.in_service.contains(year)) {
+                    continue;
+                }
+                let n = l.count * PLATOON_SIZE as u32;
+                match rounds.iter_mut().find(|(id, _)| *id == l.ammo) {
+                    Some(r) => r.1 = r.1.max(n),
+                    None => rounds.push((l.ammo.clone(), n)),
+                }
+            }
+        }
+        let n = self.def.sides.iter().map(|s| s.supply_points.len()).sum::<usize>() + 1;
+        let callsign = format!("SP {n}");
+        self.def.sides[side].supply_points.push(SupplyPointDef {
+            callsign: callsign.clone(),
+            position: at,
+            unlimited: false,
+            fuel_l: fuel.round(),
+            rounds,
+            smoke_salvos: smoke,
+        });
+        self.sel = Some(Sel::Supply(side, self.def.sides[side].supply_points.len() - 1));
+        self.status = format!("SUPPLY POINT {callsign}");
+        self.unsaved = true;
+    }
+
     pub fn update(&mut self, inp: &Input, cam: &Camera, ds: &DataSet, over_ui: bool) -> Effects {
         let mut fx = Effects::default();
         let m = cam.to_world(inp.mouse);
@@ -144,9 +206,13 @@ impl ScenarioEditor {
             match self.sel {
                 Some(Sel::Unit(s, u)) => self.def.sides[s].units[u].position = m,
                 Some(Sel::Objective(k)) => self.def.objectives[k].centre = m,
+                Some(Sel::Supply(s, k)) => self.def.sides[s].supply_points[k].position = m,
                 None => {}
             }
             self.unsaved = true;
+        }
+        if inp.hit(Key::Char('s')) && !inp.ctrl && !over_ui {
+            self.place_supply(m, ds);
         }
 
         if inp.hit(Key::Char('p')) && !over_ui {
@@ -173,6 +239,10 @@ impl ScenarioEditor {
                     let gone = self.def.objectives.remove(k);
                     self.status = format!("REMOVED {}", gone.name);
                 }
+                Some(Sel::Supply(s, k)) => {
+                    let gone = self.def.sides[s].supply_points.remove(k);
+                    self.status = format!("REMOVED {}", gone.callsign);
+                }
                 None => {}
             }
             self.unsaved = true;
@@ -184,6 +254,26 @@ impl ScenarioEditor {
             }
             if inp.hit(Key::RightBracket) {
                 o.radius_m = (o.radius_m + 50.0).min(1500.0);
+            }
+        }
+        if let Some(Sel::Supply(s, k)) = self.sel {
+            let sp = &mut self.def.sides[s].supply_points[k];
+            let scale = match (inp.hit(Key::LeftBracket), inp.hit(Key::RightBracket)) {
+                (true, _) => Some(0.5),
+                (_, true) => Some(2.0),
+                _ => None,
+            };
+            if let Some(f) = scale {
+                sp.fuel_l = (sp.fuel_l * f).round();
+                sp.smoke_salvos = (sp.smoke_salvos as f64 * f) as u32;
+                for r in &mut sp.rounds {
+                    r.1 = (r.1 as f64 * f) as u32;
+                }
+                self.unsaved = true;
+            }
+            if inp.hit(Key::Char('r')) && !inp.ctrl {
+                sp.unlimited = !sp.unlimited;
+                self.unsaved = true;
             }
         }
         if inp.hit(Key::Char('r'))
@@ -270,6 +360,13 @@ impl ScenarioEditor {
         }
         for (si, side) in self.def.sides.iter().enumerate() {
             let c = if si == 0 { style::FRIENDLY } else { style::HOSTILE };
+            for (k, sp) in side.supply_points.iter().enumerate() {
+                let c = if self.sel == Some(Sel::Supply(si, k)) { style::SELECT } else { c };
+                symbols::supply_point(f, cam, sp.position, self.point_radius_m, &sp.callsign, c);
+            }
+        }
+        for (si, side) in self.def.sides.iter().enumerate() {
+            let c = if si == 0 { style::FRIENDLY } else { style::HOSTILE };
             for (ui, u) in side.units.iter().enumerate() {
                 let p = cam.to_screen(u.position);
                 if si == 0 {
@@ -310,6 +407,29 @@ impl ScenarioEditor {
             ),
             (if self.unsaved { "UNSAVED  CTRL+S".to_owned() } else { "SAVED".to_owned() }, style::TEXT_DIM),
         ];
+        if let Some(Sel::Supply(s, k)) = self.sel {
+            let sp = &self.def.sides[s].supply_points[k];
+            lines.push((
+                format!("{} ({})   [ ] HALF/DOUBLE  R UNLIMITED", sp.callsign, self.def.sides[s].name),
+                style::AMBER,
+            ));
+            if sp.unlimited {
+                lines.push(("STOCK   UNLIMITED".into(), style::TEXT));
+            } else {
+                lines.push((format!("STOCK   {:.0} L   SMOKE SALVOS {}", sp.fuel_l, sp.smoke_salvos), style::TEXT));
+                let rounds: Vec<String> = sp
+                    .rounds
+                    .iter()
+                    .map(|(id, n)| {
+                        format!("{} {n}", ds.ammo(id).map_or(id.to_uppercase(), |a| a.kind.label().to_owned()))
+                    })
+                    .collect();
+                lines.push((
+                    format!("        {}", if rounds.is_empty() { "NO ROUNDS".into() } else { rounds.join(" · ") }),
+                    style::TEXT,
+                ));
+            }
+        }
         for p in self.problems(ds).into_iter().take(4) {
             lines.push((p, style::HOSTILE));
         }
@@ -321,7 +441,7 @@ impl ScenarioEditor {
             f.text(l, x + 10.0, y + 32.0 + k as f32 * 18.0, style::FONT_L - 8, *c);
         }
         f.text(
-            "P PLACE  LMB SELECT/DRAG  R ROTATE  DEL REMOVE  O OBJECTIVE ([ ] RADIUS)  CTRL+S SAVE  F9 PLAY TEST  ESC MENU",
+            "P PLACE  LMB SELECT/DRAG  R ROTATE  DEL REMOVE  O OBJECTIVE ([ ] RADIUS)  S SUPPLY POINT  CTRL+S SAVE  F9 PLAY TEST  ESC MENU",
             10.0,
             screen[1] - 44.0,
             style::FONT_L - 8,
@@ -331,6 +451,6 @@ impl ScenarioEditor {
     }
 
     pub fn over_ui(&self, s: P2) -> bool {
-        s[0] < 310.0 && s[1] > 40.0 && s[1] < 300.0
+        s[0] < 310.0 && s[1] > 40.0 && s[1] < 380.0
     }
 }
