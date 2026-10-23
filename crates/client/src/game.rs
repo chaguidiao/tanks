@@ -3177,6 +3177,8 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                 PlatoonReport::SetAt { pos } => format!("{cs}: SET AT GRID {}.", format::grid(*pos)),
                 PlatoonReport::NoRoute => format!("{cs}: UNABLE. NO ROUTE."),
                 PlatoonReport::Resupplied { complete: true } => format!("{cs}: RESUPPLY COMPLETE."),
+                PlatoonReport::LogpacReceived { refuel: true } => format!("{cs}: LOGPAC RECEIVED. REFUELLED."),
+                PlatoonReport::LogpacReceived { refuel: false } => format!("{cs}: LOGPAC RECEIVED. REARMED."),
                 PlatoonReport::Resupplied { complete: false } => {
                     format!("{cs}: RESUPPLY PARTIAL. SUPPLY POINT SHORT.")
                 }
@@ -3253,6 +3255,7 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                 FireReport::Splash => format!("{cs}: SPLASH, OVER."),
                 FireReport::RoundsComplete => format!("{cs}: ROUNDS COMPLETE, END OF MISSION."),
                 FireReport::Ceased => format!("{cs}: CEASE FIRE, END OF MISSION."),
+                FireReport::Resupplied { he, smoke } => format!("{cs}: RESUPPLIED. {he} HE, {smoke} SMOKE."),
             }
         }
         Event::ScenarioEnd { winner, reason } => {

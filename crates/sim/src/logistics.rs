@@ -183,6 +183,27 @@ pub fn needs_anything(world: &World, k: usize, t: &Tables) -> bool {
     fuel || rounds || smoke
 }
 
+/// Off-map LOGPAC (scenario re-arm event): add `fraction` of the full load of every round type
+/// and of the smoke salvos to vehicle `k`, in whole rounds rounded down, capped at the full load.
+pub fn rearm(world: &mut World, k: usize, def: &VehicleDef, fraction: f64) {
+    if let Some(g) = world.gun[k].as_mut() {
+        for (s, &c) in g.stock.iter_mut().zip(&g.capacity) {
+            *s = (*s + (c as f64 * fraction) as u32).min(c);
+        }
+    }
+    let cap = def.smoke_launcher.as_ref().map_or(0, |l| l.salvos);
+    let sm = &mut world.smoke[k];
+    sm.salvos = (sm.salvos + (cap as f64 * fraction) as u32).min(cap);
+}
+
+/// Off-map LOGPAC: add `fraction` of the fuel capacity to vehicle `k`, capped at a full tank.
+pub fn refuel(world: &mut World, k: usize, def: &VehicleDef, fraction: f64) {
+    if let Some(m) = world.mobility[k].as_mut() {
+        let cap = def.mobility.fuel_capacity_l.get();
+        m.fuel_l = (m.fuel_l + cap * fraction).min(cap.max(m.fuel_l));
+    }
+}
+
 /// Supply point of `side` with index `id` among all points, if it belongs to that side.
 pub fn point_of(points: &[SupplyPoint], side: SideId, id: u32) -> Option<usize> {
     let i = id as usize;

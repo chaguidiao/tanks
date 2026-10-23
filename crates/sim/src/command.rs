@@ -177,6 +177,30 @@ pub enum Command {
         condition: TriggerCondition,
         then: Box<Command>,
     },
+    /// Off-map LOGPAC from a scenario re-arm event (`ScenarioDef.logistics`; M8c, C4). Issued by
+    /// the simulation only: ignored when given from outside.
+    Logpac {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        platoons: Vec<PlatoonId>,
+        kind: LogpacKind,
+    },
+}
+
+/// What a LOGPAC delivers (see `sim_data::LogisticsKind`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LogpacKind {
+    Rearm {
+        fraction: f64,
+    },
+    Refuel {
+        fraction: f64,
+    },
+    /// Rounds for battery `battery` (an id from `PerceivedWorld.fire_support`).
+    Battery {
+        battery: u32,
+        he: u32,
+        smoke: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -311,6 +335,11 @@ pub enum FireReport {
     Splash,
     RoundsComplete,
     Ceased,
+    /// A LOGPAC delivered rounds (M8c re-arm event).
+    Resupplied {
+        he: u32,
+        smoke: u32,
+    },
 }
 
 /// Structured platoon reports; the client renders them as radio text.
@@ -358,6 +387,10 @@ pub enum PlatoonReport {
     /// Resupply finished: `complete` = every vehicle full, else the point ran short.
     Resupplied {
         complete: bool,
+    },
+    /// An off-map LOGPAC arrived: `refuel` = fuel, else ammunition.
+    LogpacReceived {
+        refuel: bool,
     },
     /// Losses: members remaining.
     Strength {

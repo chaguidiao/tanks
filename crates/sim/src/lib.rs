@@ -41,8 +41,8 @@ use terrain::path::Pathfinder;
 
 pub use ai::picture::{self as view, PerceivedWorld};
 pub use command::{
-    Addressee, Command, DenyReason, EndReason, Event, FireKind, FireReport, KillKind, PlatoonReport, PositionKind,
-    SmokeMode, TimedCommand,
+    Addressee, Command, DenyReason, EndReason, Event, FireKind, FireReport, KillKind, LogpacKind, PlatoonReport,
+    PositionKind, SmokeMode, TimedCommand,
 };
 pub use world::{EntityId, SideId, World};
 
@@ -117,10 +117,60 @@ pub struct Sim {
     batteries: Vec<fires::Battery>,
     /// Supply points of all sides, in scenario order (M8c).
     supply: Vec<logistics::SupplyPoint>,
+    /// Scenario re-arm events as (tick, side, generated `Command::Logpac`), in tick order.
+    logpacs: Vec<(u64, SideId, Command)>,
     /// Recent shell bursts (pruned after `IMPACT_KEEP_S`).
     impacts: Vec<fires::Impact>,
     /// Per side: the equipment year (scenario date or the side's tech year).
     years: Vec<i32>,
+}
+
+/// Resolve the scenario's re-arm events (`ScenarioDef.logistics`) to generated commands at their
+/// ticks: platoon and battery callsigns become ids; empty platoon lists mean every platoon.
+fn logpacs(
+    scenario: &ScenarioDef,
+    platoons: &[platoon::Platoon],
+    batteries: &[fires::Battery],
+) -> Result<Vec<(u64, SideId, Command)>, String> {
+    use sim_data::LogisticsKind as K;
+    let mut out = Vec::new();
+    for (i, e) in scenario.logistics.iter().enumerate() {
+        let err = |m: String| format!("logistics event {}: {m}", i + 1);
+        if e.side >= scenario.sides.len() {
+            return Err(err(format!("no side {}", e.side)));
+        }
+        if !(e.at_s.is_finite() && e.at_s >= 0.0) {
+            return Err(err(format!("bad time {}", e.at_s)));
+        }
+        let side = SideId(e.side as u8);
+        let own = || platoons.iter().filter(move |p| p.side == side);
+        let ids = if e.platoons.is_empty() {
+            own().map(|p| p.id).collect()
+        } else {
+            e.platoons
+                .iter()
+                .map(|cs| {
+                    own().find(|p| &p.callsign == cs).map(|p| p.id).ok_or_else(|| err(format!("no platoon '{cs}'")))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let fraction_ok =
+            |f: f64| (f.is_finite() && f >= 0.0).then_some(f).ok_or_else(|| err(format!("bad fraction {f}")));
+        let (platoons, kind) = match &e.kind {
+            K::Rearm { fraction } => (ids, LogpacKind::Rearm { fraction: fraction_ok(*fraction)? }),
+            K::Refuel { fraction } => (ids, LogpacKind::Refuel { fraction: fraction_ok(*fraction)? }),
+            K::Battery { callsign, he, smoke } => {
+                let b = batteries
+                    .iter()
+                    .position(|b| b.side == side && &b.callsign == callsign)
+                    .ok_or_else(|| err(format!("no battery '{callsign}'")))?;
+                (Vec::new(), LogpacKind::Battery { battery: b as u32, he: *he, smoke: *smoke })
+            }
+        };
+        out.push(((e.at_s / DT).round() as u64, side, Command::Logpac { platoons, kind }));
+    }
+    out.sort_by_key(|(t, ..)| *t);
+    Ok(out)
 }
 
 /// Commander AI decision interval: 0.2 Hz (DESIGN.md §4.1).
@@ -324,6 +374,7 @@ impl Sim {
                 });
             }
         }
+        let logpacs = logpacs(scenario, &platoons, &batteries)?;
         let mut sim = Self {
             tick: 0,
             map,
@@ -354,6 +405,7 @@ impl Sim {
             weather,
             batteries,
             supply,
+            logpacs,
             impacts: Vec::new(),
             years,
         };
@@ -513,6 +565,14 @@ impl Sim {
             std::mem::take(&mut self.pending).into_iter().partition(|(t, _)| *t <= tick);
         self.pending = keep;
         for (_, c) in due {
+            self.apply(&c, &mut events);
+        }
+
+        // 1a. Scheduled LOGPACs (scenario re-arm events), as generated commands.
+        let due = self.logpacs.iter().filter(|(t, ..)| *t == tick).map(|(_, s, c)| (*s, c.clone())).collect::<Vec<_>>();
+        for (side, cmd) in due {
+            let c = TimedCommand { tick, side, cmd, immediate: true, generated: true };
+            self.log.push(c.clone());
             self.apply(&c, &mut events);
         }
 
@@ -1246,6 +1306,47 @@ impl Sim {
                     reference_sign: sign,
                 });
                 s.picture.triggers = control::views(&s.triggers);
+            }
+            Command::Logpac { platoons, kind } => {
+                if !c.generated {
+                    return;
+                }
+                if let LogpacKind::Battery { battery, he, smoke } = *kind {
+                    if let Some(b) = self.batteries.get_mut(battery as usize).filter(|b| b.side == c.side) {
+                        b.he += he;
+                        b.smoke += smoke;
+                        events.push(Event::FireSupport {
+                            side: c.side,
+                            battery,
+                            at: b.pos,
+                            report: FireReport::Resupplied { he, smoke },
+                        });
+                    }
+                    return;
+                }
+                for p in self.platoons.iter().filter(|p| p.side == c.side && platoons.contains(&p.id)) {
+                    let mut any = false;
+                    for &k in &p.members {
+                        let Some(vi) = self.world.vehicle[k].filter(|_| self.world.alive(k)) else { continue };
+                        match *kind {
+                            LogpacKind::Rearm { fraction } => {
+                                logistics::rearm(&mut self.world, k, &self.vehicles[vi], fraction)
+                            }
+                            LogpacKind::Refuel { fraction } => {
+                                logistics::refuel(&mut self.world, k, &self.vehicles[vi], fraction)
+                            }
+                            LogpacKind::Battery { .. } => {}
+                        }
+                        any = true;
+                    }
+                    if any {
+                        events.push(Event::PlatoonReport {
+                            side: c.side,
+                            platoon: p.id,
+                            report: PlatoonReport::LogpacReceived { refuel: matches!(kind, LogpacKind::Refuel { .. }) },
+                        });
+                    }
+                }
             }
             Command::Resupply { platoon, point } => {
                 let Some(pi) = logistics::point_of(&self.supply, c.side, *point) else { return };

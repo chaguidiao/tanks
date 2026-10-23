@@ -1508,6 +1508,7 @@ mod tests {
             victory: None,
             weather: Default::default(),
             briefing: None,
+            logistics: vec![],
         };
         let mut g = Game::new(sc, ds, map).unwrap();
         g.execute();

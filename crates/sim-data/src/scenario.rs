@@ -21,6 +21,41 @@ pub struct ScenarioDef {
     pub briefing: Option<String>,
     #[serde(default, skip_serializing_if = "WeatherDef::is_default")]
     pub weather: WeatherDef,
+    /// Re-arm events: off-map LOGPACs that refill platoons or batteries at a set time (M8c, C4).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub logistics: Vec<LogisticsEventDef>,
+}
+
+/// A scheduled off-map resupply (a LOGPAC from the trains, FM 17-15 (1996) / ATP 3-20.15 (2025)
+/// sustainment): at `at_s` the side's listed platoons (or battery) are refilled at once. Applied
+/// by the sim as a generated command, so replays regenerate it (DESIGN.md §14 #14).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LogisticsEventDef {
+    /// Seconds after the scenario start.
+    pub at_s: f64,
+    /// Index of the side.
+    pub side: usize,
+    /// Platoon callsigns refilled; empty = every platoon of the side. Unused for `Battery`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub platoons: Vec<String>,
+    pub kind: LogisticsKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LogisticsKind {
+    /// Each vehicle gets `fraction` of its full load of every round type and of its smoke salvos
+    /// (whole rounds, rounded down), never more than the full load.
+    Rearm { fraction: f64 },
+    /// Each vehicle gets `fraction` of its fuel capacity, never more than a full tank.
+    Refuel { fraction: f64 },
+    /// The side's battery `callsign` receives `he` and `smoke` rounds.
+    Battery {
+        callsign: String,
+        #[serde(default)]
+        he: u32,
+        #[serde(default)]
+        smoke: u32,
+    },
 }
 
 /// Weather and sky at the scenario (DESIGN.md decision 20). The preset (`data/combat/weather.ron`)

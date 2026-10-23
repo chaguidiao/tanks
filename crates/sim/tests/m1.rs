@@ -63,6 +63,7 @@ fn scenario(year: i32, pos: [f64; 2], heading_deg: f64) -> ScenarioDef {
         victory: None,
         weather: Default::default(),
         briefing: None,
+        logistics: vec![],
     }
 }
 
