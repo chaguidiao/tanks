@@ -6,7 +6,7 @@
 //! the rows and `-` / `=` step the focused one. The panel is built by [`ScenarioEditor::buttons`]
 //! (the same layout for hit-testing and drawing) and every hotkey issues the same [`EdAction`].
 
-use sim_data::{BatteryAssign, DataSet, ObjectiveDef, ScenarioDef, SideDef, UnitDef};
+use sim_data::{BatteryAssign, DataSet, ObjectiveDef, ScenarioDef, SideDef, UnitDef, VictoryDef};
 
 use crate::format;
 use crate::hud::{Button, Look, Rect};
@@ -44,16 +44,18 @@ pub enum Page {
     Units,
     Weather,
     Fires,
+    Victory,
 }
 
 impl Page {
-    pub const ALL: [Page; 3] = [Page::Units, Page::Weather, Page::Fires];
+    pub const ALL: [Page; 4] = [Page::Units, Page::Weather, Page::Fires, Page::Victory];
 
     fn label(self) -> &'static str {
         match self {
             Page::Units => "UNITS",
             Page::Weather => "TIME / WX",
             Page::Fires => "FIRES",
+            Page::Victory => "VICTORY",
         }
     }
 
@@ -62,6 +64,7 @@ impl Page {
             Page::Units => "1",
             Page::Weather => "2",
             Page::Fires => "3",
+            Page::Victory => "4",
         }
     }
 
@@ -70,6 +73,7 @@ impl Page {
             Page::Units => "SIDES, DOCTRINE, VEHICLES AND PLATOONS",
             Page::Weather => "DATE, START TIME, WEATHER PRESET, WIND, LATITUDE AND MOON",
             Page::Fires => "FIRE SUPPORT: BATTERIES PER SIDE (B PLACES ONE AT THE CURSOR)",
+            Page::Victory => "VICTORY CONDITIONS: TIME LIMIT, OBJECTIVE, ATTACKER, LOSS LIMIT",
         }
     }
 
@@ -78,6 +82,7 @@ impl Page {
         match self {
             Page::Units => &[F::Side, F::Doctrine, F::TechYear, F::Vehicle, F::Platoon],
             Page::Fires => &[F::Side, F::Battery, F::BatteryType, F::BatteryHe, F::BatterySmoke],
+            Page::Victory => &[F::VicOn, F::VicTime, F::VicObjective, F::VicAttacker, F::VicLoss],
             Page::Weather => {
                 &[F::Year, F::Month, F::Day, F::Start, F::Preset, F::WindFrom, F::WindSpeed, F::Latitude, F::Moon]
             }
@@ -106,6 +111,11 @@ pub enum Field {
     BatteryType,
     BatteryHe,
     BatterySmoke,
+    VicOn,
+    VicTime,
+    VicObjective,
+    VicAttacker,
+    VicLoss,
 }
 
 /// What a panel button or an editor hotkey does.
@@ -354,7 +364,8 @@ impl ScenarioEditor {
             self.place_battery(m, ds);
         }
         if inp.hit(Key::Char('o')) && !over_ui {
-            let name = format!("OBJ {}", self.def.objectives.len() + 1);
+            let taken = |n: &str| self.def.objectives.iter().any(|o| o.name == n);
+            let name = (1..).map(|n| format!("OBJ {n}")).find(|n| !taken(n)).expect("a free name");
             self.def.objectives.push(ObjectiveDef { name: name.clone(), centre: m, radius_m: 300.0 });
             self.sel = Some(Sel::Objective(self.def.objectives.len() - 1));
             self.status = format!("OBJECTIVE {name}");
@@ -519,6 +530,11 @@ impl ScenarioEditor {
                     return;
                 }
             }
+            Field::VicOn | Field::VicTime | Field::VicObjective | Field::VicAttacker | Field::VicLoss => {
+                if !self.step_victory(f, dir) {
+                    return;
+                }
+            }
             Field::Moon => {
                 let m = &mut self.def.weather.moon_phase;
                 *m = (*m + 0.25 * d).clamp(0.0, 1.0);
@@ -552,6 +568,11 @@ impl ScenarioEditor {
             Field::BatteryType => "TYPE",
             Field::BatteryHe => "HE ROUNDS",
             Field::BatterySmoke => "SMOKE ROUNDS",
+            Field::VicOn => "VICTORY",
+            Field::VicTime => "TIME LIMIT",
+            Field::VicObjective => "OBJECTIVE",
+            Field::VicAttacker => "ATTACKER",
+            Field::VicLoss => "LOSS LIMIT",
         }
     }
 
@@ -577,6 +598,13 @@ impl ScenarioEditor {
             Field::BatteryType => "BATTERY TYPE (DATA/COMBAT/FIRES.RON), IN SERVICE AT THE SIDE'S YEAR",
             Field::BatteryHe => "HE ROUNDS IN STOCK; TYPE = THE TYPE'S OWN STOCK",
             Field::BatterySmoke => "SMOKE ROUNDS IN STOCK; TYPE = THE TYPE'S OWN STOCK",
+            Field::VicOn => "VICTORY CONDITIONS ON OR OFF (OFF: THE SCENARIO RUNS UNTIL STOPPED)",
+            Field::VicTime => {
+                "SCENARIO LENGTH, 5 MIN STEPS: AT THE END THE OBJECTIVE HOLDER WINS, TIES TO THE DEFENDER"
+            }
+            Field::VicObjective => "OBJECTIVE THE ATTACKER MUST SEIZE (HOLD ALONE FOR 2 MIN)",
+            Field::VicAttacker => "ATTACKING SIDE; THE OTHER SIDE DEFENDS",
+            Field::VicLoss => "A SIDE THAT LOSES THIS SHARE OF ITS VEHICLES LOSES AT ONCE",
         }
     }
 
@@ -601,6 +629,9 @@ impl ScenarioEditor {
             }
             Field::Moon => format!("{:.2}", w.moon_phase),
             Field::Battery | Field::BatteryType | Field::BatteryHe | Field::BatterySmoke => self.fires_value(f, ds),
+            Field::VicOn | Field::VicTime | Field::VicObjective | Field::VicAttacker | Field::VicLoss => {
+                self.victory_value(f)
+            }
         }
     }
 
@@ -660,6 +691,7 @@ impl ScenarioEditor {
             }
             Page::Weather => lines.extend(self.weather_lines(ds)),
             Page::Fires => lines.extend(self.fires_lines(ds)),
+            Page::Victory => lines.extend(self.victory_lines()),
         }
         lines.push((if self.unsaved { "UNSAVED  CTRL+S".to_owned() } else { "SAVED".to_owned() }, style::TEXT_DIM));
         for p in self.problems(ds).into_iter().take(4) {
@@ -729,6 +761,16 @@ impl ScenarioEditor {
                 }
             }
         }
+        if let Some(v) = &self.def.victory {
+            if let Some(o) = &v.objective
+                && !self.def.objectives.iter().any(|x| &x.name == o)
+            {
+                out.push(format!("VICTORY OBJECTIVE {o} MISSING"));
+            }
+            if v.attacker >= self.def.sides.len() {
+                out.push("VICTORY ATTACKER: NO SUCH SIDE".into());
+            }
+        }
         out
     }
 
@@ -738,6 +780,9 @@ impl ScenarioEditor {
             let c = if self.sel == Some(Sel::Objective(k)) { style::SELECT } else { style::AMBER };
             let p = cam.to_screen(o.centre);
             f.circle_lines(p, (o.radius_m / cam.mpp) as f32, c);
+            if self.page == Page::Victory && self.victory_objective() == Some(o.name.as_str()) {
+                f.circle_lines(p, (o.radius_m / cam.mpp) as f32 + 4.0, c);
+            }
             f.text(&o.name, p[0] - 16.0, p[1] - 6.0, style::FONT_L - 8, c);
         }
         for (si, side) in self.def.sides.iter().enumerate() {
@@ -776,6 +821,7 @@ impl ScenarioEditor {
             Page::Units => "P PLACE  LMB SELECT/DRAG  R ROTATE  DEL REMOVE  O OBJECTIVE ([ ] RADIUS)",
             Page::Weather => "CLICK OR + NEXT VALUE  - PREVIOUS  PGUP/PGDN FOCUS, - / = STEP",
             Page::Fires => "B PLACE BATTERY AT CURSOR  LMB SELECT/DRAG  DEL REMOVE",
+            Page::Victory => "O OBJECTIVE AT CURSOR ([ ] RADIUS)  CLICK OR + NEXT VALUE  - PREVIOUS",
         };
         f.text(
             &format!("{help}   1-{} PAGES  CTRL+S SAVE  F9 PLAY TEST  ESC MENU", Page::ALL.len()),
@@ -939,6 +985,90 @@ impl ScenarioEditor {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Victory conditions (`ScenarioDef.victory`, sim::victory).
+// ---------------------------------------------------------------------------------------------
+
+/// Time-limit step and range (s).
+const VIC_TIME_STEP_S: f64 = 300.0;
+const VIC_TIME_S: (f64, f64) = (600.0, 6.0 * 3600.0);
+/// Loss-limit step and range (share of a side's vehicles).
+const VIC_LOSS_STEP: f64 = 0.05;
+const VIC_LOSS: (f64, f64) = (0.1, 1.0);
+
+impl ScenarioEditor {
+    fn victory_objective(&self) -> Option<&str> {
+        self.def.victory.as_ref().and_then(|v| v.objective.as_deref())
+    }
+
+    /// Step a victory row. False if nothing changed.
+    fn step_victory(&mut self, f: Field, dir: i8) -> bool {
+        let d = f64::from(dir);
+        if f == Field::VicOn {
+            self.def.victory = match self.def.victory {
+                Some(_) => None,
+                None => Some(VictoryDef {
+                    time_limit_s: 3600.0,
+                    objective: self.def.objectives.first().map(|o| o.name.clone()),
+                    attacker: 0,
+                    destroyed_fraction: 0.7,
+                }),
+            };
+            return true;
+        }
+        let names: Vec<Option<String>> =
+            std::iter::once(None).chain(self.def.objectives.iter().map(|o| Some(o.name.clone()))).collect();
+        let sides = self.def.sides.len();
+        let Some(v) = &mut self.def.victory else {
+            self.status = "VICTORY CONDITIONS ARE OFF".into();
+            return false;
+        };
+        match f {
+            Field::VicTime => {
+                v.time_limit_s = (v.time_limit_s + VIC_TIME_STEP_S * d).clamp(VIC_TIME_S.0, VIC_TIME_S.1);
+            }
+            Field::VicObjective => v.objective = names[cycle(&names, &v.objective, dir)].clone(),
+            Field::VicAttacker => {
+                v.attacker = (v.attacker as i64 + i64::from(dir)).rem_euclid(sides.max(1) as i64) as usize;
+            }
+            Field::VicLoss => {
+                let x = (v.destroyed_fraction + VIC_LOSS_STEP * d).clamp(VIC_LOSS.0, VIC_LOSS.1);
+                // Keep the value on the 5 % grid (no drift from repeated float steps).
+                v.destroyed_fraction = (x / VIC_LOSS_STEP).round() * VIC_LOSS_STEP;
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn victory_value(&self, f: Field) -> String {
+        let Some(v) = &self.def.victory else {
+            return if f == Field::VicOn { "OFF".into() } else { "-".into() };
+        };
+        match f {
+            Field::VicOn => "ON".into(),
+            Field::VicTime => format!("{:.0} MIN", v.time_limit_s / 60.0),
+            Field::VicObjective => v.objective.clone().unwrap_or_else(|| "NONE".into()),
+            Field::VicAttacker => self.def.sides.get(v.attacker).map_or("-".into(), |s| s.name.clone()),
+            Field::VicLoss => format!("{:.0} %", v.destroyed_fraction * 100.0),
+            _ => String::new(),
+        }
+    }
+
+    fn victory_lines(&self) -> Vec<(String, Rgba)> {
+        let Some(v) = &self.def.victory else {
+            return vec![("NO VICTORY CONDITIONS: RUNS UNTIL STOPPED".into(), style::TEXT_DIM)];
+        };
+        let end = format::clock(f64::from(self.def.start_time_s) + v.time_limit_s);
+        let defender = self.def.sides.get((v.attacker + 1) % self.def.sides.len().max(1)).map_or("-", |s| &s.name);
+        let mut out = vec![(format!("ENDS AT {end}; TIES GO TO {defender}"), style::TEXT_DIM)];
+        if let Some(o) = &v.objective {
+            out.push((format!("SEIZED: ATTACKER ALONE ON {o} FOR 2 MIN"), style::TEXT_DIM));
+        }
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1024,6 +1154,19 @@ mod tests {
         ed.place_battery([5000.0, 6000.0], &ds);
         ed.act(EdAction::Step(Field::BatterySmoke, 1), &ds);
         assert_eq!(ed.def.sides[1].fire_support[0].callsign, "ARTY 2");
+        ed.def.victory = None;
+        for (f, d) in [
+            (Field::VicOn, 1),
+            (Field::VicTime, -1),
+            (Field::VicObjective, 1),
+            (Field::VicAttacker, 1),
+            (Field::VicLoss, 1),
+        ] {
+            ed.act(EdAction::Step(f, d), &ds);
+        }
+        let v = ed.def.victory.as_ref().expect("victory on");
+        assert_eq!((v.time_limit_s, v.attacker), (3300.0, 1));
+        assert_eq!(v.destroyed_fraction, 0.75);
         assert!(ed.def.sides[0].fire_support[0].he_rounds.is_some());
         ed.prepare_save();
         DataSet::save_scenario(&tmp, &ed.def).unwrap();
