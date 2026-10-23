@@ -64,6 +64,10 @@ pub struct OwnUnit {
     pub speed: f64,
     pub fuel_fraction: f64,
     pub ammo: u32,
+    /// Rounds carried when full (all types): what resupply fills to.
+    pub full_load: u32,
+    /// Stage in a service-station resupply, when its platoon has that order (M8c).
+    pub service: Option<ServiceStage>,
     /// Rounds left per type: (type label, count), in loadout order.
     pub rounds: Vec<(String, u32)>,
     /// Round type the commander ordered; None = crew's choice.
@@ -94,6 +98,19 @@ pub struct OwnUnit {
     pub engine_smoke: Option<bool>,
     /// Crew suppression 0..1 (rises under fire).
     pub suppression: f64,
+}
+
+/// Where a vehicle is in a service-station resupply (M8c; FM 17-15 (1996) service-station method).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceStage {
+    /// Driving into the supply point.
+    ToPoint,
+    /// In the holding line until a station is free.
+    Waiting,
+    /// At the point, taking on fuel and ammunition.
+    Served,
+    /// Full, or the point has nothing more it needs.
+    Done,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -154,6 +171,8 @@ pub struct PlatoonView {
     pub contact_reaction: ContactReaction,
     /// Orders waiting in the queue.
     pub queued: u8,
+    /// Supply point (id in `supply_points`) of a service-station resupply in progress.
+    pub resupply_at: Option<u32>,
 }
 
 /// Control measures (DESIGN.md §8.4; MIL-STD-2525D tactical graphics).

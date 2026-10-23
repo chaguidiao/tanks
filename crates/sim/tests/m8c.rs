@@ -54,6 +54,7 @@ fn a_platoon_drives_to_the_point_is_served_two_at_a_time_and_reports() {
     sim.submit(blue, Command::Resupply { platoon: pl, point: sp.id });
     let radius = 40.0;
     let (mut report, mut most_at_point) = (None, 0);
+    let (mut most_served, mut saw_waiting, mut saw_point) = (0, false, false);
     for s in 0..1200 {
         for e in run(&mut sim, 1.0) {
             if let Event::PlatoonReport { report: PlatoonReport::Resupplied { complete }, .. } = e {
@@ -66,6 +67,11 @@ fn a_platoon_drives_to_the_point_is_served_two_at_a_time_and_reports() {
             .filter(|&k| w.mobility[k].as_ref().unwrap().speed.abs() < 0.5)
             .count();
         most_at_point = most_at_point.max(at);
+        let pic = sim.perceived(blue);
+        let stage = |s: sim::view::ServiceStage| pic.own.iter().filter(|u| u.service == Some(s)).count();
+        most_served = most_served.max(stage(sim::view::ServiceStage::Served));
+        saw_waiting |= stage(sim::view::ServiceStage::Waiting) > 0;
+        saw_point |= pic.platoons[0].resupply_at == Some(sp.id);
         if report.is_some() {
             break;
         }
@@ -73,6 +79,8 @@ fn a_platoon_drives_to_the_point_is_served_two_at_a_time_and_reports() {
     let (s, complete) = report.expect("resupply finishes within 20 minutes");
     assert!(complete, "the point holds enough fuel for four tanks");
     assert!(most_at_point <= 2, "two stations: at most two vehicles served at once ({most_at_point})");
+    assert!(most_served == 2 && saw_waiting && saw_point, "the picture shows the stages ({most_served} served)");
+    assert!(sim.perceived(blue).own.iter().all(|u| u.service.is_none() && u.ammo <= u.full_load));
     let w = sim.truth();
     for k in 0..w.len() {
         let f = w.mobility[k].as_ref().unwrap().fuel_l;

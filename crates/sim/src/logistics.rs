@@ -4,7 +4,7 @@
 //! return). Transfers run at the rates in `data/combat/logistics.ron`, in whole rounds, with no
 //! randomness; stocks are conserved between the point and the vehicles.
 
-use ai::picture::SideId;
+use ai::picture::{ServiceStage, SideId};
 use sim_data::{AmmoDef, LogisticsModel, StowClass, VehicleDef};
 use terrain::hash::StableHasher;
 
@@ -67,11 +67,13 @@ pub struct ServiceState {
     pub credit: [f64; 4],
     /// Where the member was last routed (NaN = not yet).
     pub goal: Vec2,
+    /// For the picture only (follows from the fields above and positions; not hashed).
+    pub stage: ServiceStage,
 }
 
 impl ServiceState {
     pub fn new() -> Self {
-        Self { done: false, short: false, credit: [0.0; 4], goal: [f64::NAN, f64::NAN] }
+        Self { done: false, short: false, credit: [0.0; 4], goal: [f64::NAN, f64::NAN], stage: ServiceStage::ToPoint }
     }
 
     pub(crate) fn hash_into(&self, h: &mut StableHasher) {

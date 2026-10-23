@@ -1430,6 +1430,15 @@ impl Sim {
                     smoke_salvos: sp.smoke_salvos,
                 })
                 .collect();
+            for p in self.platoons.iter().filter(|p| p.side == dst.side) {
+                if let platoon::PlatoonOrder::Resupply { members, .. } = &p.order {
+                    for (&k, st) in p.members.iter().zip(members) {
+                        if let Some(u) = dst.own.iter_mut().find(|u| u.id == self.world.id[k]) {
+                            u.service = Some(st.stage);
+                        }
+                    }
+                }
+            }
             if !self.smoke.is_empty() {
                 let near = |p: Vec2| {
                     dst.own.iter().any(|u| u.condition != Condition::Destroyed && dist(u.pos, p) < SMOKE_VIEW_M)
