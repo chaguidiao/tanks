@@ -31,7 +31,7 @@ jobs:
         run: |
           v="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
           test "${GITHUB_REF_NAME}" = "v${v}" || { echo "tag ${GITHUB_REF_NAME} does not match Cargo version ${v}"; exit 1; }
-      - name: System packages (Linux: raylib build)
+      - name: "System packages (Linux: raylib build)"
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update

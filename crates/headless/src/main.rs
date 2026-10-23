@@ -489,7 +489,10 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
     }
     match a.get("--out") {
         Some(p) => {
-            std::fs::write(p, &csv).map_err(|e| e.to_string())?;
+            if let Some(dir) = std::path::Path::new(p).parent() {
+                std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            }
+            std::fs::write(p, &csv).map_err(|e| format!("{p}: {e}"))?;
             eprintln!("wrote {p}");
             print!("{csv}");
         }

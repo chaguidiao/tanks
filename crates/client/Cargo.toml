@@ -19,3 +19,8 @@ terrain.workspace = true
 terragen.workspace = true
 sim.workspace = true
 ai.workspace = true
+
+# MSVC's linker does not drop raylib-rs wrappers for modules we leave out (audio, models), so the
+# Windows build fails with unresolved externals. Build those modules there; they stay unused.
+[target.'cfg(windows)'.dependencies]
+raylib = { workspace = true, features = ["SUPPORT_MODULE_RAUDIO", "SUPPORT_MODULE_RMODELS"] }
