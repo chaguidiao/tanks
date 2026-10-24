@@ -15,6 +15,9 @@ A reading list grouped by subsystem. ★ = read first. Public sources only — n
 - **ADP 3-90 *Offense and Defense*** (2019) — control measures: checkpoints, routes, phase lines, battle positions.
 - **TC 3-25.26 *Map Reading and Land Navigation*** — grid, contours, military crest, intervisibility.
 
+- **FM 90-10-1 *An Infantryman's Guide to Combat in Built-up Areas*** (1993) — movement inside buildings, ch. 7 weapons effects and wall protection (building classes, `data/terrain/buildings.ron`).
+- **FM 3-21.18 *Foot Marches*** (2017) — rates of march by day and night, road and cross-country (`data/terrain/foot.ron`).
+
 ## Doctrine — Red (OPFOR)
 - ★ **FM 100-2-1 *The Soviet Army: Operations and Tactics*** (1984) — march → pre-battle → battle formations, norms.
 - **FM 100-2-3 *The Soviet Army: Troops, Organization and Equipment*** (1991).

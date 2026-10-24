@@ -1,0 +1,15 @@
+// Foot movement of a dismounted squad for route planning (TODO H9, plan M8B-INFANTRY §5).
+// Planning speeds are sustained march rates, not rushes: a squad moving tactically under
+// observation is slower still, and that is left to the squad AI.
+(
+    road_speed_mps: (value: 1.11, source: "FM 3-21.18 Foot Marches (2017) ch. 1, normal rates of march", confidence: medium,
+        notes: "4 km/h by day on roads, including short halts."),
+    cross_country_speed_mps: (value: 0.67, source: "FM 3-21.18 Foot Marches (2017) ch. 1, normal rates of march", confidence: medium,
+        notes: "2.4 km/h by day cross-country; land cover multiplies this (foot_speed_factor in landcover.ron)."),
+    max_slope: (value: 0.70, source: "estimate", confidence: estimate,
+        notes: "About 40 degrees: a loaded soldier still climbs on foot, slowly; steeper ground needs hands or ropes. Speed falls quadratically towards this limit as for vehicles."),
+    fording_depth_m: (value: 1.0, source: "estimate", confidence: estimate,
+        notes: "About waist deep with weapons and load held clear; deeper water needs a crossing site or swimming aids."),
+    building_interior_speed_mps: (value: 0.3, source: "FM 90-10-1 (1993) ch. 3, movement inside buildings; estimate", confidence: estimate,
+        notes: "Rooms, doors and stairs crossed with security; makes routes avoid buildings unless they end inside one."),
+)

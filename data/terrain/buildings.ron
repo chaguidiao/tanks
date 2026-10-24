@@ -1,0 +1,73 @@
+// Building construction classes (TODO H7, plan M8B-INFANTRY §5). One entry per class.
+// protection = fraction of the casualties an occupant would take in the open that still occur
+// inside. It never reaches zero: occupants must expose themselves at windows and loopholes to
+// observe and fire. FM 90-10-1 (1993) ch. 7 ("Effects of weapons in built-up areas") gives the
+// qualitative ranking used here: wood-frame walls stop little, a brick or block wall of about
+// 20 cm or more stops rifle and machine-gun rounds, reinforced concrete also resists fragments and
+// blast. It gives no casualty multipliers, so every protection value is an estimate.
+[
+    (class: wood,
+        wall_thickness_m: (value: 0.15, source: "estimate", confidence: estimate,
+            notes: "Timber frame with boards and plaster on both faces."),
+        floor_height_m: (value: 3.0, source: "estimate", confidence: estimate,
+            notes: "Storey of about 2.6 m plus a share of a light roof."),
+        protection: (
+            small_arms: (value: 0.8, source: "FM 90-10-1 (1993) ch. 7; estimate", confidence: estimate,
+                notes: "Wood-frame walls are concealment, not cover: rounds pass through."),
+            fragments: (value: 0.6, source: "FM 90-10-1 (1993) ch. 7; estimate", confidence: estimate,
+                notes: "Boards stop low-energy fragments from bursts outside."),
+            blast: (value: 0.8, source: "FM 90-10-1 (1993) ch. 7; estimate", confidence: estimate,
+                notes: "A light structure fails under a direct HE hit and adds debris."),
+        ),
+        squads_per_100m2: (value: 1.0, source: "estimate", confidence: estimate,
+            notes: "One squad holds a house of about 100 m2 of floor (a firing position per room)."),
+    ),
+    (class: masonry,
+        wall_thickness_m: (value: 0.35, source: "estimate", confidence: estimate,
+            notes: "One and a half bricks or a stone wall, common in older European village houses."),
+        floor_height_m: (value: 3.5, source: "estimate", confidence: estimate,
+            notes: "Storey of about 2.8 m plus a pitched roof share; a 4.5-9 m house has one or two floors."),
+        protection: (
+            small_arms: (value: 0.25, source: "FM 90-10-1 (1993) ch. 7; estimate", confidence: estimate,
+                notes: "The wall stops rifle and MG rounds; casualties come through windows and firing ports."),
+            fragments: (value: 0.2, source: "FM 90-10-1 (1993) ch. 7; estimate", confidence: estimate,
+                notes: "Only fragments entering through openings."),
+            blast: (value: 0.5, source: "FM 90-10-1 (1993) ch. 7; estimate", confidence: estimate,
+                notes: "Tank HE and artillery breach brick walls; spall and collapse injure occupants."),
+        ),
+        squads_per_100m2: (value: 1.0, source: "estimate", confidence: estimate,
+            notes: "As wood: a firing position per room."),
+    ),
+    (class: concrete,
+        wall_thickness_m: (value: 0.25, source: "estimate", confidence: estimate,
+            notes: "Reinforced concrete wall or frame with block infill."),
+        floor_height_m: (value: 3.2, source: "estimate", confidence: estimate,
+            notes: "Flat-roofed storey of about 3 m."),
+        protection: (
+            small_arms: (value: 0.2, source: "FM 90-10-1 (1993) ch. 7; estimate", confidence: estimate,
+                notes: "Stops small arms; exposure at openings only."),
+            fragments: (value: 0.15, source: "FM 90-10-1 (1993) ch. 7; estimate", confidence: estimate,
+                notes: "Fragments enter only through openings."),
+            blast: (value: 0.35, source: "FM 90-10-1 (1993) ch. 7; estimate", confidence: estimate,
+                notes: "Reinforced walls resist single HE hits better than brick."),
+        ),
+        squads_per_100m2: (value: 1.0, source: "estimate", confidence: estimate,
+            notes: "As masonry."),
+    ),
+    (class: industrial,
+        wall_thickness_m: (value: 0.1, source: "estimate", confidence: estimate,
+            notes: "Steel frame clad in sheet metal or thin panels."),
+        floor_height_m: (value: 6.0, source: "estimate", confidence: estimate,
+            notes: "Single tall hall; mezzanines ignored."),
+        protection: (
+            small_arms: (value: 0.7, source: "FM 90-10-1 (1993) ch. 7; estimate", confidence: estimate,
+                notes: "Cladding stops little; the frame and machinery give some cover."),
+            fragments: (value: 0.5, source: "FM 90-10-1 (1993) ch. 7; estimate", confidence: estimate,
+                notes: "Cladding stops small fragments."),
+            blast: (value: 0.6, source: "FM 90-10-1 (1993) ch. 7; estimate", confidence: estimate,
+                notes: "Large open volume; cladding blows in rather than spalling."),
+        ),
+        squads_per_100m2: (value: 0.5, source: "estimate", confidence: estimate,
+            notes: "Large open floors offer few firing positions per area."),
+    ),
+]
