@@ -10,6 +10,7 @@ Rules for every item (CLAUDE.md): data in `data/**/*.ron` with source and confid
 Added 2026-10-21. Remove a line when it is decided, and record the decision on the item it belongs to.
 - **I9 dusk attack balance**: keep `mod-dusk-attack` harder at dusk (Blue's passive AI loses about 1 in 3: 5 of 16 seeds) or retune it.
 - **M8c defaults**: `docs/plans/M8C-LOGISTICS.md` §6 (supply points as scenario items, transfer at data rates, re-arm events as their own list, repaired vehicles return). Work continues on these defaults unless changed.
+- **M8b calibration**: the four questions in `docs/plans/M8B-CALIBRATION-NOTES.md` §4 (keep lethality lenient or tighten it; armour and night aiming with the era data or later; detection search-time fix as its own step; fetch primary PDFs before entering `low`/`estimate` values). Gates B20–B25.
 - **Z3 release check**: the 2026-10-21 `v0.1.0` tag never ran (`release.yml` was invalid YAML, fixed in 10dc32b). Decided 2026-10-24: release as `v0.1.1` instead of moving the old tag (workspace version bumped; the release is published, not a draft). Check the published release page in the browser (the session's token cannot read releases; needs Contents: read).
 
 ## Phase map (v1.x = M8, v1.5 = M9, then v2+)
@@ -83,6 +84,15 @@ Scope: abstracted per `docs/plans/M8B-INFANTRY.md` §0. Tank combat is the theme
 - Exit (met 2026-10-24; golden hash unchanged, no behaviour change without squads): IFV platoon dismounts and remounts by player command; tank vs infantry and infantry vs infantry unit tests; infantry detection CSV; golden hash updated deliberately.
 
 - Deferred from M8b-a (2026-10-24), small: squads ignore plans (`SetPlan` on a dismount platoon does nothing; G8), a `PlatoonMove` to a dismount platoon whose squads are all mounted is dropped, no small-arms resupply, ineffective squads do not withdraw on their own, squads do not use the radio delay for their own position (they report like vehicles), no fire-team split.
+
+## M8b-cal — Infantry calibration and era data (research 2026-10-24)
+Notes, sources and proposed values: `docs/plans/M8B-CALIBRATION-NOTES.md`. Nothing implemented yet; waiting on the §4 questions.
+- [ ] B20 Re-source the lethality data: aiming error (Hitchman ORO-T-160 range trials × Rowland combat degradation), chance a hit takes a man out (Beebe & DeBakey, Hitchman), MG/rifle ratio; `estimate` → `low` where the sources support it. Data only (notes §1)
+- [ ] B21 Era data to 2005: dated Blue rifle row with optics (6 → 5 mrad from 2003), Blue PVS-14 and aiming laser, Red 1PN58-class night sight; no thermal weapon sights before 2006. Data only (notes §3)
+- [ ] B22 Body armour per squad, by date: chance a bullet hit takes a man out (Blue 0.6 → 0.52 from 2004) and HE exposure for fragment vests. Small model change (notes §3)
+- [ ] B23 Night aiming: small-arms aiming error grows at night without an aiming aid (×1.6) and less with goggles and an infrared laser (×1.1). Small model change (notes §3)
+- [ ] B24 Infantry detection timing: camouflage factor for halted and dug-in squads (D1, golden hash unaffected); sector search factor for narrow-field sights (D2, model-wide: re-run the detection calibration and balance batches, golden hash changes) (notes §2)
+- [ ] B25 Validation harness for infantry: targets V1–V5 (formula test against Hitchman, rounds per casualty, MG/rifle ratio, share of losses from small arms with artillery, 2005 against 1990 exchange ratio) (notes §1.3)
 
 ## M8b-b — Anti-tank teams
 - [ ] B2 ATGM teams on the existing guided-round model — §13.2
