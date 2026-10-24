@@ -199,6 +199,15 @@ pub enum Command {
         id: u32,
         condition: TriggerCondition,
     },
+    /// Put the squads out (plan M8B-INFANTRY §6, TODO B14): `platoon` is the carrier platoon or
+    /// its dismount platoon. Carriers halt for the ramp drill.
+    Dismount {
+        platoon: PlatoonId,
+    },
+    /// Squads walk back to their carriers and board; the carriers halt and wait.
+    Mount {
+        platoon: PlatoonId,
+    },
 }
 
 impl Command {
@@ -438,6 +447,10 @@ pub enum PlatoonReport {
     LogpacReceived {
         refuel: bool,
     },
+    /// Every carrier of the platoon has put its squads out.
+    Dismounted,
+    /// Every squad of the dismount platoon is aboard.
+    Mounted,
     /// Losses: members remaining.
     Strength {
         remaining: u8,

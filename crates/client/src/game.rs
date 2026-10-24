@@ -3338,6 +3338,8 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                 }
                 PlatoonReport::PlanComplete => format!("{cs}: PLAN COMPLETE."),
                 PlatoonReport::Bounding { section } => format!("{cs}: SECTION {section} BOUNDING."),
+                PlatoonReport::Dismounted => format!("{cs}: DISMOUNTED."),
+                PlatoonReport::Mounted => format!("{cs}: MOUNTED."),
                 PlatoonReport::Strength { remaining, of } => format!("{cs}: {remaining} OF {of} VEHICLES OPERATIONAL."),
             }
         }

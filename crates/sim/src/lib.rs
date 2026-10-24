@@ -746,9 +746,26 @@ impl Sim {
             }
         }
 
-        // 3. Vehicle AI.
+        // 3. Vehicle AI, then squads and ramp drills (which hold a dismounting carrier).
         if tick.is_multiple_of(VEHICLE_AI_EVERY) {
             vehicle::step(&mut self.world, &self.vehicles, &mut events);
+            let doctrines: Vec<_> = self.sides.iter().map(|s| s.doctrine.clone()).collect();
+            let mut ictx = infantry::Ctx {
+                world: &mut self.world,
+                squads: &self.squads,
+                vehicles: &self.vehicles,
+                map: &self.map,
+                td: &self.data.terrain,
+                model: &self.data.infantry,
+                doctrines: &doctrines,
+                pathfinder: &mut self.pathfinder,
+                tick,
+                events: &mut events,
+            };
+            infantry::step(&mut ictx);
+            if tick.is_multiple_of(PLATOON_AI_EVERY) {
+                infantry::platoon_step(&mut self.platoons, &mut ictx);
+            }
         }
 
         // 4–5. Sensors and reports.
@@ -925,6 +942,7 @@ impl Sim {
             &mut events,
         );
 
+        infantry::move_squads(&mut self.world, &self.map, &self.data.infantry, &mut events);
         infantry::follow_carriers(&mut self.world);
 
         // 9. Victory conditions (1 Hz).
@@ -1118,7 +1136,27 @@ impl Sim {
             }
             Command::Move { unit, destination, via, speed_limit_mps } => {
                 let Some(k) = self.world.index_of(*unit) else { return };
-                if self.world.side[k] != c.side || !self.world.can_move(k) {
+                if self.world.side[k] != c.side || !self.world.can_move(k) || self.world.mounted(k) {
+                    return;
+                }
+                if self.world.squad[k].is_some() {
+                    if let Some(pid) = self.world.platoon[k]
+                        && let Some(p) = self.platoon_mut(c.side, pid)
+                    {
+                        p.order = platoon::PlatoonOrder::None;
+                    }
+                    let pos = self.world.transform[k].pos;
+                    if let Some(s) = self.world.squad[k].as_mut() {
+                        s.boarding = None;
+                    }
+                    match infantry::foot_route(&self.map, &mut self.pathfinder, pos, via, *destination) {
+                        Some(route) => {
+                            let length = route.windows(2).map(|w| dist(w[0], w[1])).sum::<f64>();
+                            self.world.set_route(k, route, *speed_limit_mps, None, false, 2.0);
+                            events.push(Event::RoutePlanned { unit: *unit, length_m: length });
+                        }
+                        None => events.push(Event::NoRoute { unit: *unit }),
+                    }
                     return;
                 }
                 let Some(vi) = self.world.vehicle[k] else { return };
@@ -1480,6 +1518,46 @@ impl Sim {
                 p.plan = None;
                 p.held = None;
                 p.withdraw = false;
+                events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
+            }
+            Command::Dismount { platoon } | Command::Mount { platoon } => {
+                let Some(p) = self.platoons.iter().find(|p| p.id == *platoon && p.side == c.side) else { return };
+                // Either platoon of the pair can be addressed.
+                let (carrier_pid, dismount_pids): (Option<PlatoonId>, Vec<PlatoonId>) = if p.dismount {
+                    (p.carrier_platoon, vec![p.id])
+                } else {
+                    let ds = self
+                        .platoons
+                        .iter()
+                        .filter(|d| d.dismount && d.carrier_platoon == Some(p.id))
+                        .map(|d| d.id)
+                        .collect();
+                    (Some(p.id), ds)
+                };
+                let carriers: Vec<usize> = carrier_pid
+                    .and_then(|id| self.platoons.iter().find(|x| x.id == id))
+                    .map(|x| x.members.clone())
+                    .unwrap_or_default();
+                let squads: Vec<usize> = self
+                    .platoons
+                    .iter()
+                    .filter(|x| dismount_pids.contains(&x.id))
+                    .flat_map(|x| x.members.clone())
+                    .collect();
+                let acted = if matches!(c.cmd, Command::Dismount { .. }) {
+                    infantry::order_dismount(&mut self.world, &self.vehicles, &carriers)
+                } else {
+                    !infantry::order_mount(&mut self.world, &self.vehicles, &squads).is_empty()
+                };
+                if !acted {
+                    return;
+                }
+                for pid in carrier_pid.into_iter().chain(dismount_pids) {
+                    if let Some(x) = self.platoon_mut(c.side, pid) {
+                        x.halt();
+                        x.plan = None;
+                    }
+                }
                 events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
             }
             Command::OccupyPosition { platoon, centre, radius_m, facing, kind } => {

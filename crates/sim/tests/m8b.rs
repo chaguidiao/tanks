@@ -126,3 +126,101 @@ fn dismount_platoons_name_their_carrier_platoon() {
     assert!(views.iter().any(|p| p.callsign == "1" && p.id == PlatoonId(1)));
     assert!(views.iter().any(|p| p.callsign == "1-D"));
 }
+
+fn reports(ev: &[Event], want: &sim::PlatoonReport) -> bool {
+    ev.iter().any(|e| matches!(e, Event::PlatoonReport { report, .. } if report == want))
+}
+
+#[test]
+fn an_ifv_platoon_dismounts_and_remounts_within_the_drill_times() {
+    // TODO B1/B14 exit: dismount and remount by player command. M2: 20 s ramp drill, 30 s to
+    // mount (data), plus the walk between the ramp and the security positions 20 m out.
+    let mut sim = mech_sim();
+    sim.submit_immediate(BLUE, Command::Dismount { platoon: PlatoonId(1) });
+    let ev = run(&mut sim, 15.0);
+    assert!(sim.truth().mounted(2) && sim.truth().mounted(3), "still in the ramp drill at 15 s");
+    assert!(!reports(&ev, &sim::PlatoonReport::Dismounted));
+    let ev = run(&mut sim, 10.0);
+    assert!(reports(&ev, &sim::PlatoonReport::Dismounted), "dismounted by 25 s");
+    run(&mut sim, 60.0);
+    let w = sim.truth();
+    for (sq, c) in [(2, 0), (3, 1)] {
+        assert!(!w.mounted(sq));
+        let d = dist(w.transform[sq].pos, w.transform[c].pos);
+        assert!((15.0..=26.0).contains(&d), "squad {sq} in security {d:.1} m from its carrier");
+        let s = w.squad[sq].as_ref().unwrap();
+        assert_eq!(s.posture, sim::world::Posture::Halted);
+    }
+    // Remount: walk 20 m back (about 30 s at 2.4 km/h) and the 30 s drill.
+    sim.submit_immediate(BLUE, Command::Mount { platoon: PlatoonId(2) });
+    let ev = run(&mut sim, 90.0);
+    assert!(sim.truth().mounted(2) && sim.truth().mounted(3), "both squads back aboard in 90 s");
+    assert!(reports(&ev, &sim::PlatoonReport::Mounted));
+    let view = sim.perceived(BLUE).own.iter().find(|u| u.callsign == "1-2A").unwrap().squad.clone().unwrap();
+    assert_eq!(view.posture, SquadPosture::Mounted);
+}
+
+#[test]
+fn the_ramp_drill_waits_for_the_carrier_to_stop() {
+    let mut sim = mech_sim();
+    let c = sim.truth().id[0];
+    sim.submit_immediate(
+        BLUE,
+        Command::Move { unit: c, destination: [600.0, 2400.0], via: vec![], speed_limit_mps: None },
+    );
+    run(&mut sim, 20.0);
+    let v0 = sim.truth().mobility[0].as_ref().unwrap().speed;
+    assert!(v0 > 5.0, "moving at {v0:.1} m/s");
+    sim.submit_immediate(BLUE, Command::Dismount { platoon: PlatoonId(1) });
+    run(&mut sim, 22.0);
+    // Braking from speed takes a few seconds, so the 20 s drill is not over yet.
+    assert!(sim.truth().mounted(2), "the drill counts only once stopped");
+    run(&mut sim, 10.0);
+    assert!(!sim.truth().mounted(2));
+    assert!(sim.truth().mobility[0].as_ref().unwrap().speed < 0.5, "the carrier stays halted");
+}
+
+#[test]
+fn a_dismount_platoon_moves_on_line_at_walking_pace() {
+    let mut sim = mech_sim();
+    sim.submit_immediate(BLUE, Command::Dismount { platoon: PlatoonId(1) });
+    run(&mut sim, 60.0);
+    let dest = [650.0, 700.0];
+    sim.submit_immediate(
+        BLUE,
+        Command::PlatoonMove {
+            platoon: PlatoonId(2),
+            destination: dest,
+            via: vec![],
+            formation: None,
+            technique: sim_data::Technique::Traveling,
+            speed_limit_mps: None,
+        },
+    );
+    let ev = run(&mut sim, 60.0);
+    let w = sim.truth();
+    let v = w.squad[2].as_ref().unwrap().speed;
+    // FM 3-21.18: 2.4 km/h cross-country march rate on grassland.
+    assert!((v - 0.67).abs() < 0.05, "walking at {v:.2} m/s");
+    assert_eq!(w.squad[2].as_ref().unwrap().posture, sim::world::Posture::Moving);
+    assert!(!reports(&ev, &sim::PlatoonReport::SetAt { pos: dest }));
+    let ev = run(&mut sim, 600.0);
+    assert!(reports(&ev, &sim::PlatoonReport::SetAt { pos: dest }), "the platoon reports set");
+    let w = sim.truth();
+    let gap = dist(w.transform[2].pos, w.transform[3].pos);
+    assert!((40.0..=60.0).contains(&gap), "squads 50 m apart on line ({gap:.0} m)");
+    assert!(dist(w.transform[2].pos, dest) < 40.0);
+}
+
+#[test]
+fn a_halted_squad_digs_in_after_the_dig_in_time() {
+    let ds = data();
+    let m = map(&ds, 100, 100, "grassland", |_, _| 0.0);
+    let blue = vec![squad("A", "rifle_squad_b", [200.0, 200.0], Some("1-D"), None)];
+    let mut sim = Sim::new(&scenario(36000, blue, vec![]), ds, m).unwrap();
+    run(&mut sim, 60.0);
+    assert_eq!(sim.truth().squad[0].as_ref().unwrap().posture, sim::world::Posture::Halted);
+    run(&mut sim, 1200.0);
+    let v = sim.perceived(BLUE).own[0].squad.clone().unwrap();
+    assert_eq!(v.posture, SquadPosture::DugIn, "20 minutes halted (data: dig_in_s)");
+}
