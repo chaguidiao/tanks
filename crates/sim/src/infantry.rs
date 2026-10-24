@@ -157,7 +157,13 @@ fn ramp_of(world: &World, c: usize) -> crate::Vec2 {
 
 /// Walk squads along their routes (every tick): the planning speed of the foot raster, none
 /// while pinned (plan §6: follow a foot route).
-pub fn move_squads(world: &mut World, map: &terrain::BakedMap, model: &InfantryModel, events: &mut Vec<Event>) {
+pub fn move_squads(
+    world: &mut World,
+    map: &terrain::BakedMap,
+    td: &sim_data::TerrainData,
+    model: &InfantryModel,
+    events: &mut Vec<Event>,
+) {
     let Some(layer) = foot_layer(map) else { return };
     let cell = map.manifest.cell_size_m;
     let pinned = model.pinned_above.get();
@@ -220,7 +226,30 @@ pub fn move_squads(world: &mut World, map: &terrain::BakedMap, model: &InfantryM
         if let Some(s) = world.squad[k].as_mut() {
             s.speed = if moved { v } else { 0.0 };
         }
+        if arrived {
+            occupy_here(world, map, td, k);
+        }
     }
+}
+
+/// A squad that ends a move inside a building occupies it, if there is room (TODO B7; capacity
+/// from the building class and floor area, `TerrainData::squad_capacity`).
+pub fn occupy_here(world: &mut World, map: &terrain::BakedMap, td: &sim_data::TerrainData, k: usize) -> bool {
+    let pos = world.transform[k].pos;
+    let Some(b) = map.building_at(pos[0], pos[1]) else { return false };
+    let cap = td.squad_capacity(b.class, b.footprint_m2 as f64, b.height_m as f64) as usize;
+    let inside = (0..world.len())
+        .filter(|&q| q != k && world.alive(q))
+        .filter(|&q| world.squad[q].as_ref().is_some_and(|s| s.in_building == Some(b.id)))
+        .count();
+    if inside >= cap {
+        return false;
+    }
+    if let Some(s) = world.squad[k].as_mut() {
+        s.in_building = Some(b.id);
+        s.posture = Posture::DugIn;
+    }
+    true
 }
 
 /// Squad AI and carrier drills (5 Hz, after the vehicle AI so a carrier in a ramp drill is held).
@@ -550,7 +579,7 @@ pub fn platoon_step(platoons: &mut [crate::platoon::Platoon], ctx: &mut Ctx) {
             .iter()
             .copied()
             .filter(|&k| ctx.world.can_move(k) && !ctx.world.mounted(k))
-            .filter(|&k| ctx.world.squad[k].as_ref().is_some_and(|s| s.boarding.is_none()))
+            .filter(|&k| ctx.world.squad[k].as_ref().is_some_and(|s| s.boarding.is_none() && !s.ineffective))
             .collect();
         if movers.is_empty() {
             continue;

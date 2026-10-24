@@ -217,6 +217,8 @@ pub struct Ctx<'a> {
     pub infantry: &'a sim_data::InfantryModel,
     /// Per side: squad strength fraction below which it is combat-ineffective.
     pub ineffective: &'a [f64],
+    pub map: &'a terrain::BakedMap,
+    pub td: &'a sim_data::TerrainData,
 }
 
 /// One tick of every battery. Returns (shooter side, position) of vehicles destroyed by bursts.
@@ -322,8 +324,24 @@ pub fn step(batteries: &mut [Battery], ctx: &mut Ctx) -> Vec<(SideId, Vec2)> {
     destroyed
 }
 
-/// An HE burst: suppression and damage to every vehicle nearby, whatever its side.
+/// An HE burst: suppression and damage to every vehicle nearby, whatever its side, and
+/// casualties among squads on the ground (plan M8B-INFANTRY §4).
 fn burst(ctx: &mut Ctx, side: SideId, at: Vec2) -> Vec<(SideId, Vec2)> {
+    let lethal = ctx.model.effects.personnel_lethal_radius_m.get();
+    if ctx.world.squad.iter().any(|s| s.is_some()) {
+        crate::smallarms::he_burst(
+            ctx.world,
+            ctx.map,
+            ctx.td,
+            ctx.infantry,
+            ctx.ineffective,
+            at,
+            lethal,
+            None,
+            ctx.rng,
+            ctx.events,
+        );
+    }
     let (eff, sup) = (&ctx.model.effects, &ctx.model.suppression);
     let reach = eff.near_radius_m.get().max(sup.burst_radius_m.get());
     let mut destroyed = Vec::new();
@@ -336,7 +354,7 @@ fn burst(ctx: &mut Ctx, side: SideId, at: Vec2) -> Vec<(SideId, Vec2)> {
         if d > reach {
             continue;
         }
-        if d < sup.burst_radius_m.get() {
+        if d < sup.burst_radius_m.get() && ctx.world.squad[k].is_none() {
             let s = &mut ctx.world.suppression[k];
             *s = (*s + sup.burst_peak.get() * (1.0 - d / sup.burst_radius_m.get())).min(1.0);
         }

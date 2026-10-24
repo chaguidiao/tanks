@@ -74,7 +74,7 @@
         rounds_per_burst: (value: 10.0, source: "FM 3-22.68 (2003): coax bursts of about 10-20 rounds; estimate", confidence: low),
         burst_interval_s: (value: 5.0, source: "FM 3-22.68 (2003): sustained fire about 100 rounds/min", confidence: low),
         max_range_m: (value: 900.0, source: "FM 3-22.68 (2003): 7.62 mm tracer burnout about 900 m", confidence: medium),
-        dispersion_mrad: (value: 2.0, source: "estimate", confidence: estimate, notes: "Rigid mount laid through the gunner's sight; beaten zone of the burst dominates."),
+        dispersion_mrad: (value: 2.5, source: "estimate", confidence: estimate, notes: "Rigid mount laid through the gunner's sight; beaten zone of the burst dominates."),
         bursts: 220),  // Hunnicutt, Bradley (1999): 2,200 rounds of 7.62 mm; bursts of 10
     troops: (capacity_men: 6,
         dismount_s: (value: 20.0, source: "Hunnicutt, Bradley (1999): power ramp; estimate", confidence: estimate, notes: "Halt, open, squad out and into its security posture."),

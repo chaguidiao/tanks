@@ -50,6 +50,9 @@ pub struct GunState {
     pub bias: (f64, f64),
     /// Crew casualties slow every action.
     pub crew_loss: u8,
+    /// Infantry target the gunner engages with the coax this tick (set by `step`, read by
+    /// `smallarms::step`).
+    pub coax_target: Option<usize>,
 }
 
 /// A smoke fire mission (point target), FM 3-11.50.
@@ -73,6 +76,7 @@ impl GunState {
             rounds_at_target: 0,
             bias: (0.0, 0.0),
             crew_loss: 0,
+            coax_target: None,
         }
     }
 
@@ -409,6 +413,8 @@ pub enum Effect {
     Shot { target: usize, outcome: ShotOutcome },
     /// Smoke shell: `clouds` clouds of smoke kind `kind` at the impact point.
     Smoke { kind: usize, clouds: u32 },
+    /// HE fired at infantry: bursts at the impact point (plan M8B-INFANTRY §4).
+    Burst { lethal_radius_m: f64 },
 }
 
 /// A round in flight.
@@ -465,8 +471,10 @@ pub fn apply_damage(world: &mut World, t: usize, kill: Option<KillKind>, sights:
 }
 
 /// Pick a target from the crew's own tracks: assigned target if engageable, else keep the
-/// current one, else the nearest engageable enemy.
-fn choose_target(world: &World, k: usize, max_range: f64, tick: u64) -> Option<usize> {
+/// current one, else by threat (ATP 3-20.15 ch. 4, engagement priorities): infantry inside
+/// `close_infantry` (anti-tank weapons at close range) first, then the nearest vehicle, then
+/// the nearest infantry.
+fn choose_target(world: &World, k: usize, max_range: f64, close_infantry: f64, tick: u64) -> Option<usize> {
     let s = world.sensors[k].as_ref()?;
     let g = world.gun[k].as_ref()?;
     let min_level = match world.weapons[k] {
@@ -481,7 +489,7 @@ fn choose_target(world: &World, k: usize, max_range: f64, tick: u64) -> Option<u
                 && tr.visible_fraction > 0.0
                 && tr.range_m <= max_range
         }) && world.alive(t)
-            && world.vehicle[t].is_some()
+            && !world.mounted(t)
     };
     if let Some(a) = g.assigned
         && ok(a)
@@ -493,11 +501,41 @@ fn choose_target(world: &World, k: usize, max_range: f64, tick: u64) -> Option<u
     {
         return Some(cur);
     }
-    s.tracks
-        .iter()
-        .filter(|tr| ok(tr.target))
-        .min_by(|a, b| a.range_m.total_cmp(&b.range_m).then(a.target.cmp(&b.target)))
-        .map(|tr| tr.target)
+    let nearest = |pred: &dyn Fn(&crate::world::LocalTrack) -> bool| {
+        s.tracks
+            .iter()
+            .filter(|tr| ok(tr.target) && pred(tr))
+            .min_by(|a, b| a.range_m.total_cmp(&b.range_m).then(a.target.cmp(&b.target)))
+            .map(|tr| tr.target)
+    };
+    let squad = |tr: &crate::world::LocalTrack| world.squad[tr.target].is_some();
+    nearest(&|tr| squad(tr) && tr.range_m <= close_infantry)
+        .or_else(|| nearest(&|tr| !squad(tr)))
+        .or_else(|| nearest(&squad))
+}
+
+/// Main-gun round for infantry: the commander's choice if it bursts, else the first stocked round
+/// meant for infantry with a lethal radius (FM 3-20.12: HE or multipurpose at troops in the open).
+pub fn select_infantry_round(g: &GunState, loadout: &[usize], ammo: &[AmmoDef], range: f64) -> Option<usize> {
+    let usable = |li: usize| {
+        let a = &ammo[loadout[li]];
+        g.stock[li] > 0 && a.lethal_radius_m.is_some() && a.max_range_m.as_ref().is_none_or(|m| range <= m.get())
+    };
+    if let Some(kind) = g.selected
+        && let Some(li) = (0..loadout.len()).find(|&li| usable(li) && ammo[loadout[li]].kind == kind)
+    {
+        return Some(li);
+    }
+    (0..loadout.len())
+        .find(|&li| usable(li) && ammo[loadout[li]].preferred_vs.contains(&sim_data::TargetClass::Infantry))
+}
+
+/// What the gunners need to know about infantry targets.
+pub struct InfantryGunnery<'a> {
+    /// Per side: infantry inside this range comes before vehicles (doctrine).
+    pub close_infantry: &'a [f64],
+    pub map: &'a terrain::BakedMap,
+    pub td: &'a sim_data::TerrainData,
 }
 
 pub struct FireEvent {
@@ -516,6 +554,7 @@ pub fn step(
     dmg: &DamageTables,
     smoke: &SmokeModel,
     engage_range: &[f64],
+    inf: &InfantryGunnery,
     slow_gain: f64,
     tick: u64,
     rng: &mut ChaCha8Rng,
@@ -533,13 +572,14 @@ pub fn step(
             }
             continue;
         }
-        let max_range = def.armament.max_engagement_range_m.get().min(engage_range[world.side[k].0 as usize]);
+        let side = world.side[k].0 as usize;
+        let max_range = def.armament.max_engagement_range_m.get().min(engage_range[side]);
         let target = if tick.is_multiple_of(crate::VEHICLE_AI_EVERY)
             || world.gun[k].as_ref().is_some_and(|g| g.target.is_none())
         {
-            choose_target(world, k, max_range, tick)
+            choose_target(world, k, max_range, inf.close_infantry[side], tick)
         } else {
-            world.gun[k].as_ref().and_then(|g| g.target).filter(|&t| world.alive(t))
+            world.gun[k].as_ref().and_then(|g| g.target).filter(|&t| world.alive(t) && !world.mounted(t))
         };
         let pos = world.transform[k].pos;
         let heading = world.transform[k].heading;
@@ -555,7 +595,23 @@ pub fn step(
             (t, tp, r, br)
         });
         let u_lay = uniform(rng);
+        // Infantry: the coax inside its reach unless the men are behind walls it cannot get
+        // through, and nothing better (HE) is loaded; otherwise the main gun with HE.
+        let coax = target.filter(|&t| world.squad[t].is_some()).and_then(|t| {
+            let c = def.coax.as_ref()?;
+            let stocked = world.coax[k].as_ref().is_some_and(|s| s.bursts > 0);
+            let r = dist(world.transform[k].pos, world.transform[t].pos);
+            let walls = world.squad[t]
+                .as_ref()
+                .and_then(|s| s.in_building)
+                .and_then(|id| inf.map.building(id))
+                .is_some_and(|b| inf.td.protection(b.class, sim_data::BuildingThreat::SmallArms) < 0.5);
+            let g = world.gun[k].as_ref()?;
+            let he = select_infantry_round(g, &loadouts[vi], ammo, r).is_some();
+            (stocked && r <= c.max_range_m.get() && !(walls && he)).then_some(t)
+        });
         let g = world.gun[k].as_mut().expect("checked");
+        g.coax_target = coax;
         if g.target != target {
             g.target = target;
             g.rounds_at_target = 0;
@@ -585,7 +641,7 @@ pub fn step(
             Phase::Reloading { .. } => Phase::Laying { left: 1.0 * slow }, // re-lay / adjust
             Phase::Lasing { .. } | Phase::Ready => Phase::Ready,
         };
-        if g.phase != Phase::Ready || g.rounds() == 0 {
+        if g.phase != Phase::Ready || g.rounds() == 0 || g.coax_target.is_some() {
             continue;
         }
         // Fire.
@@ -593,7 +649,13 @@ pub fn step(
         if visible <= 0.0 {
             continue;
         }
-        let tdef = &vehicles[world.vehicle[t].expect("vehicle")];
+        let Some(tvi) = world.vehicle[t] else {
+            if let Some(f) = fire_he_at_infantry(world, k, def, &loadouts[vi], ammo, t, r, br, slow, tick, rng) {
+                fired.push(f);
+            }
+            continue;
+        };
+        let tdef = &vehicles[tvi];
         let tt = world.transform[t];
         let tspeed = world.mobility[t].as_ref().map_or(0.0, |m| m.speed);
         let rel = tt.heading - br;
@@ -637,6 +699,69 @@ pub fn step(
         });
     }
     fired
+}
+
+/// Main-gun HE at a squad (plan M8B-INFANTRY §4): the round lands at the aim point displaced by
+/// the error budget (lateral error as is, vertical error stretched along the line of fire by
+/// the flat descent angle) and bursts there.
+#[allow(clippy::too_many_arguments)]
+fn fire_he_at_infantry(
+    world: &mut World,
+    k: usize,
+    def: &VehicleDef,
+    loadout: &[usize],
+    ammo: &[AmmoDef],
+    t: usize,
+    r: f64,
+    br: f64,
+    slow: f64,
+    tick: u64,
+    rng: &mut ChaCha8Rng,
+) -> Option<FireEvent> {
+    let pos = world.transform[k].pos;
+    let tp = world.transform[t].pos;
+    let speed = world.mobility[k].as_ref().map_or(0.0, |m| m.speed);
+    let g = world.gun[k].as_mut().expect("checked");
+    let li = select_infantry_round(g, loadout, ammo, r)?;
+    let a = &ammo[loadout[li]];
+    let geo = ShotGeometry {
+        range: r,
+        visible: 1.0,
+        bearing_to_shooter: crate::wrap(br + std::f64::consts::PI),
+        target_heading: 0.0,
+        crossing_speed: 0.0,
+        shooter_moving: speed > 1.0,
+    };
+    if g.rounds_at_target == 0 {
+        let bs = bias_sigma_mrad(def, a, r);
+        g.bias = (gauss(rng) * bs, gauss(rng) * bs * 0.5);
+    } else {
+        g.bias = (g.bias.0 * 0.4, g.bias.1 * 0.4);
+    }
+    g.rounds_at_target += 1;
+    g.stock[li] -= 1;
+    let reload = a.reload_s.as_ref().map_or(def.armament.reload_s.get(), |x| x.get());
+    g.phase = Phase::Reloading { left: reload * slow };
+    let (sv, sh) = random_sigma_mrad(def, a, &geo);
+    let ev = (g.bias.0 + gauss(rng) * sv) * r / 1000.0;
+    let eh = (g.bias.1 + gauss(rng) * sh) * r / 1000.0;
+    // Descent angle of a flat trajectory is about twice the superelevation; at least 0.05 rad.
+    let descent = (2.0 * drop_at(a, r) / r).max(0.05);
+    let along = ev / descent;
+    let (ux, uy) = (libm::sin(br), libm::cos(br));
+    let to = [tp[0] + ux * along + uy * eh, tp[1] + uy * along - ux * eh];
+    world.last_fired[k] = Some(tick);
+    let lethal = a.lethal_radius_m.as_ref().map_or(0.0, |x| x.get());
+    Some(FireEvent {
+        shooter: k,
+        projectile: Projectile {
+            impact_tick: tick + (time_of_flight(a, r) / DT).ceil() as u64,
+            shooter: k,
+            from: pos,
+            to,
+            effect: Effect::Burst { lethal_radius_m: lethal },
+        },
+    })
 }
 
 /// Fire mission with smoke shells: slew onto the aiming point, fire when the gun is ready.

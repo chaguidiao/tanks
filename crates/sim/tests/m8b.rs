@@ -305,3 +305,215 @@ fn a_mounted_squad_is_neither_seen_nor_seeing() {
     assert!(w.sensors[2].as_ref().unwrap().track(1).is_none(), "but not the squad inside");
     assert!(w.sensors[1].as_ref().unwrap().tracks.is_empty(), "the squad inside sees nothing");
 }
+
+// --- fire against infantry (plan §4, steps 9–11) ---------------------------------------------
+
+fn squad_strength(sim: &Sim, k: usize) -> u8 {
+    sim.truth().squad[k].as_ref().unwrap().strength
+}
+
+/// Blue tanks at y = 200 facing a Red squad `range` m north (halted, or in a masonry house).
+fn tank_vs_squad(tanks: usize, range: f64, in_house: bool, seed: u64) -> Sim {
+    let ds = data();
+    let y = 200.0 + range;
+    let m = map_with(&ds, 300, 400, "road", |p| {
+        p.features.buildings.push(building(1, 594.0, y - 6.0, 606.0, y + 6.0, sim_data::BuildingClass::Masonry));
+    });
+    let blue = (0..tanks)
+        .map(|i| unit(&format!("1-{}", i + 1), "bulwark_a1", [580.0 + i as f64 * 40.0, 200.0], 0.0, None))
+        .collect();
+    // On the ground beside the house, or (after occupying) inside it.
+    let at = if in_house { [600.0, y - 14.0] } else { [560.0, y] };
+    let red = vec![squad("A", "mr_squad", at, Some("2-D"), None)];
+    let mut sc = scenario(10 * 3600, blue, red);
+    sc.seed = seed;
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    sim.set_ai_enabled(SideId(1), false);
+    let k = tanks;
+    if in_house {
+        let sq = sim.truth().id[k];
+        sim.submit_immediate(SideId(1), Command::OccupyBuilding { to: sim::Addressee::Unit(sq), building: 1 });
+        // Hold fire on the way in and until the tanks watch the house.
+        for i in 0..tanks {
+            let to = sim::Addressee::Unit(sim.truth().id[i]);
+            sim.submit_immediate(BLUE, Command::WeaponsControl { to, status: ai::picture::WeaponsStatus::Hold });
+        }
+        run(&mut sim, 60.0);
+        assert_eq!(sim.truth().squad[k].as_ref().unwrap().in_building, Some(1), "the squad occupied the house");
+        for i in 0..tanks {
+            let to = sim::Addressee::Unit(sim.truth().id[i]);
+            sim.submit_immediate(BLUE, Command::WeaponsControl { to, status: ai::picture::WeaponsStatus::Free });
+        }
+    }
+    sim
+}
+
+#[test]
+fn a_tank_platoon_defeats_a_squad_in_the_open_with_its_coax() {
+    let mut sim = tank_vs_squad(4, 600.0, false, 7);
+    let mut volleys = 0;
+    for _ in 0..(300 * sim::TICK_HZ) {
+        for e in sim.step() {
+            if matches!(e, Event::Volley { unit, .. } if unit.0 <= 4) {
+                volleys += 1;
+            }
+        }
+    }
+    let s = sim.truth().squad[4].as_ref().unwrap();
+    assert!(volleys > 0, "the tanks used their coax");
+    assert!(s.ineffective, "the squad is combat-ineffective after 5 minutes ({}/{})", s.strength, s.men);
+    let main_gun: u32 = sim.truth().gun[0].as_ref().unwrap().stock.iter().sum();
+    let full: u32 = sim.truth().gun[0].as_ref().unwrap().capacity.iter().sum();
+    assert_eq!(main_gun, full, "no main-gun rounds spent on infantry inside coax range");
+}
+
+#[test]
+fn tanks_cannot_clear_a_masonry_house_without_he() {
+    // Coax only (HE removed): the walls stop most of it.
+    let mut sim = tank_vs_squad(2, 500.0, true, 3);
+    for i in 0..2 {
+        let g = sim.truth_mut().gun[i].as_mut().unwrap();
+        g.stock = g.stock.iter().map(|_| 0).collect();
+        g.stock[1] = 10; // sabot only
+    }
+    run(&mut sim, 240.0);
+    let s = sim.truth().squad[2].as_ref().unwrap();
+    assert!(!s.ineffective, "coax and sabot do not clear the house in 4 minutes ({}/{})", s.strength, s.men);
+    // With multipurpose HEAT the same house is cleared.
+    let mut sim = tank_vs_squad(2, 500.0, true, 3);
+    run(&mut sim, 240.0);
+    let s = sim.truth().squad[2].as_ref().unwrap();
+    assert!(s.ineffective, "HEAT-MP clears the house ({}/{})", s.strength, s.men);
+    let spent = sim.truth().gun[0].as_ref().unwrap();
+    assert!(spent.stock.iter().sum::<u32>() < spent.capacity.iter().sum::<u32>(), "main-gun rounds were fired");
+}
+
+/// A Blue squad against a Red squad 250 m away (in the open or in a masonry house); Red holds
+/// fire when `red_fires` is false. Returns (Blue lost, Red lost, volleys by Blue, by Red).
+fn squad_duel(in_house: bool, red_fires: bool, seed: u64) -> (u32, u32, u32, u32) {
+    let ds = data();
+    let m = map_with(&ds, 300, 300, "road", |p| {
+        p.features.buildings.push(building(1, 594.0, 444.0, 606.0, 456.0, sim_data::BuildingClass::Masonry));
+    });
+    let blue = vec![squad("B", "rifle_squad_b", [600.0, 200.0], Some("1-D"), None)];
+    let red = vec![squad("A", "mr_squad", if in_house { [600.0, 436.0] } else { [560.0, 450.0] }, Some("2-D"), None)];
+    let mut sc = scenario(10 * 3600, blue, red);
+    sc.seed = seed;
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    let (b, r) = (sim::Addressee::Unit(sim.truth().id[0]), sim::Addressee::Unit(sim.truth().id[1]));
+    if in_house {
+        sim.submit_immediate(SideId(1), Command::OccupyBuilding { to: r, building: 1 });
+        sim.submit_immediate(BLUE, Command::WeaponsControl { to: b, status: ai::picture::WeaponsStatus::Hold });
+    }
+    if !red_fires {
+        sim.submit_immediate(SideId(1), Command::WeaponsControl { to: r, status: ai::picture::WeaponsStatus::Hold });
+    }
+    if in_house {
+        run(&mut sim, 40.0);
+        assert_eq!(sim.truth().squad[1].as_ref().unwrap().in_building, Some(1));
+        sim.submit_immediate(BLUE, Command::WeaponsControl { to: b, status: ai::picture::WeaponsStatus::Free });
+    }
+    let (mut vb, mut vr) = (0, 0);
+    for _ in 0..(300 * sim::TICK_HZ) {
+        for e in sim.step() {
+            if let Event::Volley { unit, .. } = e {
+                if unit.0 == 1 { vb += 1 } else { vr += 1 }
+            }
+        }
+    }
+    ((6 - squad_strength(&sim, 0)) as u32, (7 - squad_strength(&sim, 1)) as u32, vb, vr)
+}
+
+#[test]
+fn squads_trade_fire_and_take_losses() {
+    let (mut lost, mut vb, mut vr) = (0, 0, 0);
+    for seed in 1..=3 {
+        let (b, r, x, y) = squad_duel(false, true, seed);
+        lost += b + r;
+        vb += x;
+        vr += y;
+    }
+    assert!(vb > 0 && vr > 0, "both squads fire ({vb} / {vr} volleys)");
+    assert!(lost > 0, "a 5-minute firefight at 250 m costs men");
+}
+
+#[test]
+fn a_squad_in_a_house_outlasts_one_in_the_open() {
+    // The same Blue squad fires at a Red squad that does not answer: in a masonry house the walls
+    // and windows cut Red's losses (FM 90-10-1 ch. 7; data: protection, in_building signature).
+    let losses = |in_house: bool| (1..=4).map(|seed| squad_duel(in_house, false, seed).1).sum::<u32>();
+    let (open, house) = (losses(false), losses(true));
+    assert!(open >= 4, "squads in the open take losses ({open})");
+    assert!(house * 3 <= open, "the house protects: {house} lost inside vs {open} in the open");
+}
+
+#[test]
+fn machine_gun_fire_pins_a_squad() {
+    let mut sim = tank_vs_squad(1, 500.0, false, 11);
+    assert!(sim.truth().squad[1].is_some());
+    let mut peak: f64 = 0.0;
+    for _ in 0..(90 * sim::TICK_HZ) {
+        sim.step();
+        peak = peak.max(sim.truth().suppression[1]);
+    }
+    let pinned = data().infantry.pinned_above.get();
+    assert!(peak > pinned, "coax bursts pin the squad (peak suppression {peak:.2})");
+}
+
+#[test]
+fn a_building_holds_only_as_many_squads_as_its_floor_area_allows() {
+    let ds = data();
+    // 9 × 7 m, one floor: 63 m² → one squad (TerrainData::squad_capacity).
+    let m = map_with(&ds, 200, 200, "grassland", |p| {
+        p.features.buildings.push(building(1, 396.0, 396.0, 405.0, 403.0, sim_data::BuildingClass::Masonry));
+    });
+    let blue = vec![
+        squad("A", "rifle_squad_b", [300.0, 300.0], Some("1-D"), None),
+        squad("B", "rifle_squad_b", [340.0, 300.0], Some("1-D"), None),
+    ];
+    let mut sim = Sim::new(&scenario(36000, blue, vec![]), ds, m).unwrap();
+    sim.submit_immediate(BLUE, Command::OccupyBuilding { to: sim::Addressee::Platoon(PlatoonId(1)), building: 1 });
+    run(&mut sim, 300.0);
+    let inside = (0..2).filter(|&k| sim.truth().squad[k].as_ref().unwrap().in_building == Some(1)).count();
+    assert_eq!(inside, 1);
+    let view = sim.perceived(BLUE).own.iter().find(|u| u.squad.as_ref().is_some_and(|s| s.building.is_some())).cloned();
+    assert_eq!(view.unwrap().squad.unwrap().posture, SquadPosture::InBuilding);
+}
+
+#[test]
+fn a_squad_under_fire_in_the_open_runs_for_cover() {
+    // ATP 3-21.8 battle drill 2: a squad walking along open ground is fired on by a coax and goes
+    // to the wood 30 m north of its route.
+    let ds = data();
+    let forest = ds.terrain.landcover_id("deciduous_forest").unwrap();
+    let m = map_with(&ds, 300, 300, "grassland", |p| {
+        for j in 0..300 {
+            for i in 0..300 {
+                if (j as f64 + 0.5) * 4.0 >= 730.0 {
+                    p.landcover.set(i, j, forest);
+                }
+            }
+        }
+    });
+    let blue = vec![squad("A", "rifle_squad_b", [300.0, 700.0], Some("1-D"), None)];
+    let red = vec![unit("211", "kurgan_b", [500.0, 150.0], 0.0, None)];
+    let mut sim = Sim::new(&scenario(10 * 3600, blue, red), ds, m).unwrap();
+    sim.set_ai_enabled(SideId(1), false);
+    let sq = sim.truth().id[0];
+    sim.submit_immediate(
+        BLUE,
+        Command::Move { unit: sq, destination: [900.0, 700.0], via: vec![], speed_limit_mps: None },
+    );
+    let mut reacted = false;
+    for _ in 0..(120 * sim::TICK_HZ) {
+        sim.step();
+        if sim.truth().transform[0].pos[1] >= 728.0 {
+            reacted = true;
+            break;
+        }
+    }
+    // It may be pinned on the way (suppressed squads do not move), but it has left its route.
+    let at = sim.truth().transform[0].pos;
+    assert!(reacted || at[1] > 705.0, "the squad turned for the wood; at {at:?}");
+    assert!(sim.truth().ai[0].as_ref().unwrap().held.is_some(), "its move is held for later");
+}

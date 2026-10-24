@@ -88,7 +88,7 @@
         rounds_per_burst: (value: 10.0, source: "FM 3-22.68 (2003): coax bursts of about 10-20 rounds; estimate", confidence: low),
         burst_interval_s: (value: 5.0, source: "FM 3-22.68 (2003): sustained fire about 100 rounds/min", confidence: low),
         max_range_m: (value: 900.0, source: "FM 3-22.68 (2003): 7.62 mm tracer burnout about 900 m", confidence: medium),
-        dispersion_mrad: (value: 2.0, source: "estimate", confidence: estimate, notes: "Rigid mount laid through the gunner's sight; beaten zone of the burst dominates."),
+        dispersion_mrad: (value: 2.5, source: "estimate", confidence: estimate, notes: "Rigid mount laid through the gunner's sight; beaten zone of the burst dominates."),
         bursts: 200),  // FM 100-2-3 (1991): BRDM-2 PKT with 2,000 rounds; bursts of 10
     armour: (
         ce_factor: (value: 1.0, source: "estimate: thin steel armour has no special CE protection", confidence: estimate),

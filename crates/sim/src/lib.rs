@@ -23,6 +23,7 @@ pub mod plan;
 pub mod platoon;
 pub mod platoon_ai;
 pub mod sensors;
+pub mod smallarms;
 pub mod smoke;
 pub mod vehicle;
 pub mod victory;
@@ -819,6 +820,8 @@ impl Sim {
 
         // 6. Gunnery.
         let engage: Vec<f64> = self.sides.iter().map(|s| s.doctrine.engagement_range_m.get()).collect();
+        let close: Vec<f64> = self.sides.iter().map(|s| s.doctrine.infantry.close_infantry_m.get()).collect();
+        let inf = gunnery::InfantryGunnery { close_infantry: &close, map: &self.map, td: &self.data.terrain };
         let fired = gunnery::step(
             &mut self.world,
             &self.vehicles,
@@ -828,6 +831,7 @@ impl Sim {
             &self.data.damage,
             &self.data.smoke,
             &engage,
+            &inf,
             self.data.fires.suppression.slow_gain.get(),
             tick,
             &mut self.rngs.gunnery,
@@ -849,6 +853,35 @@ impl Sim {
             self.projectiles.push(f.projectile);
         }
 
+        // 6a. Small arms and coax (plan M8B-INFANTRY §4).
+        {
+            let ineffective = self.ineffective_fractions();
+            let mut sctx = smallarms::Ctx {
+                world: &mut self.world,
+                vehicles: &self.vehicles,
+                squads: &self.squads,
+                map: &self.map,
+                td: &self.data.terrain,
+                model: &self.data.infantry,
+                ineffective: &ineffective,
+                slow_gain: self.data.fires.suppression.slow_gain.get(),
+                tick,
+                rng: &mut self.rngs.gunnery,
+                events: &mut events,
+            };
+            for v in smallarms::step(&mut sctx) {
+                let shooter_side = self.world.side[v.shooter];
+                for side in self.sides.iter_mut() {
+                    let own = side.picture.side == shooter_side;
+                    let known =
+                        own || side.picture.contacts.iter().any(|c| !c.destroyed && dist(c.pos, v.from) < 300.0);
+                    if known {
+                        side.add_shot(ShotView { from: v.from, to: v.to, time_s: tick as f64 * DT, hit: false, own });
+                    }
+                }
+            }
+        }
+
         // 7. Impacts.
         let (hits, flying): (Vec<_>, Vec<_>) =
             std::mem::take(&mut self.projectiles).into_iter().partition(|p| p.impact_tick <= tick);
@@ -861,6 +894,22 @@ impl Sim {
                         let off = if *clouds > 1 { 8.0 } else { 0.0 };
                         self.smoke.add(*kind, [p.to[0] + libm::sin(a) * off, p.to[1] + libm::cos(a) * off]);
                     }
+                    continue;
+                }
+                gunnery::Effect::Burst { lethal_radius_m } => {
+                    let thr = self.ineffective_fractions();
+                    smallarms::he_burst(
+                        &mut self.world,
+                        &self.map,
+                        &self.data.terrain,
+                        &self.data.infantry,
+                        &thr,
+                        p.to,
+                        *lethal_radius_m,
+                        Some(p.shooter),
+                        &mut self.rngs.gunnery,
+                        &mut events,
+                    );
                     continue;
                 }
                 gunnery::Effect::Shot { target, outcome } => (*target, outcome),
@@ -924,6 +973,8 @@ impl Sim {
                 impacts: &mut self.impacts,
                 infantry: &self.data.infantry,
                 ineffective: &ineffective,
+                map: &self.map,
+                td: &self.data.terrain,
             };
             for (side, pos) in fires::step(&mut self.batteries, &mut fctx) {
                 self.sides[side.0 as usize].mark_destroyed(pos);
@@ -950,7 +1001,7 @@ impl Sim {
             &mut events,
         );
 
-        infantry::move_squads(&mut self.world, &self.map, &self.data.infantry, &mut events);
+        infantry::move_squads(&mut self.world, &self.map, &self.data.terrain, &self.data.infantry, &mut events);
         infantry::follow_carriers(&mut self.world);
 
         // 9. Victory conditions (1 Hz).
@@ -1146,6 +1197,9 @@ impl Sim {
                 let Some(k) = self.world.index_of(*unit) else { return };
                 if self.world.side[k] != c.side || !self.world.can_move(k) || self.world.mounted(k) {
                     return;
+                }
+                if self.world.squad[k].as_ref().is_some_and(|s| s.ineffective) {
+                    return; // combat-ineffective: defends in place
                 }
                 if self.world.squad[k].is_some() {
                     if let Some(pid) = self.world.platoon[k]
@@ -1567,6 +1621,43 @@ impl Sim {
                     }
                 }
                 events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
+            }
+            Command::OccupyBuilding { to, building } => {
+                let Some(b) = self.map.building(*building) else { return };
+                let cap = self.data.terrain.squad_capacity(b.class, b.footprint_m2 as f64, b.height_m as f64) as usize;
+                let Some(goal) = self.map.building_goal(*building) else { return };
+                let mut taken = (0..self.world.len())
+                    .filter(|&q| self.world.alive(q))
+                    .filter(|&q| self.world.squad[q].as_ref().is_some_and(|s| s.in_building == Some(*building)))
+                    .count();
+                let mut any = false;
+                for k in self.members(c.side, *to) {
+                    let ok = self.world.squad[k].as_ref().is_some_and(|s| s.mounted_in.is_none() && !s.ineffective);
+                    if !ok || !self.world.can_move(k) || taken >= cap {
+                        continue;
+                    }
+                    if self.world.squad[k].as_ref().is_some_and(|s| s.in_building == Some(*building)) {
+                        continue;
+                    }
+                    let pos = self.world.transform[k].pos;
+                    if let Some(route) = infantry::foot_route(&self.map, &mut self.pathfinder, pos, &[], goal) {
+                        self.world.set_route(k, route, None, None, false, 2.0);
+                        if let Some(s) = self.world.squad[k].as_mut() {
+                            s.boarding = None;
+                        }
+                        taken += 1;
+                        any = true;
+                    }
+                }
+                if let Addressee::Platoon(pid) = to
+                    && let Some(p) = self.platoon_mut(c.side, *pid)
+                {
+                    p.order = platoon::PlatoonOrder::None;
+                    p.held = None;
+                }
+                if any {
+                    events.push(Event::OrderReceived { side: c.side, to: *to });
+                }
             }
             Command::OccupyPosition { platoon, centre, radius_m, facing, kind } => {
                 let o = platoon::PlatoonOrder::Occupy {

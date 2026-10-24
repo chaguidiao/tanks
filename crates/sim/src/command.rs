@@ -208,6 +208,12 @@ pub enum Command {
     Mount {
         platoon: PlatoonId,
     },
+    /// Squads walk into a building (`BakedBuilding::id`) through an entrance and occupy it, as
+    /// many as it holds (TODO B7).
+    OccupyBuilding {
+        to: Addressee,
+        building: u32,
+    },
 }
 
 impl Command {
@@ -356,6 +362,13 @@ pub enum Event {
         by: Option<EntityId>,
         lost: u8,
         left: u8,
+    },
+    /// A small-arms or machine-gun volley (squad weapons or a coax): `casualties` it caused.
+    Volley {
+        unit: EntityId,
+        from: Vec2,
+        to: Vec2,
+        casualties: u8,
     },
     /// Squads left their carrier (`unit`), or boarded it.
     Dismounted {

@@ -91,7 +91,7 @@
         rounds_per_burst: (value: 10.0, source: "FM 3-22.68 (2003): coax bursts of about 10-20 rounds; estimate", confidence: low),
         burst_interval_s: (value: 5.0, source: "FM 3-22.68 (2003): sustained fire about 100 rounds/min", confidence: low),
         max_range_m: (value: 900.0, source: "FM 3-22.68 (2003): 7.62 mm tracer burnout about 900 m", confidence: medium),
-        dispersion_mrad: (value: 2.0, source: "estimate", confidence: estimate, notes: "Rigid mount laid through the gunner's sight; beaten zone of the burst dominates."),
+        dispersion_mrad: (value: 2.5, source: "estimate", confidence: estimate, notes: "Rigid mount laid through the gunner's sight; beaten zone of the burst dominates."),
         bursts: 125),  // Zaloga, T-64 (Osprey): 1,250 rounds of 7.62 mm; bursts of 10
     armour: (
         ce_factor: (value: 1.3, source: "open-source summaries (Wikipedia, T-64, 2026): 370-440 mm vs KE and 500-575 mm vs HEAT for the series", confidence: estimate,

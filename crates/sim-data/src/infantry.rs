@@ -122,12 +122,15 @@ pub struct InfantryModel {
     pub he_exposure: PostureFactors,
     /// Radius over which a squad's men are spread (m).
     pub spread_radius_m: Stat<f64>,
-    /// Suppression added to a squad by a burst aimed at it (0..1).
+    /// Suppression added to a squad per 10 rounds aimed at it (0..1).
     pub suppression_per_burst: Stat<f64>,
     /// Suppression added to a vehicle by small-arms fire (unbuttoned commander forced down).
     pub vehicle_suppression_per_burst: Stat<f64>,
-    /// Above this a squad neither fires nor moves.
+    /// Above this a squad does not move (it still fires, slower and less accurately).
     pub pinned_above: Stat<f64>,
+    /// Squads fire their small arms at vehicles (to drive exposed crews down) inside this range,
+    /// when no infantry is in reach (m).
+    pub vehicle_engage_m: Stat<f64>,
     /// How much of the vehicles' thermal crossover applies to people (0 = none, 1 = all).
     pub thermal_crossover_share: Stat<f64>,
     /// Multiplier on optical (visible-band) cycles against men: camouflage clothing and

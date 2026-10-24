@@ -36,6 +36,45 @@ pub fn map(ds: &DataSet, w: usize, h: usize, cover: &str, z: impl Fn(f64, f64) -
     Arc::new(bake(&p, &ds.terrain, &classes))
 }
 
+/// Flat map like `map`, with the authoring package edited (buildings, forests) before baking.
+pub fn map_with(
+    ds: &DataSet,
+    w: usize,
+    h: usize,
+    cover: &str,
+    edit: impl FnOnce(&mut AuthoringPackage),
+) -> Arc<BakedMap> {
+    let m = MapManifest {
+        id: "synthetic".into(),
+        name: "synthetic".into(),
+        width_cells: w,
+        height_cells: h,
+        cell_size_m: 4.0,
+        seed: 1,
+        recipe: None,
+    };
+    let mut p = AuthoringPackage::new_flat(m, 100.0);
+    p.landcover.data.fill(ds.terrain.landcover_id(cover).unwrap());
+    edit(&mut p);
+    Arc::new(bake(&p, &ds.terrain, &terrain::mobility::all_classes(ds)))
+}
+
+/// A rectangular building footprint (counter-clockwise).
+pub fn building(
+    id: u32,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    class: sim_data::BuildingClass,
+) -> terrain::features::Building {
+    terrain::features::Building {
+        id,
+        ring: vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+        props: terrain::features::BuildingProps { height_m: 7.0, class },
+    }
+}
+
 /// A squad on the ground, or mounted in `carrier` (listed before it).
 pub fn squad(cs: &str, squad: &str, pos: [f64; 2], platoon: Option<&str>, carrier: Option<&str>) -> UnitDef {
     UnitDef {

@@ -68,13 +68,13 @@ Only what infantry needs from buildings; full towns wait for M8h1b.
 ## M8b-a — Infantry core
 Scope: abstracted per `docs/plans/M8B-INFANTRY.md` §0. Tank combat is the theme; a dismounted squad is one element with strength, three postures and one burst-fire model, and mounted squads matter only at carrier level.
 - [ ] B1 Dismount/infantry entity class (squads, mount/dismount from IFVs, small arms, posture, low signature) — §2.2, §13.2
-- [ ] B3 Coaxial MG — §13.1 M3, M7b
-- [ ] B4 HE/HEI vs soft targets (25 mm HEI, HE-FRAG on infantry) — §13.1 M7b
-- [ ] B5 Suppression of dismounts (reuse M7d model) — §13.1 M7d
-- [ ] B7 Dismounts occupy buildings (uses H8) — supports F5
+- [x] B3 Coaxial MG — §13.1 M3, M7b. (Done 2026-10-24: vehicle `coax` data on every vehicle; the gunner uses it on infantry inside its range unless the men are behind walls and HE is loaded; `sim::smallarms`)
+- [x] B4 HE/HEI vs soft targets (25 mm HEI, HE-FRAG on infantry) — §13.1 M7b. (Done 2026-10-24: `lethal_radius_m` on HE and multipurpose rounds, `Effect::Burst`, artillery `personnel_lethal_radius_m`; casualties by spread overlap, posture exposure and building protection)
+- [x] B5 Suppression of dismounts (reuse M7d model) — §13.1 M7d. (Done 2026-10-24: suppression per 10 rounds aimed at a squad, decaying with the M7d model; pinned squads do not move and fire slower and less accurately; react-to-contact drill)
+- [x] B7 Dismounts occupy buildings (uses H8) — supports F5. (Done 2026-10-24: `Command::OccupyBuilding`, squads ending a move inside a building occupy it up to its capacity; seen and engaged through the facade, protected by its class)
 - [ ] B8 Tall crops matter for infantry concealment — TERRAIN.md §5.3
 - [ ] B10 Infantry detection signatures: small target size by posture (standing/prone/dug in/in building), thermal contrast, motion cue; spotters in the picture as small contacts
-- [ ] B11 Tank gunnery vs infantry: target class "infantry", ammo selection (HE/canister), coax use, firing rules in the contact drill
+- [x] B11 Tank gunnery vs infantry: target class "infantry", ammo selection (HE/canister), coax use, firing rules in the contact drill. (Done 2026-10-24: threat order: infantry inside the doctrine's close range, then vehicles, then infantry; `select_infantry_round`; contact drill fires only under the weapons status)
 - [ ] B14 Minimal DISMOUNT/MOUNT command with hotkey (full plan actions and card in G8), so infantry is playable at once
 - [ ] B15 Client display of infantry: NATO infantry symbols in `symbols.rs`, small contacts in the picture, roster and status card, AAR, database entries
 - [ ] B16 Doctrine and data: infantry drills in `western-combined` and `generic-opfor` with citations (ATP 3-21.x); squad weapon data per era, sourced
