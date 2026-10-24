@@ -21,7 +21,7 @@ pub fn load_recipe(data: &Path, preset: &str) -> Result<(Recipe, String)> {
 }
 
 pub fn mobility_classes(ds: &DataSet) -> Vec<MobilityClass> {
-    ds.vehicles.iter().map(MobilityClass::from).collect()
+    terrain::mobility::all_classes(ds)
 }
 
 /// Generate an authoring package and write it to `data/maps/<id>`.

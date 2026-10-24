@@ -55,11 +55,11 @@ Why:
 
 ## M8h1a — Buildings for infantry (before infantry, on existing villages)
 Only what infantry needs from buildings; full towns wait for M8h1b.
-- [ ] H7 Building types with wall thickness/height for LOS and cover values (infantry cover, fields of fire)
-- [ ] H8 Building identity in the baked map (ID raster or kept feature list; today only a `building_height` grid): needed by B7, F5, D4
-- [ ] H9 Foot mobility class and planning raster (forest, steep slopes, into/through buildings); `MobilityClass` today derives only from `VehicleDef`
+- [x] H7 Building types with wall thickness/height for LOS and cover values (infantry cover, fields of fire). (Done 2026-10-24: `data/terrain/buildings.ron`, `TerrainData::{floors, squad_capacity, protection}`; DESIGN.md §13.1 M8h1a)
+- [x] H8 Building identity in the baked map (ID raster or kept feature list; today only a `building_height` grid): needed by B7, F5, D4. (Done 2026-10-24: `building_id.bin` + `buildings.ron` with entrances, `BAKER_VERSION` 3)
+- [x] H9 Foot mobility class and planning raster (forest, steep slopes, into/through buildings); `MobilityClass` today derives only from `VehicleDef`. (Done 2026-10-24: `foot` raster from `data/terrain/foot.ron` and `foot_speed_factor`; buildings entered only through entrances; DESIGN.md §14 #30)
 - [x] H10 Narrow streets column-only for vehicles (from D4): formations collapse to column in built-up areas. (Done 2026-10-21, ahead of the rest: slots follow the route by arc length, `ai::formation::route_slot`, so trailing vehicles stay on the street; column through the uplands village 398 → 232 s; 16-seed balance batch neutral)
-- Exit: buildings carry type and identity; foot routes through a village; a wedge driving through a village goes to column; baker and hash tests; `BAKER_VERSION` bump.
+- Exit: buildings carry type and identity; foot routes through a village; a wedge driving through a village goes to column; baker and hash tests; `BAKER_VERSION` bump. (Met 2026-10-24.)
 
 ## M8h1b — Towns (after M8f1)
 - [ ] H3 Settlement interiors, town blocks and streets beyond villages — §13.1 M0.5, M6

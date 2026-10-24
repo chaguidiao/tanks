@@ -218,7 +218,8 @@ At tank scale, buildings matter as **LOS blockers, mobility obstacles and ambush
 
 - **Representation**: building footprints (polygons) with height and construction class (`wood | masonry | reinforced concrete | industrial steel`), streets as part of the road network, plus open courtyards and parks.
 - **LOS**: urban tiles get a sparse **1 m surface-height layer** (terrain + buildings, with walls ≥ 1 m thick rasterised conservatively). LOS uses surface height there. Building-polygon ray tests are the exact fallback.
-- **Mobility**: streets at reduced speed (narrow streets: column only, no turret traverse room — later), buildings impassable for v1 (later: tanks can push through light wood/masonry with damage and debris), rubble as slow terrain.
+- **Mobility**: streets at reduced speed (narrow streets: column only, no turret traverse room — later), buildings impassable to vehicles for v1 (later: tanks can push through light wood/masonry with damage and debris), rubble as slow terrain. On foot, buildings are entered through entrances only (below).
+- **Identity and entrances (implemented, M8h1a)**: the baked package holds `building_id.bin` (u32 per cell, 0 = none) and `buildings.ron` (id, feature id, class, height, centroid, footprint area, cells, entrances). Entrances are wall midpoints with open dry ground outside. In the `foot` speed raster wall cells are no-go and entrance and interior cells are open at a slow interior speed. Construction classes are data (`data/terrain/buildings.ron`: wall thickness, storey height, protection, squad capacity).
 - **Destruction (v1.x)**: HE hits damage buildings; collapsed buildings → rubble (reduced height, passable slowly).
 - **Protection**: being behind buildings blocks LOS; firing through buildings is not modelled in v1.
 - **Display**: building footprints as thin outlines with light fill (dense centres merge into blocks when zoomed out); built-up area outline at low zoom.

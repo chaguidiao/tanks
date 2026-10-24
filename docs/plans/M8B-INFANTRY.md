@@ -118,10 +118,10 @@ Consequence of §0 (added at review): none for H10, which was already done on 20
 ## 10. Order of work (each line is about one reviewable commit)
 
 M8h1a:
-1. H8 building ids + baked building list (`BAKER_VERSION` bump, determinism test).
-2. H7 building class data table and protection lookup (data + unit tests).
-3. H9 foot mobility class and raster, `Pathfinder` for foot; test: a foot route through a village ends inside a building.
-4. H10 is already done (2026-10-21). Nothing to do here. If H7–H9 change baked output, re-run the Z1 balance batch.
+1. H8 building ids + baked building list (`BAKER_VERSION` bump, determinism test). **Done 2026-10-24.**
+2. H7 building class data table and protection lookup (data + unit tests). **Done 2026-10-24.**
+3. H9 foot mobility class and raster, `Pathfinder` for foot; test: a foot route through a village ends inside a building. **Done 2026-10-24** (no new pathfinder: the foot raster encodes walls and entrances, DESIGN.md §14 #30).
+4. H10 is already done (2026-10-21). Nothing to do here. H7–H9 left the vehicle rasters unchanged (golden hash unchanged), so the Z1 balance batch was not re-run.
 
 M8b-a:
 5. Data: `SquadDef`, Cold War and modern squads, carrier `troops` block, BMP-1 class (B16, B17); loader tests.

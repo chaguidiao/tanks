@@ -15,14 +15,7 @@ pub struct Features {
     pub buildings: Vec<Building>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BuildingClass {
-    Wood,
-    Masonry,
-    Concrete,
-    Industrial,
-}
+pub use sim_data::BuildingClass;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BuildingProps {

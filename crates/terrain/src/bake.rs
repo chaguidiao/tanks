@@ -1,7 +1,8 @@
 //! Baker: a pure function `(authoring package, data) -> baked package` (TERRAIN.md §1, §2.3).
 //!
-//! Steps: edited elevation → carve rivers → cut/fill roads → rasterise forests → quantise
-//! elevation → water depth → per-class speed rasters → contours → hashes.
+//! Steps: edited elevation → carve rivers → cut/fill roads → rasterise forests → buildings
+//! (height, identity, entrances) → quantise elevation → water depth → per-class speed rasters →
+//! contours → hashes.
 //!
 //! Simplifications in this version (see TERRAIN.md §9): layers are stored as single zstd blocks
 //! instead of 256² tiles, and a road crossing a river acts as an implicit bridge.
@@ -13,14 +14,14 @@ use serde::{Deserialize, Serialize};
 use sim_data::TerrainData;
 
 use crate::contour::{self, ContourKind, ContourLine, ContourSpec};
-use crate::features::{ForestKind, RoadClass};
+use crate::features::{BuildingClass, ForestKind, RoadClass};
 use crate::hash::StableHasher;
 use crate::mobility::{self, MobilityClass};
 use crate::raster;
-use crate::{AuthoringPackage, Features, Grid, Heightfield, MapManifest, Result, TerrainError};
+use crate::{AuthoringPackage, Features, Grid, Heightfield, MapManifest, Result, TerrainError, Vec2};
 
 /// Bump when baker output changes for the same input.
-pub const BAKER_VERSION: u32 = 2;
+pub const BAKER_VERSION: u32 = 3;
 
 /// Elevation quantisation step (m) in the baked package.
 pub const ELEVATION_STEP: f64 = 0.02;
@@ -30,6 +31,28 @@ pub struct MobilityLayer {
     pub class: MobilityClass,
     /// Planning speed, units of `mobility::SPEED_QUANTUM` m/s.
     pub speed: Grid<u8>,
+}
+
+/// A building in the baked map (TODO H8): identity, construction and entrances, for infantry
+/// occupancy and foot routes. Floors, capacity and protection come from the class's entry in
+/// `data/terrain/buildings.ron` (`TerrainData::floors` and friends).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BakedBuilding {
+    /// 1-based; the value of its cells in `BakedMap::building_id`.
+    pub id: u32,
+    /// Id of the authoring footprint feature.
+    pub feature_id: u32,
+    pub class: BuildingClass,
+    pub height_m: f32,
+    pub centroid: [f32; 2],
+    /// Footprint area (one floor).
+    pub footprint_m2: f32,
+    /// Raster cells it owns; 0 for a footprint smaller than a cell (it then blocks nothing and
+    /// cannot be entered).
+    pub cells: u32,
+    /// Entrances: midpoints of walls with dry, open ground outside and one of the building's own
+    /// cells just inside. A squad enters the building only through these (foot raster).
+    pub entrances: Vec<[f32; 2]>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,6 +66,9 @@ pub struct BakedMap {
     pub water_depth: Grid<f32>,
     /// Building height above ground (m, decimetre steps); 0 = no building.
     pub building_height: Grid<f32>,
+    /// Building owning each cell (`BakedBuilding::id`); 0 = none.
+    pub building_id: Grid<u32>,
+    pub buildings: Vec<BakedBuilding>,
     pub mobility: Vec<MobilityLayer>,
     pub contours: Vec<ContourLine>,
     pub features: Features,
@@ -51,6 +77,44 @@ pub struct BakedMap {
 impl BakedMap {
     pub fn mobility(&self, class_id: &str) -> Option<&MobilityLayer> {
         self.mobility.iter().find(|m| m.class.id == class_id)
+    }
+
+    /// Building at a point, if any.
+    pub fn building_at(&self, x: f64, y: f64) -> Option<&BakedBuilding> {
+        let (i, j) = self.elevation.cell_of(x, y);
+        self.building(self.building_id.get(i, j))
+    }
+
+    pub fn building(&self, id: u32) -> Option<&BakedBuilding> {
+        (id as usize).checked_sub(1).and_then(|k| self.buildings.get(k))
+    }
+
+    /// Where a foot route into a building should end: the centre of the building's cell that is
+    /// open on the foot raster (interior or entrance) nearest its centroid. `None` if the map has
+    /// no foot raster or the building cannot be entered.
+    pub fn building_goal(&self, id: u32) -> Option<Vec2> {
+        let b = self.building(id)?;
+        let foot = self.mobility(mobility::FOOT_CLASS)?;
+        let cell = self.manifest.cell_size_m;
+        let (ci, cj) = self.elevation.cell_of(b.centroid[0] as f64, b.centroid[1] as f64);
+        let r = (libm::sqrt(b.footprint_m2 as f64) / cell) as i64 + 3;
+        let mut best: Option<(i64, Vec2)> = None;
+        for dj in -r..=r {
+            for di in -r..=r {
+                let (i, j) = (ci as i64 + di, cj as i64 + dj);
+                if !self.building_id.in_bounds(i, j) {
+                    continue;
+                }
+                let (i, j) = (i as usize, j as usize);
+                if self.building_id.get(i, j) == id && foot.speed.get(i, j) > 0 {
+                    let d = di * di + dj * dj;
+                    if best.is_none_or(|b| d < b.0) {
+                        best = Some((d, [(i as f64 + 0.5) * cell, (j as f64 + 0.5) * cell]));
+                    }
+                }
+            }
+        }
+        best.map(|b| b.1)
     }
 
     /// Hash of all baked output (determinism check).
@@ -67,6 +131,24 @@ impl BakedMap {
         }
         for &v in &self.building_height.data {
             h.f32(v);
+        }
+        for &v in &self.building_id.data {
+            h.u32(v);
+        }
+        for b in &self.buildings {
+            h.u32(b.id);
+            h.u32(b.feature_id);
+            h.u8(b.class as u8);
+            h.f32(b.height_m);
+            h.f32(b.centroid[0]);
+            h.f32(b.centroid[1]);
+            h.f32(b.footprint_m2);
+            h.u32(b.cells);
+            h.u32(b.entrances.len() as u32);
+            for e in &b.entrances {
+                h.f32(e[0]);
+                h.f32(e[1]);
+            }
         }
         for m in &self.mobility {
             h.str(&m.class.id);
@@ -286,12 +368,17 @@ pub fn bake(pkg: &AuthoringPackage, td: &TerrainData, classes: &[MobilityClass])
         }
     }
 
-    // Buildings: footprint cells carry the building height (LOS obstruction, no-go).
+    // Buildings: footprint cells carry the building height (LOS obstruction, no-go for vehicles)
+    // and the id of the building owning them (the tallest where footprints overlap).
     let mut buildings = Grid::new(w, h, 0.0f32);
-    for b in &pkg.features.buildings {
+    let mut building_id = Grid::new(w, h, 0u32);
+    for (n, b) in pkg.features.buildings.iter().enumerate() {
         let hgt = (libm::round(b.props.height_m as f64 * 10.0) / 10.0) as f32;
         raster::fill_polygon(&b.ring, cell, w, h, |i, j| {
             let k = j * w + i;
+            if building_id.data[k] == 0 || hgt > buildings.data[k] {
+                building_id.data[k] = n as u32 + 1;
+            }
             buildings.data[k] = buildings.data[k].max(hgt);
         });
     }
@@ -303,14 +390,18 @@ pub fn bake(pkg: &AuthoringPackage, td: &TerrainData, classes: &[MobilityClass])
     for v in water.data.iter_mut() {
         *v = (libm::round(*v as f64 * 100.0) / 100.0) as f32;
     }
+    let (building_list, foot_open) = identify_buildings(pkg, &building_id, &water, td.foot.fording_depth_m.get());
+    let interior = mobility::quantise(td.foot.building_interior_speed_mps.get());
 
     let mobility = classes
         .iter()
         .map(|c| {
             let mut speed = mobility::speed_raster(c, td, &hf, &landcover, &water);
-            for (v, b) in speed.data.iter_mut().zip(&buildings.data) {
-                if *b > 0.0 {
-                    *v = 0;
+            for (k, v) in speed.data.iter_mut().enumerate() {
+                if building_id.data[k] != 0 {
+                    // Vehicles: no-go (TERRAIN.md §5.4). Foot: walls are no-go, so a squad gets
+                    // in only through an entrance cell and then moves at the interior speed.
+                    *v = if c.foot && foot_open[k] { interior } else { 0 };
                 }
             }
             MobilityLayer { class: c.clone(), speed }
@@ -326,11 +417,113 @@ pub fn bake(pkg: &AuthoringPackage, td: &TerrainData, classes: &[MobilityClass])
         soil,
         water_depth: water,
         building_height: buildings,
+        building_id,
+        buildings: building_list,
         mobility,
         contours,
         features: pkg.features.clone(),
     }
 }
+
+/// Building list with entrances, and the building cells open to foot movement: interior cells
+/// (all four neighbours in the same building) and the inner cell of each entrance.
+fn identify_buildings(
+    pkg: &AuthoringPackage,
+    ids: &Grid<u32>,
+    water: &Grid<f32>,
+    fording_m: f64,
+) -> (Vec<BakedBuilding>, Vec<bool>) {
+    let cell = pkg.manifest.cell_size_m;
+    let (w, h) = (ids.w, ids.h);
+    let mut cells = vec![0u32; pkg.features.buildings.len() + 1];
+    let mut open = vec![false; w * h];
+    for j in 0..h {
+        for i in 0..w {
+            let id = ids.get(i, j);
+            if id == 0 {
+                continue;
+            }
+            cells[id as usize] += 1;
+            let same = |di: i64, dj: i64| {
+                ids.in_bounds(i as i64 + di, j as i64 + dj) && ids.get_clamped(i as i64 + di, j as i64 + dj) == id
+            };
+            open[j * w + i] = same(1, 0) && same(-1, 0) && same(0, 1) && same(0, -1);
+        }
+    }
+    let cell_at = |p: Vec2| -> Option<(usize, usize)> {
+        let (i, j) = (libm::floor(p[0] / cell) as i64, libm::floor(p[1] / cell) as i64);
+        ids.in_bounds(i, j).then_some((i as usize, j as usize))
+    };
+    let list = pkg
+        .features
+        .buildings
+        .iter()
+        .enumerate()
+        .map(|(n, b)| {
+            let id = n as u32 + 1;
+            let ring = &b.ring;
+            // Shoelace area and centroid; twice the signed area gives the winding (CCW > 0).
+            let (mut a2, mut cx, mut cy) = (0.0, 0.0, 0.0);
+            for k in 0..ring.len() {
+                let (p, q) = (ring[k], ring[(k + 1) % ring.len()]);
+                let cr = p[0] * q[1] - q[0] * p[1];
+                a2 += cr;
+                cx += (p[0] + q[0]) * cr;
+                cy += (p[1] + q[1]) * cr;
+            }
+            let centroid = if libm::fabs(a2) > 1e-9 {
+                [cx / (3.0 * a2), cy / (3.0 * a2)]
+            } else {
+                let k = ring.len().max(1) as f64;
+                [ring.iter().map(|p| p[0]).sum::<f64>() / k, ring.iter().map(|p| p[1]).sum::<f64>() / k]
+            };
+            let mut entrances = Vec::new();
+            for k in 0..ring.len() {
+                let (a, q) = (ring[k], ring[(k + 1) % ring.len()]);
+                let (dx, dy) = (q[0] - a[0], q[1] - a[1]);
+                let len = libm::sqrt(dx * dx + dy * dy);
+                if len < MIN_ENTRANCE_WALL_M {
+                    continue;
+                }
+                let wind = if a2 >= 0.0 { 1.0 } else { -1.0 };
+                let nrm = [wind * dy / len, -wind * dx / len];
+                let mid = [(a[0] + q[0]) / 2.0, (a[1] + q[1]) / 2.0];
+                // The building's own cell just inside the wall, with dry open ground on its
+                // outward side (a four-neighbour, so A* can step in without cutting a corner).
+                let inner = [0.5, 1.0].iter().find_map(|&f| {
+                    let (i, j) = cell_at([mid[0] - nrm[0] * f * cell, mid[1] - nrm[1] * f * cell])?;
+                    (ids.get(i, j) == id).then_some((i, j))
+                });
+                let Some((i, j)) = inner else { continue };
+                let outside = [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)].into_iter().any(|(di, dj)| {
+                    let (oi, oj) = (i as i64 + di, j as i64 + dj);
+                    di as f64 * nrm[0] + dj as f64 * nrm[1] > 0.3
+                        && ids.in_bounds(oi, oj)
+                        && ids.get(oi as usize, oj as usize) == 0
+                        && (water.get(oi as usize, oj as usize) as f64) <= fording_m
+                });
+                if outside {
+                    open[j * w + i] = true;
+                    entrances.push([mid[0] as f32, mid[1] as f32]);
+                }
+            }
+            BakedBuilding {
+                id,
+                feature_id: b.id,
+                class: b.props.class,
+                height_m: (libm::round(b.props.height_m as f64 * 10.0) / 10.0) as f32,
+                centroid: [centroid[0] as f32, centroid[1] as f32],
+                footprint_m2: (libm::fabs(a2) / 2.0) as f32,
+                cells: cells[id as usize],
+                entrances,
+            }
+        })
+        .collect();
+    (list, open)
+}
+
+/// Shortest wall that gets an entrance: a door and room to reach it.
+const MIN_ENTRANCE_WALL_M: f64 = 2.0;
 
 // --- baked package I/O --------------------------------------------------------------------
 
@@ -352,6 +545,8 @@ pub struct BakedClass {
     pub cross_country_speed: f64,
     pub max_slope: f64,
     pub fording_depth: f64,
+    #[serde(default)]
+    pub foot: bool,
 }
 
 const MAGIC: &[u8; 4] = b"TKL1";
@@ -396,6 +591,14 @@ fn u16_grid(path: &Path) -> Result<Grid<u16>> {
     Ok(Grid::from_vec(w, h, b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect()))
 }
 
+fn u32_grid(path: &Path) -> Result<Grid<u32>> {
+    let (w, h, b) = read_layer(path)?;
+    if b.len() != w * h * 4 {
+        return Err(TerrainError::io(path, "layer size mismatch"));
+    }
+    Ok(Grid::from_vec(w, h, b.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect()))
+}
+
 fn u16_bytes(g: &Grid<u16>) -> Vec<u8> {
     g.data.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
@@ -416,6 +619,12 @@ impl BakedMap {
         write_layer(&dir.join("water_depth.bin"), w, h, &u16_bytes(&wd))?;
         let bh = self.building_height.map(|v| libm::round(v as f64 * 10.0).clamp(0.0, 65535.0) as u16);
         write_layer(&dir.join("buildings.bin"), w, h, &u16_bytes(&bh))?;
+        let ids: Vec<u8> = self.building_id.data.iter().flat_map(|v| v.to_le_bytes()).collect();
+        write_layer(&dir.join("building_id.bin"), w, h, &ids)?;
+        let list = ron::ser::to_string_pretty(&self.buildings, ron::ser::PrettyConfig::default())
+            .map_err(|e| TerrainError::io(dir, e))?;
+        let lp = dir.join("buildings.ron");
+        std::fs::write(&lp, list).map_err(|e| TerrainError::io(&lp, e))?;
         for m in &self.mobility {
             write_layer(&md.join(format!("{}.bin", m.class.id)), w, h, &m.speed.data)?;
         }
@@ -436,6 +645,7 @@ impl BakedMap {
                     cross_country_speed: m.class.cross_country_speed,
                     max_slope: m.class.max_slope,
                     fording_depth: m.class.fording_depth,
+                    foot: m.class.foot,
                 })
                 .collect(),
         };
@@ -460,6 +670,9 @@ impl BakedMap {
         let z = q.map(|v| ((man.elevation_offset_steps + v as i64) as f64 * ELEVATION_STEP) as f32);
         let wd = u16_grid(&dir.join("water_depth.bin"))?.map(|v| (v as f64 / 100.0) as f32);
         let bh = u16_grid(&dir.join("buildings.bin"))?.map(|v| (v as f64 / 10.0) as f32);
+        let lp = dir.join("buildings.ron");
+        let list = std::fs::read_to_string(&lp).map_err(|e| TerrainError::io(&lp, e))?;
+        let buildings: Vec<BakedBuilding> = ron::from_str(&list).map_err(|e| TerrainError::io(&lp, e))?;
         let mut mobility = Vec::new();
         for c in &man.mobility_classes {
             mobility.push(MobilityLayer {
@@ -469,6 +682,7 @@ impl BakedMap {
                     cross_country_speed: c.cross_country_speed,
                     max_slope: c.max_slope,
                     fording_depth: c.fording_depth,
+                    foot: c.foot,
                 },
                 speed: u8_grid(&dir.join("mobility").join(format!("{}.bin", c.id)))?,
             });
@@ -479,6 +693,8 @@ impl BakedMap {
             soil: u8_grid(&dir.join("soil.bin"))?,
             water_depth: wd,
             building_height: bh,
+            building_id: u32_grid(&dir.join("building_id.bin"))?,
+            buildings,
             mobility,
             contours: read_contours(&dir.join("contours.bin"))?,
             features: Features::load(&dir.join("features"))?,

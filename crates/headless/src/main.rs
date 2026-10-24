@@ -185,6 +185,9 @@ fn print_info(b: &BakedMap) {
         b.features.forests.len(),
         b.features.buildings.len()
     );
+    let enterable = b.buildings.iter().filter(|x| !x.entrances.is_empty()).count();
+    let entrances: usize = b.buildings.iter().map(|x| x.entrances.len()).sum();
+    println!("buildings  {} baked, {enterable} enterable on foot, {entrances} entrances", b.buildings.len());
     println!(
         "contours   {} lines, {} points",
         b.contours.len(),

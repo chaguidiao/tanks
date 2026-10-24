@@ -65,6 +65,9 @@ fn bake_is_deterministic_and_round_trips() {
     let back = BakedMap::load(&dir).unwrap();
     assert_eq!(back.output_hash(), b1.output_hash());
     assert_eq!(back.elevation, b1.elevation);
+    assert_eq!(back.building_id, b1.building_id);
+    assert_eq!(back.buildings, b1.buildings);
+    assert_eq!(back, b1, "a loaded bake equals the fresh one");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -99,6 +102,36 @@ fn villages_get_building_footprints_that_block_movement() {
     let (i, j) = baked.elevation.cell_of(c[0], c[1]);
     assert!(baked.building_height.get(i, j) > 4.0);
     assert_eq!(baked.mobility[0].speed.get(i, j), 0, "buildings are no-go");
+}
+
+/// TODO H9 exit: a foot route through a generated village ends inside a building.
+#[test]
+fn foot_routes_enter_village_buildings_through_entrances() {
+    use terrain::mobility::FOOT_CLASS;
+    use terrain::path::Pathfinder;
+    let (ds, pkg) = small(5);
+    let baked = bake(&pkg, &ds.terrain, &workflow::mobility_classes(&ds));
+    let foot = &baked.mobility(FOOT_CLASS).expect("foot raster").speed;
+    let cell = baked.manifest.cell_size_m;
+    let enterable: Vec<_> = baked.buildings.iter().filter(|b| !b.entrances.is_empty()).collect();
+    assert!(
+        enterable.len() * 10 >= baked.buildings.len() * 9,
+        "most village houses can be entered ({} of {})",
+        enterable.len(),
+        baked.buildings.len()
+    );
+    let mut pf = Pathfinder::new();
+    let mut entered = 0;
+    for b in enterable.iter().step_by(enterable.len().div_ceil(12).max(1)) {
+        let goal = baked.building_goal(b.id).expect("enterable building has an open cell");
+        // Start 60 m away on open ground (any passable cell near there).
+        let start = [b.centroid[0] as f64 + 60.0, b.centroid[1] as f64];
+        let Some(route) = pf.find(foot, cell, start, goal) else { continue };
+        let end = *route.last().unwrap();
+        assert_eq!(baked.building_at(end[0], end[1]).map(|x| x.id), Some(b.id));
+        entered += 1;
+    }
+    assert!(entered >= 6, "foot routes reached {entered} buildings");
 }
 
 fn manifest(recipe: Option<&str>, seed: u64) -> terrain::MapManifest {
