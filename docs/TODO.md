@@ -8,7 +8,6 @@ Rules for every item (CLAUDE.md): data in `data/**/*.ron` with source and confid
 
 ## Waiting on the user (decisions; check here first)
 Added 2026-10-21. Remove a line when it is decided, and record the decision on the item it belongs to.
-- **M8b calibration Q1**: keep small-arms lethality on the lethal side for now or tighten it (`docs/plans/M8B-CALIBRATION-NOTES.md` §4 Q1). Recommended: keep, re-cite the 0.6 value as `low` (B20), decide after the B25 harness. Q2–Q4 decided 2026-10-24 (see B21–B24).
 
 ## Phase map (v1.x = M8, v1.5 = M9, then v2+)
 
@@ -84,12 +83,12 @@ Scope: abstracted per `docs/plans/M8B-INFANTRY.md` §0. Tank combat is the theme
 
 ## M8b-cal — Infantry calibration and era data (research 2026-10-24)
 Notes, sources and proposed values: `docs/plans/M8B-CALIBRATION-NOTES.md`. Nothing implemented yet; waiting on the §4 questions.
-- [ ] B20 Re-source the lethality data: aiming error (Hitchman ORO-T-160 range trials × Rowland combat degradation), chance a hit takes a man out (Beebe & DeBakey, Hitchman), MG/rifle ratio; `estimate` → `low` where the sources support it. Data only (notes §1)
+- [ ] B20 Re-source the lethality data: aiming error (Hitchman ORO-T-160 range trials × Rowland combat degradation), chance a hit takes a man out (Beebe & DeBakey, Hitchman), MG/rifle ratio; `estimate` → `low` where the sources support it. Data only (notes §1). Decided 2026-10-24 (calibration Q1): keep the current lethality (lethal side) for now; raise the 0.6 hit-out value to `low` with citations; revisit after B25
 - [ ] B21 Era data to 2005: dated Blue rifle row with optics (6 → 5 mrad from 2003), Blue PVS-14 and aiming laser, Red 1PN58-class night sight; no thermal weapon sights before 2006. Data only (notes §3). Decided 2026-10-24: B21–B23 go in one step (shared per-squad dated fields); values entered as `low`/`estimate` with "verify against the PDF" notes, not blocked on the primary PDFs
 - [ ] B22 Body armour per squad, by date: chance a bullet hit takes a man out (Blue 0.6 → 0.52 from 2004) and HE exposure for fragment vests. Small model change (notes §3). Decided 2026-10-24: B21–B23 go in one step (shared per-squad dated fields); values entered as `low`/`estimate` with "verify against the PDF" notes, not blocked on the primary PDFs
 - [ ] B23 Night aiming: small-arms aiming error grows at night without an aiming aid (×1.6) and less with goggles and an infrared laser (×1.1). Small model change (notes §3). Decided 2026-10-24: B21–B23 go in one step (shared per-squad dated fields); values entered as `low`/`estimate` with "verify against the PDF" notes, not blocked on the primary PDFs
 - [ ] B24 Infantry detection timing: camouflage factor for halted and dug-in squads (D1, golden hash unaffected); sector search factor for narrow-field sights (D2, model-wide: re-run the detection calibration and balance batches, golden hash changes) (notes §2). Decided 2026-10-24: D1 may go in early; D2 is its own model-wide step before M8f1, tuned against the Phase 0 detection targets rather than a raw 9×
-- [ ] B25 Validation harness for infantry: targets V1–V5 (formula test against Hitchman, rounds per casualty, MG/rifle ratio, share of losses from small arms with artillery, 2005 against 1990 exchange ratio) (notes §1.3)
+- [ ] B25 Validation harness for infantry: targets V1–V5 (formula test against Hitchman, rounds per casualty, MG/rifle ratio, share of losses from small arms with artillery, 2005 against 1990 exchange ratio) (notes §1.3). Must run before the M8b-b anti-tank teams are tuned, and the lethality call (calibration Q1) is made from its results
 
 ## M8b-b — Anti-tank teams
 - [ ] B2 ATGM teams on the existing guided-round model — §13.2
