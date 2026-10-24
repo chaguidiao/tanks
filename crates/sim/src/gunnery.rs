@@ -481,6 +481,7 @@ fn choose_target(world: &World, k: usize, max_range: f64, tick: u64) -> Option<u
                 && tr.visible_fraction > 0.0
                 && tr.range_m <= max_range
         }) && world.alive(t)
+            && world.vehicle[t].is_some()
     };
     if let Some(a) = g.assigned
         && ok(a)

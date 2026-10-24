@@ -224,3 +224,84 @@ fn a_halted_squad_digs_in_after_the_dig_in_time() {
     let v = sim.perceived(BLUE).own[0].squad.clone().unwrap();
     assert_eq!(v.posture, SquadPosture::DugIn, "20 minutes halted (data: dig_in_s)");
 }
+
+/// A Red T-72B watching one Blue squad `range` metres north on `cover`, halted.
+fn watch_sim(cover: &str, month: u8, range: f64) -> Sim {
+    let ds = data();
+    let m = map(&ds, 300, 600, cover, |_, _| 0.0);
+    let blue = vec![squad("A", "rifle_squad_b", [600.0, 200.0 + range], Some("1-D"), None)];
+    let red = vec![unit("211", "kurgan_b", [600.0, 200.0], 0.0, Some("21"))];
+    let mut sc = scenario(10 * 3600, blue, red);
+    sc.date.1 = month;
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    sim.set_ai_enabled(SideId(1), false);
+    sim
+}
+
+#[test]
+fn a_tank_crew_reports_a_squad_as_infantry_once_recognised() {
+    let mut sim = watch_sim("grassland", 6, 400.0);
+    let mut seen = None;
+    for _ in 0..(120 * sim::TICK_HZ) {
+        sim.step();
+        if let Some(c) = sim.perceived(SideId(1)).contacts.first()
+            && c.level >= ai::picture::ContactLevel::Identified
+        {
+            seen = Some(c.clone());
+            break;
+        }
+    }
+    let c = seen.expect("identified within 2 minutes at 400 m");
+    assert_eq!(c.kind, Some(ai::picture::ContactKind::Infantry));
+    assert_eq!(c.type_name.as_deref(), Some("RIFLE SQUAD (MECH)"));
+}
+
+#[test]
+fn squads_see_vehicles_too() {
+    let mut sim = watch_sim("grassland", 6, 600.0);
+    run(&mut sim, 60.0);
+    assert!(sim.truth().sensors[0].as_ref().unwrap().track(1).is_some(), "the squad tracks the T-72B");
+    assert!(sim.perceived(BLUE).contacts.iter().any(|c| c.kind == Some(ai::picture::ContactKind::Vehicle)));
+}
+
+#[test]
+fn standing_crops_hide_a_halted_squad_in_summer() {
+    // TODO B8: crop land in season conceals kneeling and prone men (data: tall_crops).
+    let visible = |month: u8| {
+        let mut sim = watch_sim("cropland", month, 300.0);
+        for _ in 0..(120 * sim::TICK_HZ) {
+            sim.step();
+            if let Some(tr) = sim.truth().sensors[1].as_ref().unwrap().track(0) {
+                return tr.visible_fraction;
+            }
+        }
+        0.0
+    };
+    let (summer, spring) = (visible(7), visible(3));
+    assert!(spring > 0.0 && summer > 0.0, "seen either way at 300 m");
+    let want = data().infantry.tall_crops.visible_fraction.get();
+    assert!((summer / spring - want).abs() < 1e-9, "July {summer:.3} vs March {spring:.3}");
+}
+
+#[test]
+fn a_mounted_squad_is_neither_seen_nor_seeing() {
+    let ds = data();
+    let m = map(&ds, 300, 600, "grassland", |_, _| 0.0);
+    let blue = vec![
+        unit("1-1", "ward_m2", [600.0, 900.0], 180.0, None),
+        squad("1-1A", "rifle_squad_b", [0.0, 0.0], Some("1-D"), Some("1-1")),
+    ];
+    // No platoons: a platoon's fire distribution would assign targets despite WEAPONS HOLD.
+    let red = vec![unit("211", "kurgan_b", [600.0, 200.0], 0.0, None)];
+    let mut sim = Sim::new(&scenario(10 * 3600, blue, red), ds, m).unwrap();
+    sim.set_ai_enabled(SideId(1), false);
+    for (side, k) in [(SideId(1), 2), (BLUE, 0)] {
+        let to = sim::Addressee::Unit(sim.truth().id[k]);
+        sim.submit_immediate(side, Command::WeaponsControl { to, status: ai::picture::WeaponsStatus::Hold });
+    }
+    run(&mut sim, 60.0);
+    let w = sim.truth();
+    assert!(w.sensors[2].as_ref().unwrap().track(0).is_some(), "the T-72B sees the M2");
+    assert!(w.sensors[2].as_ref().unwrap().track(1).is_none(), "but not the squad inside");
+    assert!(w.sensors[1].as_ref().unwrap().tracks.is_empty(), "the squad inside sees nothing");
+}

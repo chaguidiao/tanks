@@ -164,12 +164,21 @@ pub enum ContactLevel {
     Identified,
 }
 
+/// What a contact is, known once recognised (plan M8B-INFANTRY §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContactKind {
+    Vehicle,
+    Infantry,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Contact {
     pub id: ContactId,
     /// Reported position (with reporting error).
     pub pos: Vec2,
     pub level: ContactLevel,
+    /// Vehicle or infantry, once recognised.
+    pub kind: Option<ContactKind>,
     /// Vehicle type name once identified.
     pub type_name: Option<String>,
     pub first_report_s: f64,

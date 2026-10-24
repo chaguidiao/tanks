@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use ai::picture::ContactLevel;
 use rand_chacha::ChaCha8Rng;
 use rand_chacha::rand_core::Rng;
-use sim_data::{DetectionModel, SensorKind, VehicleDef};
+use sim_data::{DetectionModel, InfantryModel, SensorKind, SquadDef, TerrainData, VehicleDef};
 use terrain::ground::Ground;
 use terrain::los::{Sight, sight};
 
@@ -105,10 +105,26 @@ pub struct Sighting {
     pub new: bool,
 }
 
+/// Infantry inputs to the detection step (plan M8B-INFANTRY §3).
+pub struct InfantryLook<'a> {
+    pub squads: &'a [SquadDef],
+    pub model: &'a InfantryModel,
+    pub td: &'a TerrainData,
+    /// Scenario month (tall crops are seasonal).
+    pub month: u8,
+}
+
+/// Squad sample heights for partial visibility: low, middle and top of the posture's silhouette
+/// (the first three entries are used).
+fn squad_heights(h: f64, floor: f64) -> ([f64; 5], usize) {
+    ([floor + 0.15 * h, floor + 0.5 * h, floor + 0.9 * h, 0.0, 0.0], 3)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn step(
     world: &mut World,
     vehicles: &[VehicleDef],
+    inf: &InfantryLook,
     g: &Ground,
     m: &DetectionModel,
     atm: &Atmosphere,
@@ -124,25 +140,50 @@ pub fn step(
     let mut out = Vec::new();
     let n = world.len();
     for o in 0..n {
-        if !world.alive(o) || world.sensors[o].is_none() {
+        if !world.alive(o) || world.sensors[o].is_none() || world.mounted(o) {
             continue;
         }
-        let Some(ovi) = world.vehicle[o] else { continue };
-        let odef = &vehicles[ovi];
-        let opos = world.transform[o].pos;
-        let eye = odef.dimensions.sight_height_m.get();
-        let observer_moving = world.mobility[o].as_ref().is_some_and(|mv| mv.speed > 1.0);
+        // Observer: a vehicle's sight, or a squad's eyes at its posture (and floor).
+        let (eye, obuilding) = match (world.vehicle[o], world.squad[o].as_ref()) {
+            (Some(ovi), _) => (vehicles[ovi].dimensions.sight_height_m.get(), None),
+            (None, Some(s)) => {
+                let (sig, floor) = crate::infantry::signature(&inf.squads[s.def], s, g.map, inf.td);
+                (sig.eye_height_m.get() + floor, s.in_building)
+            }
+            _ => continue,
+        };
+        let opos0 = world.transform[o].pos;
+        let observer_moving = world.mobility[o].as_ref().is_some_and(|mv| mv.speed > 1.0)
+            || world.squad[o].as_ref().is_some_and(|s| s.speed > 0.3);
         for t in 0..n {
-            if world.side[t] == world.side[o] || !world.alive(t) {
+            if world.side[t] == world.side[o] || !world.alive(t) || world.mounted(t) {
                 continue;
             }
-            let Some(tvi) = world.vehicle[t] else { continue };
-            let tdef = &vehicles[tvi];
             let tp = world.transform[t];
-            let r = crate::dist(opos, tp.pos);
+            let r = crate::dist(opos0, tp.pos);
             if r > max_r {
                 continue;
             }
+            // Target: a vehicle's silhouette, or a squad's posture row (window-sized in a building,
+            // seen only through the facade facing the observer; low in standing crops).
+            enum Look<'a> {
+                Vehicle(&'a VehicleDef),
+                Squad { w: f64, h: f64, floor: f64, building: Option<u32>, crops: f64 },
+            }
+            let look = match (world.vehicle[t], world.squad[t].as_ref()) {
+                (Some(tvi), _) => Look::Vehicle(&vehicles[tvi]),
+                (None, Some(s)) => {
+                    let (sig, floor) = crate::infantry::signature(&inf.squads[s.def], s, g.map, inf.td);
+                    let (ci, cj) = g.map.elevation.cell_of(tp.pos[0], tp.pos[1]);
+                    let in_crop = s.speed <= 0.3
+                        && s.in_building.is_none()
+                        && inf.model.tall_crops.months.contains(&inf.month)
+                        && inf.td.landcover(g.map.landcover.get(ci, cj)).name == "cropland";
+                    let crops = if in_crop { inf.model.tall_crops.visible_fraction.get() } else { 1.0 };
+                    Look::Squad { w: sig.width_m.get(), h: sig.height_m.get(), floor, building: s.in_building, crops }
+                }
+                _ => continue,
+            };
             // Distant pairs are checked at 1 Hz (staggered), with the hazard over 1 s.
             let stride: u64 = if r > 2500.0 { 4 } else { 1 };
             let phase = (world.id[o].0 as u64 * 31 + world.id[t].0 as u64) % stride;
@@ -150,16 +191,39 @@ pub fn step(
                 continue;
             }
             let check_dt = SENSOR_DT * stride as f64;
-            let heights = sample_heights(tdef);
-            let s = cache.get(g, (world.id[o].0, world.id[t].0), opos, eye, tp.pos, &heights);
-            let f = s.fraction();
+            let opos = match obuilding {
+                Some(id) => crate::infantry::facade_point(g.map, id, opos0, tp.pos),
+                None => opos0,
+            };
+            let (tpos, (heights, nh)) = match &look {
+                Look::Vehicle(tdef) => (tp.pos, (sample_heights(tdef), 5)),
+                Look::Squad { h, floor, building, .. } => (
+                    building.map_or(tp.pos, |id| crate::infantry::facade_point(g.map, id, tp.pos, opos0)),
+                    squad_heights(*h, *floor),
+                ),
+            };
+            let s = cache.get(g, (world.id[o].0, world.id[t].0), opos, eye, tpos, &heights[..nh]);
+            let mut f = s.fraction();
+            if let Look::Squad { crops, .. } = &look {
+                f *= crops;
+            }
             if f <= 0.0 || s.transmittance < 0.02 {
                 continue;
             }
-            let bearing = libm::atan2(opos[0] - tp.pos[0], opos[1] - tp.pos[1]);
-            let w = projected_width(tdef, tp.heading, bearing);
-            let vis_h = tdef.dimensions.height_m.get() * f;
-            let dc = libm::sqrt(w * vis_h);
+            let (dc, thermal, optical) = match &look {
+                Look::Vehicle(tdef) => {
+                    let bearing = libm::atan2(opos[0] - tp.pos[0], opos[1] - tp.pos[1]);
+                    let w = projected_width(tdef, tp.heading, bearing);
+                    let vis_h = tdef.dimensions.height_m.get() * f;
+                    (libm::sqrt(w * vis_h), atm.thermal, 1.0)
+                }
+                // People stay warmer than their background through the crossover.
+                Look::Squad { w, h, .. } => (
+                    libm::sqrt(w * h * f),
+                    1.0 - (1.0 - atm.thermal) * inf.model.thermal_crossover_share.get(),
+                    inf.model.optical_contrast.get(),
+                ),
+            };
             let sens = world.sensors[o].as_ref().expect("checked");
             let degrade = if sens.degraded { 0.5 } else { 1.0 } * (1.0 - sensor_penalty * world.suppression[o]);
             // Smoke on the path: per spectral band, a sensor below the blind threshold sees nothing.
@@ -175,9 +239,9 @@ pub fn step(
                 .filter(|&&(_, _, max)| r <= max)
                 .filter_map(|&(kind, cpm, _)| {
                     let (eff, band_t) = match kind {
-                        SensorKind::Optical => (cpm * light, t_vis),
-                        SensorKind::NightChannel => (cpm, t_vis),
-                        SensorKind::Thermal => (cpm * atm.thermal, t_th),
+                        SensorKind::Optical => (cpm * light * optical, t_vis),
+                        SensorKind::NightChannel => (cpm * optical, t_vis),
+                        SensorKind::Thermal => (cpm * thermal, t_th),
                     };
                     in_range += 1;
                     if band_t < smoke.blind_below {
@@ -191,7 +255,8 @@ pub fn step(
             if in_range > 0 && blinded == in_range {
                 continue;
             }
-            let moving = world.mobility[t].as_ref().is_some_and(|mv| mv.speed > 1.0);
+            let moving = world.mobility[t].as_ref().is_some_and(|mv| mv.speed > 1.0)
+                || world.squad[t].as_ref().is_some_and(|s| s.speed > 0.3);
             let fired = world.last_fired[t].is_some_and(|ft| tick.saturating_sub(ft) < (3.0 / crate::DT) as u64);
             let mut cue = 1.0;
             if moving {

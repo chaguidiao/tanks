@@ -130,6 +130,9 @@ pub struct InfantryModel {
     pub pinned_above: Stat<f64>,
     /// How much of the vehicles' thermal crossover applies to people (0 = none, 1 = all).
     pub thermal_crossover_share: Stat<f64>,
+    /// Multiplier on optical (visible-band) cycles against men: camouflage clothing and
+    /// vegetation give far less contrast than a vehicle's hull and shadow.
+    pub optical_contrast: Stat<f64>,
     pub tall_crops: TallCrops,
     pub mounted_loss: MountedLoss,
 }

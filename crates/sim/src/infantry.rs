@@ -600,3 +600,47 @@ pub fn platoon_step(platoons: &mut [crate::platoon::Platoon], ctx: &mut Ctx) {
         }
     }
 }
+
+// --- how squads look and see (plan §3) ------------------------------------------------------
+
+/// A squad's signature row and the height of the floor it fights from (0 outside buildings;
+/// in a building the upper floor if there is one).
+pub fn signature<'a>(
+    def: &'a sim_data::SquadDef,
+    s: &crate::world::SquadState,
+    map: &terrain::BakedMap,
+    td: &sim_data::TerrainData,
+) -> (&'a sim_data::PostureSignature, f64) {
+    let sig = &def.signature;
+    if let Some(b) = s.in_building.and_then(|id| map.building(id)) {
+        let floors = td.floors(b.class, b.height_m as f64);
+        let floor = (floors.min(2) - 1) as f64 * td.building(b.class).floor_height_m.get();
+        return (&sig.in_building, floor);
+    }
+    let row = match s.posture {
+        Posture::Moving => &sig.moving,
+        Posture::Halted => &sig.halted,
+        Posture::DugIn => &sig.dug_in,
+    };
+    (row, 0.0)
+}
+
+/// Where a squad inside building `id` at `inside` looks out towards `toward` (and is seen from
+/// there): just outside the wall on that side, so the building's own height does not block the
+/// sight line (plan §5: visible only through the facade facing the observer).
+pub fn facade_point(map: &terrain::BakedMap, id: u32, inside: crate::Vec2, toward: crate::Vec2) -> crate::Vec2 {
+    let d = crate::dist(inside, toward);
+    if d < 1.0 {
+        return inside;
+    }
+    let (ux, uy) = ((toward[0] - inside[0]) / d, (toward[1] - inside[1]) / d);
+    let mut p = inside;
+    for _ in 0..80 {
+        let (i, j) = map.elevation.cell_of(p[0], p[1]);
+        if map.building_id.get(i, j) != id {
+            return p;
+        }
+        p = [p[0] + ux * 0.5, p[1] + uy * 0.5];
+    }
+    p
+}

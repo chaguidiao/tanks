@@ -771,9 +771,16 @@ impl Sim {
         // 4–5. Sensors and reports.
         if tick.is_multiple_of(sensors::SENSOR_EVERY) {
             let g = Ground::new(&self.map, &self.data.terrain);
+            let look = sensors::InfantryLook {
+                squads: &self.squads,
+                model: &self.data.infantry,
+                td: &self.data.terrain,
+                month: self.scenario.date.1,
+            };
             let sightings = sensors::step(
                 &mut self.world,
                 &self.vehicles,
+                &look,
                 &g,
                 &self.data.detection,
                 &self.weather.at(self.start_time_s as f64 + tick as f64 * DT, &self.data.detection),
@@ -788,6 +795,7 @@ impl Sim {
                 self.sides[side].queue(
                     &self.world,
                     &self.vehicles,
+                    &self.squads,
                     s.observer,
                     s.target,
                     s.level,
@@ -802,7 +810,7 @@ impl Sim {
                 }
             }
             for side in self.sides.iter_mut() {
-                side.queue_updates(&mut self.world, &self.vehicles, tick, &mut self.rngs.sensors);
+                side.queue_updates(&mut self.world, &self.vehicles, &self.squads, tick, &mut self.rngs.sensors);
             }
         }
         for side in self.sides.iter_mut() {

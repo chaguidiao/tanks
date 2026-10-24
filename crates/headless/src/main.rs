@@ -18,6 +18,8 @@ const USAGE: &str = "usage: tanks-headless <command> [options]
   run     --scenario <id> [--seconds <s>] [--move <x,y>] [--seed <n>] [--summary]
                                                                        run a scenario headless (--summary: one CSV line;
                                                                        default --seconds: time limit + 60)
+  detect  [--observer <vehicle>] [--squad <id>] [--posture moving,halted,dug_in] [--ranges m,..] [--hour h]
+          [--cover <landcover>] [--year y] [--trials n] [--out <csv>]   infantry time-to-detect by posture
   replay  --file <replay.ron>                                          re-simulate a replay, verify its hash
   bench   [--samples <n>] [--ticks <n>] [--csv]                        timings: LOS, viewshed, battle-position search, sim throughput
   duel    [--shooter <id>] [--target <id>] [--ranges 500,1000,..] [--trials <n>] [--aspect front|side] [--year <y>]
@@ -136,6 +138,7 @@ fn run(cmd: &str, a: Args) -> Result<(), String> {
         }
         "bench" => bench(&data, &ds, &a)?,
         "duel" => duel(&ds, &a)?,
+        "detect" => detect(&ds, &a)?,
         "replay" => replay(&data, &ds, &a)?,
         _ => return Err(format!("unknown command '{cmd}'\n{USAGE}")),
     }
@@ -500,6 +503,159 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
             if let Some(dir) = std::path::Path::new(p).parent() {
                 std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
             }
+            std::fs::write(p, &csv).map_err(|e| format!("{p}: {e}"))?;
+            eprintln!("wrote {p}");
+            print!("{csv}");
+        }
+        None => print!("{csv}"),
+    }
+    Ok(())
+}
+
+/// Infantry time-to-detect (plan M8B-INFANTRY §3 deliverable): a vehicle observer and one squad at
+/// each range and posture on flat ground; per trial the time of the crew's first detection and
+/// recognition (truth tracks), up to 120 s.
+fn detect(ds: &DataSet, a: &Args) -> Result<(), String> {
+    use std::fmt::Write as _;
+    use std::sync::Arc;
+
+    use sim::view::WeaponsStatus;
+    use sim::{Addressee, Command, EntityId, SideId, Sim};
+    use sim_data::{MapRef, ScenarioDef, SideDef, UnitDef};
+    use terrain::{AuthoringPackage, MapManifest};
+
+    let observer = a.get("--observer").unwrap_or("bulwark_a1").to_owned();
+    let squad = a.get("--squad").unwrap_or("mr_squad").to_owned();
+    let trials: u64 = a.get("--trials").unwrap_or("100").parse().map_err(|_| "bad --trials")?;
+    let year: i32 = a.get("--year").unwrap_or("1990").parse().map_err(|_| "bad --year")?;
+    let hour: f64 = a.get("--hour").unwrap_or("10").parse().map_err(|_| "bad --hour")?;
+    let cover = a.get("--cover").unwrap_or("grassland");
+    let ranges: Vec<f64> = a
+        .get("--ranges")
+        .unwrap_or("250,500,750,1000,1500,2000")
+        .split(',')
+        .map(|r| r.trim().parse::<f64>().map_err(|_| format!("bad range '{r}'")))
+        .collect::<Result<_, _>>()?;
+    let postures: Vec<String> =
+        a.get("--posture").unwrap_or("moving,halted,dug_in").split(',').map(|p| p.trim().to_owned()).collect();
+    let max_r = ranges.iter().copied().fold(0.0, f64::max);
+    let m = MapManifest {
+        id: "detect".into(),
+        name: "detect".into(),
+        width_cells: 400,
+        height_cells: ((max_r + 800.0) / 4.0) as usize,
+        cell_size_m: 4.0,
+        seed: 1,
+        recipe: None,
+    };
+    let mut pkg = AuthoringPackage::new_flat(m, 100.0);
+    pkg.landcover.data.fill(ds.terrain.landcover_id(cover).ok_or_else(|| format!("no land cover '{cover}'"))?);
+    let map = Arc::new(terrain::bake(&pkg, &ds.terrain, &terrain::mobility::all_classes(ds)));
+    let data = Arc::new(ds.clone());
+    let unit = |cs: &str, vehicle: &str, squad: Option<&str>, pos: [f64; 2], heading_deg: f64| UnitDef {
+        callsign: cs.into(),
+        vehicle: vehicle.into(),
+        position: pos,
+        heading_deg,
+        platoon: None,
+        squad: squad.map(str::to_owned),
+        mounted_in: None,
+    };
+    let side = |name: &str, doctrine: &str, u: UnitDef| SideDef {
+        name: name.into(),
+        doctrine: doctrine.into(),
+        tech_year: None,
+        units: vec![u],
+        ai: None,
+        fire_support: vec![],
+        supply_points: vec![],
+    };
+    let mut csv =
+        String::from("posture,range_m,trials,p_detect_120s,mean_detect_s,p_recognise_120s,mean_recognise_s\n");
+    for posture in &postures {
+        for &r in &ranges {
+            let (mut det, mut det_t, mut rec, mut rec_t) = (0u64, 0.0, 0u64, 0.0);
+            for trial in 0..trials {
+                // A new column of ground each trial, so micro-relief is averaged over.
+                let x = 300.0 + (trial % 100) as f64 * 9.7;
+                let sc = ScenarioDef {
+                    id: "detect".into(),
+                    name: "detect".into(),
+                    date: (year, 6, 1),
+                    start_time_s: (hour * 3600.0) as u32,
+                    map: MapRef { id: "detect".into(), recipe: String::new(), seed: 1, size_m: 0.0 },
+                    seed: trial + 1,
+                    sides: vec![
+                        side("A", "western-combined", unit("O", &observer, None, [x, 200.0], 0.0)),
+                        side("B", "generic-opfor", unit("T", "", Some(&squad), [x, 200.0 + r], 180.0)),
+                    ],
+                    objectives: vec![],
+                    victory: None,
+                    weather: Default::default(),
+                    briefing: None,
+                    logistics: vec![],
+                };
+                let mut sim = Sim::new(&sc, data.clone(), map.clone())?;
+                for (s, id) in [(SideId(0), EntityId(1)), (SideId(1), EntityId(2))] {
+                    sim.submit_immediate(
+                        s,
+                        Command::WeaponsControl { to: Addressee::Unit(id), status: WeaponsStatus::Hold },
+                    );
+                }
+                match posture.as_str() {
+                    // Walking across the observer's line of sight.
+                    "moving" => sim.submit_immediate(
+                        SideId(1),
+                        Command::Move {
+                            unit: EntityId(2),
+                            destination: [x + 300.0, 200.0 + r],
+                            via: vec![],
+                            speed_limit_mps: None,
+                        },
+                    ),
+                    "halted" => {}
+                    "dug_in" => {
+                        if let Some(s) = sim.truth_mut().squad[1].as_mut() {
+                            s.halted_s = 1.0e6;
+                        }
+                    }
+                    other => return Err(format!("unknown posture '{other}'")),
+                }
+                let (mut d, mut c) = (None, None);
+                for _ in 0..(120 * sim::TICK_HZ) {
+                    sim.step();
+                    if let Some(tr) = sim.truth().sensors[0].as_ref().and_then(|s| s.track(1)) {
+                        d.get_or_insert(sim.time_s());
+                        if tr.level >= sim::view::ContactLevel::Recognised {
+                            c.get_or_insert(sim.time_s());
+                        }
+                    }
+                    if c.is_some() {
+                        break;
+                    }
+                }
+                if let Some(t) = d {
+                    det += 1;
+                    det_t += t;
+                }
+                if let Some(t) = c {
+                    rec += 1;
+                    rec_t += t;
+                }
+            }
+            let div = |a: f64, b: u64| if b > 0 { a / b as f64 } else { f64::NAN };
+            let _ = writeln!(
+                csv,
+                "{posture},{r:.0},{trials},{:.3},{:.1},{:.3},{:.1}",
+                det as f64 / trials as f64,
+                div(det_t, det),
+                rec as f64 / trials as f64,
+                div(rec_t, rec)
+            );
+        }
+    }
+    match a.get("--out") {
+        Some(p) => {
             std::fs::write(p, &csv).map_err(|e| format!("{p}: {e}"))?;
             eprintln!("wrote {p}");
             print!("{csv}");

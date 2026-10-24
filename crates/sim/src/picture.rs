@@ -7,7 +7,7 @@
 //! reporting; era-dependent lag is future work).
 
 use ai::picture::{
-    Contact, ContactId, ContactLevel, GunActivity, OwnUnit, PerceivedWorld, PlatoonView, ShotView, SideId,
+    Contact, ContactId, ContactKind, ContactLevel, GunActivity, OwnUnit, PerceivedWorld, PlatoonView, ShotView, SideId,
     SquadPosture, SquadView, Task,
 };
 use rand_chacha::ChaCha8Rng;
@@ -36,6 +36,7 @@ pub struct PendingReport {
     pub target: usize,
     pub pos: Vec2,
     pub level: ContactLevel,
+    pub kind: Option<ContactKind>,
     pub type_name: Option<String>,
     pub range_m: f64,
 }
@@ -74,6 +75,7 @@ impl SideState {
         &mut self,
         world: &World,
         vehicles: &[VehicleDef],
+        squads: &[sim_data::SquadDef],
         observer: usize,
         target: usize,
         level: ContactLevel,
@@ -97,14 +99,21 @@ impl SideState {
         let rr = (r + gauss(rng) * range_sigma).max(10.0);
         let pos = [op[0] + libm::sin(br) * rr, op[1] + libm::cos(br) * rr];
         let type_name = (level == ContactLevel::Identified)
-            .then(|| world.vehicle[target].map(|vi| vehicles[vi].name.clone()))
+            .then(|| match (world.vehicle[target], world.squad[target].as_ref()) {
+                (Some(vi), _) => Some(vehicles[vi].name.clone()),
+                (None, Some(s)) => Some(squads[s.def].name.clone()),
+                _ => None,
+            })
             .flatten();
+        let kind = (level >= ContactLevel::Recognised)
+            .then(|| if world.squad[target].is_some() { ContactKind::Infantry } else { ContactKind::Vehicle });
         self.pending.push(PendingReport {
             deliver_tick: tick + (delay / DT) as u64,
             observer,
             target,
             pos,
             level,
+            kind,
             type_name,
             range_m: r,
         });
@@ -149,6 +158,9 @@ impl SideState {
                     if r.type_name.is_some() {
                         c.type_name = r.type_name.clone();
                     }
+                    if r.kind.is_some() {
+                        c.kind = r.kind;
+                    }
                     (cid, upgraded)
                 }
                 None => {
@@ -158,6 +170,7 @@ impl SideState {
                         id: cid,
                         pos: r.pos,
                         level: r.level,
+                        kind: r.kind,
                         type_name: r.type_name.clone(),
                         first_report_s: now,
                         last_report_s: now,
@@ -188,7 +201,14 @@ impl SideState {
     }
 
     /// Periodic update reports for enemies still in sight.
-    pub fn queue_updates(&mut self, world: &mut World, vehicles: &[VehicleDef], tick: u64, rng: &mut ChaCha8Rng) {
+    pub fn queue_updates(
+        &mut self,
+        world: &mut World,
+        vehicles: &[VehicleDef],
+        squads: &[sim_data::SquadDef],
+        tick: u64,
+        rng: &mut ChaCha8Rng,
+    ) {
         let every = (UPDATE_EVERY_S / DT) as u64;
         for o in 0..world.len() {
             if world.side[o] != self.picture.side || !world.alive(o) {
@@ -205,7 +225,7 @@ impl SideState {
                 })
                 .unwrap_or_default();
             for (t, lvl) in due {
-                self.queue(world, vehicles, o, t, lvl, tick, rng);
+                self.queue(world, vehicles, squads, o, t, lvl, tick, rng);
                 if let Some(tr) = world.sensors[o].as_mut().and_then(|s| s.tracks.iter_mut().find(|x| x.target == t)) {
                     tr.last_report_tick = tick;
                 }

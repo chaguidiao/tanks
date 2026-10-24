@@ -22,6 +22,8 @@
         notes: "A pinned squad stays down: it neither moves nor returns fire until suppression decays."),
     thermal_crossover_share: (value: 0.3, source: "estimate", confidence: estimate,
         notes: "Body heat keeps people hotter than their background around dawn and dusk, unlike a vehicle's soaked hull."),
+    optical_contrast: (value: 0.5, source: "estimate", confidence: estimate,
+        notes: "NVESD-style models scale resolvable cycles with target contrast; men in camouflage against grass and hedges show perhaps half the apparent contrast of a vehicle and its shadow. Thermal sights are not affected (body heat)."),
     tall_crops: (
         months: [6, 7, 8, 9],
         visible_fraction: (value: 0.3, source: "TERRAIN.md §5.3; estimate", confidence: estimate,
