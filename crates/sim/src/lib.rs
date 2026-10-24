@@ -43,8 +43,8 @@ use terrain::path::Pathfinder;
 
 pub use ai::picture::{self as view, PerceivedWorld};
 pub use command::{
-    Addressee, Command, DenyReason, EndReason, Event, FireKind, FireReport, KillKind, LogpacKind, PlatoonReport,
-    PositionKind, SmokeMode, TimedCommand,
+    Addressee, CasualtyCause, Command, DenyReason, EndReason, Event, FireKind, FireReport, KillKind, LogpacKind,
+    PlatoonReport, PositionKind, SmokeMode, TimedCommand,
 };
 pub use world::{EntityId, SideId, World};
 

@@ -1,10 +1,11 @@
 // Infantry combat model (docs/plans/M8B-INFANTRY.md §4; DESIGN.md §14 #29). A squad is one
 // element: bursts of aimed fire are resolved as one draw each, HE as a burst over the squad's
-// spread. No public source gives these as model constants; values are estimates with the
-// reasoning in the notes, to be checked with the validation harness.
+// spread. Lethality and aiming error are checked against public sources in
+// docs/plans/M8B-CALIBRATION-NOTES.md §1 and by `tanks-headless firefight` (V2–V3); the other
+// values are estimates with the reasoning in the notes.
 (
-    lethality_per_hit: (value: 0.6, source: "estimate", confidence: estimate,
-        notes: "Most rifle and MG hits on a man take him out of the fight (killed or seriously wounded); hits on limbs or kit sometimes do not."),
+    lethality_per_hit: (value: 0.6, source: "Beebe & DeBakey, Battle Casualties (1952) p. 155; Hitchman, ORO-T-160 (1952)", confidence: low,
+        notes: "Chance a bullet hit takes the man out of this fight. About 25-30 % of men hit by bullets were killed (Beebe & DeBakey) and Hitchman takes 0.3 as the lethal probability of a hit; most of the rest were hospital admissions, so out of the fight. 0.6 allows for hits on kit, grazes and men who fight on; the sources support 0.6-0.8. Kept at the lower end (calibration Q1, 2026-10-24)."),
     max_round_hit: (value: 0.5, source: "estimate", confidence: estimate,
         notes: "Even at very short range a man under fire moves, so a single round is never a sure hit."),
     he_exposure: (

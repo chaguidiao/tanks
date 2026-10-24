@@ -17,7 +17,7 @@ use terrain::BakedMap;
 
 use crate::sensors::uniform;
 use crate::world::{Posture, World};
-use crate::{DT, Event, Vec2, dist};
+use crate::{CasualtyCause, DT, Event, Vec2, dist};
 
 pub struct Ctx<'a> {
     pub world: &'a mut World,
@@ -227,7 +227,7 @@ fn fire(ctx: &mut Ctx, k: usize, t: usize, wd: &SmallArmDef, guns: u8, moving: b
         let s = &mut ctx.world.suppression[t];
         *s = (*s + ctx.model.suppression_per_burst.get() * (rounds / 10.0).min(1.0) * prot.max(0.5)).min(1.0);
         let thr = ctx.ineffective[ctx.world.side[t].0 as usize];
-        crate::infantry::casualties(ctx.world, t, casualties, Some(k), thr, ctx.events);
+        crate::infantry::casualties(ctx.world, t, casualties, Some(k), CasualtyCause::SmallArms, thr, ctx.events);
     } else {
         let s = &mut ctx.world.suppression[t];
         *s = (*s + ctx.model.vehicle_suppression_per_burst.get()).min(1.0);
@@ -294,7 +294,7 @@ pub fn he_burst(
         let p = (frac * exposure * prot).clamp(0.0, 1.0);
         let lost = (0..s.strength).filter(|_| uniform(rng) < p).count() as u8;
         let thr = ineffective[world.side[k].0 as usize];
-        crate::infantry::casualties(world, k, lost, by, thr, events);
+        crate::infantry::casualties(world, k, lost, by, CasualtyCause::HighExplosive, thr, events);
     }
 }
 

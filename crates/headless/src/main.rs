@@ -20,6 +20,9 @@ const USAGE: &str = "usage: tanks-headless <command> [options]
                                                                        default --seconds: time limit + 60)
   detect  [--observer <vehicle>] [--squad <id>] [--posture moving,halted,dug_in] [--ranges m,..] [--hour h]
           [--cover <landcover>] [--year y] [--trials n] [--out <csv>]   infantry time-to-detect by posture
+  firefight [--shooter <squad>] [--target <squad>] [--weapons all|<name part>,..] [--posture halted,..]
+          [--ranges m,..] [--seconds s] [--year y] [--hour h] [--cover <landcover>] [--trials n] [--out <csv>]
+                                                                       small-arms validation: rounds per casualty
   replay  --file <replay.ron>                                          re-simulate a replay, verify its hash
   bench   [--samples <n>] [--ticks <n>] [--csv]                        timings: LOS, viewshed, battle-position search, sim throughput
   duel    [--shooter <id>] [--target <id>] [--ranges 500,1000,..] [--trials <n>] [--aspect front|side] [--year <y>]
@@ -139,6 +142,7 @@ fn run(cmd: &str, a: Args) -> Result<(), String> {
         "bench" => bench(&data, &ds, &a)?,
         "duel" => duel(&ds, &a)?,
         "detect" => detect(&ds, &a)?,
+        "firefight" => firefight(&ds, &a)?,
         "replay" => replay(&data, &ds, &a)?,
         _ => return Err(format!("unknown command '{cmd}'\n{USAGE}")),
     }
@@ -275,6 +279,8 @@ fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), St
     let t = Instant::now();
     let ticks = (seconds * sim::TICK_HZ as f64) as u64;
     let mut end = None;
+    // Men lost by cause (small arms, HE, with the carrier): calibration notes §1.3 V4.
+    let mut men_lost = [0u32; 3];
     for _ in 0..ticks {
         if sim.ended() {
             break;
@@ -282,6 +288,9 @@ fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), St
         for e in sim.step() {
             if let Event::ScenarioEnd { winner, reason } = &e {
                 end = Some((*winner, format!("{reason:?}")));
+            }
+            if let Event::Casualties { lost, cause, .. } = &e {
+                men_lost[*cause as usize] += *lost as u32;
             }
             let show = !summary
                 && matches!(
@@ -332,6 +341,16 @@ fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), St
             u.pos[1],
             u.speed,
             u.fuel_fraction * 100.0
+        );
+    }
+    let total: u32 = men_lost.iter().sum();
+    if total > 0 {
+        let pc = |n: u32| 100.0 * n as f64 / total as f64;
+        println!(
+            "men lost {total}: small arms {:.0} %  HE {:.0} %  with the carrier {:.0} %",
+            pc(men_lost[0]),
+            pc(men_lost[1]),
+            pc(men_lost[2])
         );
     }
     println!("ticks {ticks}  wall {wall:.2} s  ({:.0}x real time)", seconds / wall.max(1e-9));
@@ -651,6 +670,188 @@ fn detect(ds: &DataSet, a: &Args) -> Result<(), String> {
                 div(det_t, det),
                 rec as f64 / trials as f64,
                 div(rec_t, rec)
+            );
+        }
+    }
+    match a.get("--out") {
+        Some(p) => {
+            std::fs::write(p, &csv).map_err(|e| format!("{p}: {e}"))?;
+            eprintln!("wrote {p}");
+            print!("{csv}");
+        }
+        None => print!("{csv}"),
+    }
+    Ok(())
+}
+
+/// Small-arms validation harness (docs/plans/M8B-CALIBRATION-NOTES.md §1.3, V2–V3): one squad
+/// fires at another on flat ground; the target holds fire and stays in its posture. Per range and
+/// posture: rounds fired, casualties, rounds per casualty and casualties per weapon-minute from the
+/// first volley, for the shooter's weapons whose names contain one of `--weapons` (others silent).
+fn firefight(ds: &DataSet, a: &Args) -> Result<(), String> {
+    use std::fmt::Write as _;
+    use std::sync::Arc;
+
+    use sim::view::WeaponsStatus;
+    use sim::{Addressee, CasualtyCause, Command, EntityId, Event, SideId, Sim};
+    use sim_data::{MapRef, ScenarioDef, SideDef, UnitDef};
+    use terrain::{AuthoringPackage, MapManifest};
+
+    let shooter = a.get("--shooter").unwrap_or("rifle_squad_b").to_owned();
+    let target = a.get("--target").unwrap_or("mr_squad").to_owned();
+    let trials: u64 = a.get("--trials").unwrap_or("100").parse().map_err(|_| "bad --trials")?;
+    let seconds: f64 = a.get("--seconds").unwrap_or("120").parse().map_err(|_| "bad --seconds")?;
+    let year: i32 = a.get("--year").unwrap_or("1990").parse().map_err(|_| "bad --year")?;
+    let hour: f64 = a.get("--hour").unwrap_or("10").parse().map_err(|_| "bad --hour")?;
+    let cover = a.get("--cover").unwrap_or("grassland");
+    let ranges: Vec<f64> = a
+        .get("--ranges")
+        .unwrap_or("100,250,400")
+        .split(',')
+        .map(|r| r.trim().parse::<f64>().map_err(|_| format!("bad range '{r}'")))
+        .collect::<Result<_, _>>()?;
+    let postures: Vec<String> =
+        a.get("--posture").unwrap_or("halted").split(',').map(|p| p.trim().to_owned()).collect();
+    let picks: Vec<String> = a.get("--weapons").unwrap_or("all").split(',').map(|w| w.trim().to_uppercase()).collect();
+    let sdef = ds.squad(&shooter).ok_or_else(|| format!("no squad '{shooter}'"))?;
+    let kept: Vec<usize> = (0..sdef.weapons.len())
+        .filter(|&i| {
+            let w = &sdef.weapons[i];
+            w.in_service.is_none_or(|d| d.contains(year))
+                && picks.iter().any(|p| p == "ALL" || w.name.contains(p.as_str()))
+        })
+        .collect();
+    if kept.is_empty() {
+        return Err(format!("no weapon of '{shooter}' in service in {year} matches --weapons"));
+    }
+    let guns: u32 = kept.iter().map(|&i| sdef.weapons[i].count as u32).sum();
+    let label = kept.iter().map(|&i| sdef.weapons[i].name.as_str()).collect::<Vec<_>>().join("+");
+    let max_r = ranges.iter().copied().fold(0.0, f64::max);
+    let m = MapManifest {
+        id: "firefight".into(),
+        name: "firefight".into(),
+        width_cells: 400,
+        height_cells: ((max_r + 800.0) / 4.0) as usize,
+        cell_size_m: 4.0,
+        seed: 1,
+        recipe: None,
+    };
+    let mut pkg = AuthoringPackage::new_flat(m, 100.0);
+    pkg.landcover.data.fill(ds.terrain.landcover_id(cover).ok_or_else(|| format!("no land cover '{cover}'"))?);
+    let map = Arc::new(terrain::bake(&pkg, &ds.terrain, &terrain::mobility::all_classes(ds)));
+    let data = Arc::new(ds.clone());
+    let unit = |cs: &str, squad: &str, pos: [f64; 2], heading_deg: f64| UnitDef {
+        callsign: cs.into(),
+        vehicle: String::new(),
+        position: pos,
+        heading_deg,
+        platoon: None,
+        squad: Some(squad.to_owned()),
+        mounted_in: None,
+    };
+    let side = |name: &str, doctrine: &str, u: UnitDef| SideDef {
+        name: name.into(),
+        doctrine: doctrine.into(),
+        tech_year: None,
+        units: vec![u],
+        ai: None,
+        fire_support: vec![],
+        supply_points: vec![],
+    };
+    let mut csv = String::from(
+        "posture,range_m,weapons,guns,trials,p_engaged,mean_first_volley_s,rounds,casualties,rounds_per_casualty,casualties_per_gun_min\n",
+    );
+    for posture in &postures {
+        for &r in &ranges {
+            let (mut engaged, mut first_sum, mut rounds, mut lost, mut gun_min) = (0u64, 0.0, 0.0, 0u64, 0.0);
+            for trial in 0..trials {
+                let x = 300.0 + (trial % 100) as f64 * 9.7;
+                let sc = ScenarioDef {
+                    id: "firefight".into(),
+                    name: "firefight".into(),
+                    date: (year, 6, 1),
+                    start_time_s: (hour * 3600.0) as u32,
+                    map: MapRef { id: "firefight".into(), recipe: String::new(), seed: 1, size_m: 0.0 },
+                    seed: trial + 1,
+                    sides: vec![
+                        side("A", "western-combined", unit("S", &shooter, [x, 200.0], 0.0)),
+                        side("B", "generic-opfor", unit("T", &target, [x, 200.0 + r], 180.0)),
+                    ],
+                    objectives: vec![],
+                    victory: None,
+                    weather: Default::default(),
+                    briefing: None,
+                    logistics: vec![],
+                };
+                let mut sim = Sim::new(&sc, data.clone(), map.clone())?;
+                sim.submit_immediate(
+                    SideId(1),
+                    Command::WeaponsControl { to: Addressee::Unit(EntityId(2)), status: WeaponsStatus::Hold },
+                );
+                if let Some(s) = sim.truth_mut().squad[0].as_mut() {
+                    for w in s.weapons.iter_mut().filter(|w| !kept.contains(&w.def)) {
+                        w.bursts = 0;
+                    }
+                }
+                match posture.as_str() {
+                    "moving" => sim.submit_immediate(
+                        SideId(1),
+                        Command::Move {
+                            unit: EntityId(2),
+                            destination: [x + 300.0, 200.0 + r],
+                            via: vec![],
+                            speed_limit_mps: None,
+                        },
+                    ),
+                    "halted" => {}
+                    "dug_in" => {
+                        if let Some(s) = sim.truth_mut().squad[1].as_mut() {
+                            s.halted_s = 1.0e6;
+                        }
+                    }
+                    other => return Err(format!("unknown posture '{other}'")),
+                }
+                let mut first = None;
+                for _ in 0..((seconds * sim::TICK_HZ as f64) as u64) {
+                    for e in sim.step() {
+                        match e {
+                            Event::Volley { unit: EntityId(1), .. } => {
+                                first.get_or_insert(sim.time_s());
+                            }
+                            Event::Casualties {
+                                unit: EntityId(2), lost: n, cause: CasualtyCause::SmallArms, ..
+                            } => {
+                                lost += n as u64;
+                            }
+                            _ => {}
+                        }
+                    }
+                    if sim.truth().squad[1].as_ref().is_none_or(|s| s.strength == 0) {
+                        break;
+                    }
+                }
+                if let Some(t0) = first {
+                    engaged += 1;
+                    first_sum += t0;
+                    gun_min += guns as f64 * (sim.time_s() - t0) / 60.0;
+                }
+                if let Some(s) = sim.truth().squad[0].as_ref() {
+                    rounds += s
+                        .weapons
+                        .iter()
+                        .filter(|w| kept.contains(&w.def))
+                        .map(|w| (w.full - w.bursts) as f64 * sdef.weapons[w.def].rounds_per_burst.get())
+                        .sum::<f64>();
+                }
+            }
+            let div = |a: f64, b: f64| if b > 0.0 { a / b } else { f64::NAN };
+            let _ = writeln!(
+                csv,
+                "{posture},{r:.0},{label},{guns},{trials},{:.3},{:.1},{rounds:.0},{lost},{:.0},{:.3}",
+                engaged as f64 / trials as f64,
+                div(first_sum, engaged as f64),
+                div(rounds, lost as f64),
+                div(lost as f64, gun_min)
             );
         }
     }

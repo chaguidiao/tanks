@@ -13,7 +13,7 @@
             rounds_per_burst: (value: 3.0, source: "FM 100-2-3 (1991); estimate as for Blue rifles", confidence: low),
             burst_interval_s: (value: 10.0, source: "estimate as for Blue rifles", confidence: estimate),
             max_range_m: (value: 500.0, source: "FM 100-2-3 (1991): AK-74/AKM effective range about 500 m", confidence: low),
-            dispersion_mrad: (value: 6.0, source: "estimate", confidence: estimate, notes: "Same combat aiming error as Blue rifles."),
+            dispersion_mrad: (value: 6.0, source: "Hitchman, ORO-T-160 (1952) x Rowland (JORS 1987, 1991), as for Blue rifles", confidence: low, notes: "Same combat aiming error as Blue rifles."),
             bursts: 70),
         (name: "LIGHT MG (RPK)", count: 1,
             rounds_per_burst: (value: 4.0, source: "estimate", confidence: estimate, notes: "Magazine-fed: short bursts."),

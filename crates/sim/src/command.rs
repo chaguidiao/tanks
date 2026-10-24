@@ -362,6 +362,7 @@ pub enum Event {
         by: Option<EntityId>,
         lost: u8,
         left: u8,
+        cause: CasualtyCause,
     },
     /// A small-arms or machine-gun volley (squad weapons or a coax): `casualties` it caused.
     Volley {
@@ -387,6 +388,17 @@ pub enum DenyReason {
     Busy,
     /// Nothing to adjust: the battery has not fired a mission.
     NoMission,
+}
+
+/// What took a squad's men out (AAR and the infantry validation harness).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CasualtyCause {
+    /// Rifles, machine guns and coax.
+    SmallArms,
+    /// HE fragments and blast: main-gun and autocannon HE, artillery.
+    HighExplosive,
+    /// Riding in a carrier that was penetrated or destroyed.
+    Carrier,
 }
 
 /// Fire-support radio traffic (ATP 3-09.42 call-for-fire sequence).

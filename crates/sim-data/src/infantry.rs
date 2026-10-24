@@ -210,4 +210,13 @@ mod tests {
         assert!((m.round_hit(0.75, 3.0, 600.0) - p / 4.0).abs() < 1e-9);
         assert!(m.round_hit(0.75, 3.0, 5.0) <= m.max_round_hit.get());
     }
+
+    #[test]
+    fn round_hit_matches_hitchman_range_trials() {
+        // Hitchman, ORO-T-160 (1952): marksmen firing alone at 300 yd (274 m) hit a type E
+        // silhouette (0.43 m²) 24 % of the time; their aiming error is about 2 mrad per axis.
+        // Calibration notes §1.3 V1: 0.24 ± 0.03.
+        let p = model().round_hit(0.43, 2.0, 274.3);
+        assert!((p - 0.24).abs() <= 0.03, "{p}");
+    }
 }

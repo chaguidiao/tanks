@@ -6,7 +6,7 @@ use rand_chacha::ChaCha8Rng;
 use sim_data::InfantryModel;
 
 use crate::Event;
-use crate::command::KillKind;
+use crate::command::{CasualtyCause, KillKind};
 use crate::sensors::uniform;
 use crate::world::{Posture, World};
 
@@ -25,6 +25,7 @@ pub fn casualties(
     k: usize,
     lost: u8,
     by: Option<usize>,
+    cause: CasualtyCause,
     ineffective_fraction: f64,
     events: &mut Vec<Event>,
 ) {
@@ -48,7 +49,7 @@ pub fn casualties(
             cs.embarked.retain(|&q| q != k);
         }
     }
-    events.push(Event::Casualties { unit: world.id[k], by: by.map(|b| world.id[b]), lost, left });
+    events.push(Event::Casualties { unit: world.id[k], by: by.map(|b| world.id[b]), lost, left, cause });
 }
 
 /// Squads in a carrier share its fate (plan §2): a penetration costs a fraction of the men, a
@@ -80,7 +81,7 @@ pub fn carrier_hit(
         let Some(s) = world.squad[k].as_ref() else { continue };
         let lost = (0..s.strength).filter(|_| uniform(rng) < p).count() as u8;
         let thr = ineffective[world.side[k].0 as usize];
-        casualties(world, k, lost, by, thr, events);
+        casualties(world, k, lost, by, CasualtyCause::Carrier, thr, events);
         if destroyed {
             bail_out(world, carrier, k);
         }

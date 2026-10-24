@@ -53,6 +53,32 @@ sources; they are not quoted figures.
 | V4 | Share of infantry losses from small arms in a scenario with artillery and tank HE | 15–35 % |
 | V5 | Exchange ratio of 2005 Blue against 1990 Blue squads, same ground (after §3) | 1.4–1.9× |
 
+### 1.4 Harness results (2026-10-24, `tanks-headless firefight`, 100 trials, flat grass, by day)
+
+Blue rifle squad firing at a halted Red MR squad that holds fire; one weapon type at a time.
+
+| Weapons | Range | Rounds per casualty | Casualties per weapon-minute |
+|---|---|---|---|
+| 5 rifles | 100 m | 30 | 0.64 |
+| 5 rifles | 250 m | **246** | 0.076 |
+| 5 rifles | 400 m | 671 | 0.028 |
+| M60 class (1984) | 100 / 250 / 400 m | 21 / 156 / 468 | 4.83 / 0.63 / 0.21 |
+| SAW (1990) | 250 m | 208 | 0.29 |
+
+- **V1** passes: `round_hit(0.43, 2.0, 274.3)` = 0.23 (unit test in `sim-data`).
+- **V2** passes, at the strict end of the band: 246 rounds per casualty at 250 m (target
+  100–250). The visible fraction of a halted squad (about 0.65) is why this is higher than the
+  160 the formula alone gives.
+- **V3** passes: one M60 causes 7.5–8.2× the casualties of one rifle (target 6–10×). The SAW
+  causes 3.9×.
+- **V4** cannot be measured yet. `tanks-headless run` now prints men lost by cause (small arms,
+  HE, with the carrier). But no side's AI dismounts its squads yet (TODO F11), so in
+  `m8b-dismounts` all losses happen with the carrier. Measure V4 when F11 or a scenario with
+  fighting dismounts exists.
+- **V5** waits on the era data (B21–B23).
+- The Q1 decision stands: no value changed. Small-arms fire against men is on the lethal side
+  of what history suggests, but inside the V2 band of this harness.
+
 ## 2. Detection of infantry
 
 ### 2.1 What the sources say
