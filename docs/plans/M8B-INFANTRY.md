@@ -1,8 +1,20 @@
 # M8b infantry and M8h1a buildings: design plan (draft for review)
 
-Status: **draft, 2026-10-21, not agreed.** TODO.md Z6. Covers M8h1a (H7–H10) and M8b-a (B1, B3–B5, B7, B8, B10, B11, B14–B18); M8b-b (anti-tank teams) is sketched only where it shapes the core. Nothing here is coded until the decisions in §9 are agreed.
+Status: **decisions agreed 2026-10-24** (§9, recommendations accepted, plus the scope rule in §0). TODO.md Z6 is closed; M8h1a and M8b-a may start in the order in §10. Covers M8h1a (H7–H10) and M8b-a (B1, B3–B5, B7, B8, B10, B11, B14–B18); M8b-b (anti-tank teams) is sketched only where it shapes the core.
 
 Goal of the two phases together: an IFV platoon dismounts its squads by player command, the squads walk into a village and occupy a building, tanks and infantry can see and fight each other with sourced numbers, and every result replays to the same hash.
+
+## 0. Scope rule (agreed 2026-10-24)
+
+**Tank combat is the major theme of the game.** Infantry is abstracted: it exists to make armour decisions matter (dismounts in villages, ambushes, tanks that cannot clear a building without HE), not to be simulated in detail. Concretely:
+
+- A **dismounted squad is one abstract element**: one strength number, one of three postures (moving, halted, dug in or occupying), one burst-fire model, one signature row per posture. No fire teams, individual men, per-man visibility, or per-man movement in v1.
+- **Mounted squads** matter only at carrier level: they ride with the IFV, count toward its capacity, and are lost or wounded with it by a data table. Nothing about them is simulated while they are inside.
+- Infantry AI stays small: follow a foot route, take the posture for the situation, seek cover and return fire on contact, occupy a building. Drills are cited, but only the ones the dismount/remount and ambush scenarios need.
+- Building work (H7–H9) covers only what squads need from buildings. Narrow-street column AI (H10) is already done (2026-10-21, TODO.md) and needs no further work for infantry.
+- When in doubt, prefer the simpler model and record the cut in §14 of DESIGN.md. Fidelity that does not change a tank decision is out of scope.
+
+Anything in the sections below that goes beyond this rule should be cut or simplified, not built.
 
 ## 1. Scale and granularity
 
@@ -66,7 +78,7 @@ Today: building footprints are authored features with `height_m` and a `Building
 - **H7 building types**: `data/terrain/buildings.ron` per class: wall thickness, floors (from height), protection factor vs small arms / HE fragments / blast, capacity in squads per 100 m² of floor, and whether tanks can push through (D4 later). Sourced from FM 90-10-1 tables where possible.
 - **H8 identity**: baked map gains a `building_id.bin` raster (u32, 0 = none) plus `buildings.ron` in the baked package: id, class, height, footprint centroid, floor area, entrances (footprint edges facing a street or open ground). Sim keeps occupancy per building (squads inside), hashed.
 - **H9 foot mobility**: `MobilityClass::Foot` and its own planning speed raster: slope limit (~ 35–45°, data), forest slow but passable, deep water NO-GO, buildings passable only through entrances (route ends inside the building). Foot speeds and rates from ATP 3-21.8 (data). `MobilityClass` stops deriving only from `VehicleDef`.
-- **H10 narrow streets**: a baked `built_up` raster (building density within ~25 m above a threshold). Platoon AI collapses any formation to column in it; leaves column on exit. This changes the AI in today's villages (golden hash, balance re-run).
+- **H10 narrow streets** (done 2026-10-21, see TODO.md): a baked `built_up` raster (building density within ~25 m above a threshold). Platoon AI collapses any formation to column in it; leaves column on exit. This changes the AI in today's villages (golden hash, balance re-run).
 - Each of H7–H10 changes baked output: one `BAKER_VERSION` bump per commit that changes output, baker determinism test extended (fresh bake == loaded bake).
 
 **Occupancy (B7)**: a squad ordered to occupy a building walks to an entrance, then is "in" it: its position is the building, it observes and fires from the facade facing each target (eye height = a floor height), it is visible only through that facade, and its protection comes from H7. Capacity limits how many squads fit.
@@ -89,17 +101,19 @@ APP-6D infantry symbols (crossed frame; anti-armour modifier for AT teams; squad
 - `Replay` gains `sim_version: u32` (`#[serde(default)]` = 0). The sim has a `SIM_VERSION` constant bumped when behaviour changes. A replay with another version is **rejected cleanly** by `tanks-headless replay` and the client ("replay from sim version N; this build is M") instead of failing on a hash mismatch. Old replays (no field) read as version 0 and are rejected with the same message. Scenario files stay backward compatible (new fields optional).
 - AAR is recorded live, so it is not affected.
 
-## 9. Decisions needed at review
+## 9. Decisions (agreed 2026-10-24)
 
-| # | Question | Recommendation |
+| # | Question | Decision |
 |---|---|---|
 | 1 | Squad as one entity with strength, or fire teams / individuals? | **One entity per squad** with strength; fire-team split later as an order |
 | 2 | Mounted squads: entities from the start, or spawned on dismount? | **Entities from the start**, skipped while mounted |
 | 3 | Small arms vs personnel: per-burst expected-casualty draw, or per-round ballistics? | **Per burst** (per-round is too expensive and needs data we do not have) |
 | 4 | Dismounts as their own linked platoon, or members of the IFV platoon? | **Own linked platoon** (`1-D`) |
-| 5 | Towns (H3): new recipe and map, or change `demo`/`uplands` and re-balance? | **New map** for towns; existing maps keep villages (H7–H10 still change them, so Z1's batch is re-run once after H10) |
+| 5 | Towns (H3): new recipe and map, or change `demo`/`uplands` and re-balance? | **New map** for towns; existing maps keep villages (H7–H10 still change them, so Z1's batch is re-run once after H10 if H10 is done) |
 | 6 | Old replays after the change? | **Reject cleanly** with a version message; no migration |
 | 7 | Do squads use the radio delay and report like vehicles? | **Yes**, same reporting path; dismounted squads may lose position-report quality (E6 later) |
+
+Consequence of §0 (added at review): none for H10, which was already done on 2026-10-21 (narrow-street column AI, TODO.md). Only H7–H9 remain in M8h1a.
 
 ## 10. Order of work (each line is about one reviewable commit)
 
@@ -107,7 +121,7 @@ M8h1a:
 1. H8 building ids + baked building list (`BAKER_VERSION` bump, determinism test).
 2. H7 building class data table and protection lookup (data + unit tests).
 3. H9 foot mobility class and raster, `Pathfinder` for foot; test: a foot route through a village ends inside a building.
-4. H10 `built_up` raster and column-in-village; golden hash update; Z1 balance batch re-run.
+4. H10 is already done (2026-10-21). Nothing to do here. If H7–H9 change baked output, re-run the Z1 balance batch.
 
 M8b-a:
 5. Data: `SquadDef`, Cold War and modern squads, carrier `troops` block, BMP-1 class (B16, B17); loader tests.
