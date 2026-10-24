@@ -49,6 +49,8 @@ All timings, rates and stocks live in `data/combat/logistics.ron` (and the vehic
 
 ## 6. Defaults taken (change before slice 2 if wanted)
 
+All four confirmed by the user on 2026-10-24.
+
 | # | Question | Default |
 |---|---|---|
 | 1 | Supply point an entity or a scenario item? | **Scenario item** (graphic with stock); trucks are the entities (slice 6) |

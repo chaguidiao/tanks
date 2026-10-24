@@ -117,6 +117,8 @@ Out of scope until scenarios go past 2005: small drones, general issue of therma
 
 ## 4. Open questions for alignment
 
+Decided 2026-10-24: Q2 yes, body armour and night aiming go in with the era data as one step; Q3 yes, D2 is its own step before M8f1; Q4 no, enter `low`/`estimate` values with notes and upgrade them if the PDFs are obtained. Q1 is still open.
+
 1. Keep the lethality where it is (lenient side), or tighten it towards Rowland × Dupuy with a
    narrower aiming error or a smaller exposed area?
 2. Body armour and night aiming need per-squad model fields. Do them with the era data, or defer?
