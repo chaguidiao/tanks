@@ -67,20 +67,22 @@ Only what infantry needs from buildings; full towns wait for M8h1b.
 
 ## M8b-a — Infantry core
 Scope: abstracted per `docs/plans/M8B-INFANTRY.md` §0. Tank combat is the theme; a dismounted squad is one element with strength, three postures and one burst-fire model, and mounted squads matter only at carrier level.
-- [ ] B1 Dismount/infantry entity class (squads, mount/dismount from IFVs, small arms, posture, low signature) — §2.2, §13.2
+- [x] B1 Dismount/infantry entity class (squads, mount/dismount from IFVs, small arms, posture, low signature) — §2.2, §13.2. (Done 2026-10-24: `SquadState`/`CarrierState` components, mounted squads from the start, dismount platoons, `sim::infantry`; DESIGN.md §13.1 M8b-a)
 - [x] B3 Coaxial MG — §13.1 M3, M7b. (Done 2026-10-24: vehicle `coax` data on every vehicle; the gunner uses it on infantry inside its range unless the men are behind walls and HE is loaded; `sim::smallarms`)
 - [x] B4 HE/HEI vs soft targets (25 mm HEI, HE-FRAG on infantry) — §13.1 M7b. (Done 2026-10-24: `lethal_radius_m` on HE and multipurpose rounds, `Effect::Burst`, artillery `personnel_lethal_radius_m`; casualties by spread overlap, posture exposure and building protection)
 - [x] B5 Suppression of dismounts (reuse M7d model) — §13.1 M7d. (Done 2026-10-24: suppression per 10 rounds aimed at a squad, decaying with the M7d model; pinned squads do not move and fire slower and less accurately; react-to-contact drill)
 - [x] B7 Dismounts occupy buildings (uses H8) — supports F5. (Done 2026-10-24: `Command::OccupyBuilding`, squads ending a move inside a building occupy it up to its capacity; seen and engaged through the facade, protected by its class)
-- [ ] B8 Tall crops matter for infantry concealment — TERRAIN.md §5.3
-- [ ] B10 Infantry detection signatures: small target size by posture (standing/prone/dug in/in building), thermal contrast, motion cue; spotters in the picture as small contacts
+- [x] B8 Tall crops matter for infantry concealment — TERRAIN.md §5.3. (Done 2026-10-24: halted squads in crop land in the crop months show the data's visible fraction)
+- [x] B10 Infantry detection signatures: small target size by posture (standing/prone/dug in/in building), thermal contrast, motion cue; spotters in the picture as small contacts. (Done 2026-10-24: posture signature rows, facade sightlines in buildings, thermal crossover share, optical contrast, motion cue; contacts carry vehicle/infantry kind; `tanks-headless detect` CSV)
 - [x] B11 Tank gunnery vs infantry: target class "infantry", ammo selection (HE/canister), coax use, firing rules in the contact drill. (Done 2026-10-24: threat order: infantry inside the doctrine's close range, then vehicles, then infantry; `select_infantry_round`; contact drill fires only under the weapons status)
 - [x] B14 Minimal DISMOUNT/MOUNT command with hotkey (full plan actions and card in G8), so infantry is playable at once. (Done 2026-10-24: DISMOUNT/MOUNT card cell and context-menu item, hotkey U; `Command::Dismount` / `Mount`)
 - [x] B15 Client display of infantry: NATO infantry symbols in `symbols.rs`, small contacts in the picture, roster and status card, AAR, database entries. (Done 2026-10-24: APP-6D infantry symbols (smaller, squad echelon dot), infantry contacts, carriers show men aboard, squad status card, dismount platoon summary, AAR volleys and men hit/lost, INFANTRY database tab)
-- [ ] B16 Doctrine and data: infantry drills in `western-combined` and `generic-opfor` with citations (ATP 3-21.x); squad weapon data per era, sourced
+- [x] B16 Doctrine and data: infantry drills in `western-combined` and `generic-opfor` with citations (ATP 3-21.x); squad weapon data per era, sourced. (Done 2026-10-24: infantry blocks in both doctrine packs (security, react to contact, ineffective threshold, close-infantry range, spacing) with citations; dated squad weapons (M60 class to 1984, SAW from 1985))
 - [x] B17 BMP-1 class IFV (from I1) so Cold War scenarios have dismounts; duel harness re-run. (Done 2026-10-24: `skif_m0` with 73 mm HEAT/HE-FRAG and a manually guided missile; duels: its missile defeats an M1 side-on, Ph 0.94 at 1 km, 0.53 at 2 km, and not the M1 or T-72A front)
 - [x] B18 Replay/save versioning for the grown entity model (old replays load or are rejected cleanly, as decided in Z6). (Done 2026-10-24: `sim::SIM_VERSION`, `Replay.sim_version`; `Replay::from_ron` rejects another version with "replay from sim version N; this build is M")
-- Exit: IFV platoon dismounts and remounts by player command; tank vs infantry and infantry vs infantry unit tests; infantry detection CSV; golden hash updated deliberately.
+- Exit (met 2026-10-24; golden hash unchanged, no behaviour change without squads): IFV platoon dismounts and remounts by player command; tank vs infantry and infantry vs infantry unit tests; infantry detection CSV; golden hash updated deliberately.
+
+- Deferred from M8b-a (2026-10-24), small: squads ignore plans (`SetPlan` on a dismount platoon does nothing; G8), a `PlatoonMove` to a dismount platoon whose squads are all mounted is dropped, no small-arms resupply, ineffective squads do not withdraw on their own, squads do not use the radio delay for their own position (they report like vehicles), no fire-team split.
 
 ## M8b-b — Anti-tank teams
 - [ ] B2 ATGM teams on the existing guided-round model — §13.2

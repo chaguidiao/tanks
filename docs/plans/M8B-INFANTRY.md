@@ -1,6 +1,6 @@
-# M8b infantry and M8h1a buildings: design plan (draft for review)
+# M8b infantry and M8h1a buildings: design plan
 
-Status: **decisions agreed 2026-10-24** (§9, recommendations accepted, plus the scope rule in §0). TODO.md Z6 is closed; M8h1a and M8b-a may start in the order in §10. Covers M8h1a (H7–H10) and M8b-a (B1, B3–B5, B7, B8, B10, B11, B14–B18); M8b-b (anti-tank teams) is sketched only where it shapes the core.
+Status: **M8h1a and M8b-a done 2026-10-24** (DESIGN.md §13.1, §14 #30–31); decisions agreed 2026-10-24 (§9, recommendations accepted, plus the scope rule in §0). TODO.md Z6 is closed; M8h1a and M8b-a may start in the order in §10. Covers M8h1a (H7–H10) and M8b-a (B1, B3–B5, B7, B8, B10, B11, B14–B18); M8b-b (anti-tank teams) is sketched only where it shapes the core.
 
 Goal of the two phases together: an IFV platoon dismounts its squads by player command, the squads walk into a village and occupy a building, tanks and infantry can see and fight each other with sourced numbers, and every result replays to the same hash.
 
@@ -124,15 +124,15 @@ M8h1a:
 4. H10 is already done (2026-10-21). Nothing to do here. H7–H9 left the vehicle rasters unchanged (golden hash unchanged), so the Z1 balance batch was not re-run.
 
 M8b-a:
-5. Data: `SquadDef`, Cold War and modern squads, carrier `troops` block, BMP-1 class (B16, B17); loader tests.
-6. Entity: `SquadState`, `CarrierState`, scenario `mounted_in`, hash; replay `sim_version` (B1 part, B18).
-7. Mount/dismount commands and drill timing, foot movement, squad AI posture (B1, B14); scenario test: IFV platoon dismounts and remounts within the drill time.
-8. Signatures and detection by posture, contact kind, crops (B10, B8); probe CSV.
-9. Burst model, coax, HE vs infantry, suppression of dismounts (B3, B4, B5); unit tests per pairing with cited reference values.
-10. Gunnery target class infantry and contact-drill rules (B11); scenario test: tank platoon defeats a squad in the open, fails to clear a masonry building without HE.
-11. Building occupancy (B7) and protection.
-12. Client: symbols, roster, card button, status, AAR, database (B15); screenshot checks.
-13. Golden hash, balance batch and duel re-run; DESIGN.md §13.1 and §14 entries; TODO ticks.
+5. Data: `SquadDef`, Cold War and modern squads, carrier `troops` block, BMP-1 class (B16, B17); loader tests. **Done 2026-10-24.**
+6. Entity: `SquadState`, `CarrierState`, scenario `mounted_in`, hash; replay `sim_version` (B1 part, B18). **Done 2026-10-24.**
+7. Mount/dismount commands and drill timing, foot movement, squad AI posture (B1, B14); scenario test: IFV platoon dismounts and remounts within the drill time. **Done 2026-10-24.**
+8. Signatures and detection by posture, contact kind, crops (B10, B8); probe CSV. **Done 2026-10-24.**
+9. Burst model, coax, HE vs infantry, suppression of dismounts (B3, B4, B5); unit tests per pairing with cited reference values. **Done 2026-10-24.**
+10. Gunnery target class infantry and contact-drill rules (B11); scenario test: tank platoon defeats a squad in the open, fails to clear a masonry building without HE. **Done 2026-10-24.**
+11. Building occupancy (B7) and protection. **Done 2026-10-24.**
+12. Client: symbols, roster, card button, status, AAR, database (B15); screenshot checks. **Done 2026-10-24.**
+13. Golden hash, balance batch and duel re-run; DESIGN.md §13.1 and §14 entries; TODO ticks. **Done 2026-10-24.**
 
 ## 11. Tests (exit criteria from TODO.md)
 
