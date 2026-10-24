@@ -1,5 +1,6 @@
 //! NATO symbology subset (MIL-STD-2525D / APP-6D) drawn from primitives: frame shape encodes
-//! affiliation (rectangle friendly, diamond hostile), the ellipse is the armour icon.
+//! affiliation (rectangle friendly, diamond hostile), the ellipse is the armour icon and the
+//! crossed diagonals the infantry icon.
 
 use crate::render::{Frame, P2, Rgba};
 use crate::style;
@@ -23,6 +24,37 @@ pub fn hostile_armour(f: &mut Frame, p: P2, c: Rgba) {
     }
     f.ellipse_lines(p, r * 0.45, r * 0.28, c);
 }
+
+/// Friendly infantry (APP-6D: rectangle with crossed diagonals), drawn at `scale` of the armour
+/// frame (squads are smaller than vehicles on the map).
+pub fn friendly_infantry(f: &mut Frame, p: P2, c: Rgba, scale: f32) {
+    let (w, h) = (W * scale, H * scale);
+    let (x0, y0) = (p[0] - w / 2.0, p[1] - h / 2.0);
+    f.rect(x0, y0, w, h, Rgba(10, 18, 24, 200));
+    f.rect_lines(x0, y0, w, h, c);
+    f.line([x0, y0], [x0 + w, y0 + h], 1.5, c);
+    f.line([x0, y0 + h], [x0 + w, y0], 1.5, c);
+}
+
+/// Hostile infantry: diamond with crossed diagonals, at `scale`.
+pub fn hostile_infantry(f: &mut Frame, p: P2, c: Rgba, scale: f32) {
+    let r = H * 0.9 * scale;
+    let pts = [[p[0], p[1] - r], [p[0] + r, p[1]], [p[0], p[1] + r], [p[0] - r, p[1]]];
+    for k in 0..4 {
+        f.line(pts[k], pts[(k + 1) % 4], 2.0, c);
+    }
+    let d = r * 0.5;
+    f.line([p[0] - d, p[1] - d], [p[0] + d, p[1] + d], 1.5, c);
+    f.line([p[0] - d, p[1] + d], [p[0] + d, p[1] - d], 1.5, c);
+}
+
+/// Squad echelon amplifier: one dot above a frame of half-height `h2`.
+pub fn echelon_squad(f: &mut Frame, p: P2, h2: f32, c: Rgba) {
+    f.circle([p[0], p[1] - h2 - 4.0], 1.6, c);
+}
+
+/// Squads are drawn at this fraction of a vehicle symbol.
+pub const SQUAD_SCALE: f32 = 0.75;
 
 /// Field artillery: friendly rectangle or hostile diamond frame with a filled dot (APP-6D).
 pub fn field_artillery(f: &mut Frame, p: P2, c: Rgba, friendly: bool) {

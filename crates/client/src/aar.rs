@@ -20,6 +20,8 @@ pub struct UnitSnap {
     pub pos: [f64; 2],
     pub heading: f64,
     pub condition: Condition,
+    /// Squads: (men fit, establishment) and whether it rides in a carrier.
+    pub squad: Option<((u8, u8), bool)>,
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +46,11 @@ pub struct SideStats {
     pub hits: u32,
     pub kills: u32,
     pub losses: u32,
+    /// Small-arms and coax volleys (not counted as rounds).
+    pub volleys: u32,
+    /// Enemy men put out of action by this side, and own men lost (squads).
+    pub men_hit: u32,
+    pub men_lost: u32,
     /// Range band (500 m) → (shots, hits).
     pub by_range: BTreeMap<u32, (u32, u32)>,
 }
@@ -110,6 +117,21 @@ impl Recorder {
                         }
                     }
                 }
+                Event::Volley { unit, from, to, casualties } => {
+                    if let Some(s) = side_of(*unit) {
+                        self.stats[s.0 as usize].volleys += 1;
+                        self.shots.push(Shot { t, side: s, from: *from, to: *to, hit: *casualties > 0 });
+                    }
+                }
+                Event::Casualties { unit, by, lost, .. } => {
+                    if let Some(s) = side_of(*unit) {
+                        self.stats[s.0 as usize].men_lost += *lost as u32;
+                        let shooter = by.and_then(side_of).map(|x| x.0 as usize);
+                        if let Some(k) = kill_credit(shooter, s.0 as usize, n_sides) {
+                            self.stats[k].men_hit += *lost as u32;
+                        }
+                    }
+                }
                 Event::SpotReport { side, .. } => {
                     let st = &mut self.stats[side.0 as usize];
                     st.first_report_s.get_or_insert(t);
@@ -136,6 +158,7 @@ impl Recorder {
                         pos: w.transform[k].pos,
                         heading: w.transform[k].heading,
                         condition: w.condition[k],
+                        squad: w.squad[k].as_ref().map(|s| ((s.strength, s.men), s.mounted_in.is_some())),
                     })
                     .collect(),
             });
@@ -207,10 +230,12 @@ impl AarView {
         }
         for u in &fr.units {
             let p = cam.to_screen(u.pos);
-            if u.side.0 == 0 {
-                symbols::friendly_armour(f, p, style::FRIENDLY);
-            } else {
-                symbols::hostile_armour(f, p, style::HOSTILE);
+            match (u.side.0 == 0, u.squad) {
+                (_, Some((_, true))) => continue, // riding in its carrier
+                (true, Some(_)) => symbols::friendly_infantry(f, p, style::FRIENDLY, symbols::SQUAD_SCALE),
+                (false, Some(_)) => symbols::hostile_infantry(f, p, style::HOSTILE, symbols::SQUAD_SCALE),
+                (true, None) => symbols::friendly_armour(f, p, style::FRIENDLY),
+                (false, None) => symbols::hostile_armour(f, p, style::HOSTILE),
             }
             match u.condition {
                 Condition::Destroyed => symbols::destroyed(f, p, Rgba(220, 210, 190, 255)),
@@ -218,8 +243,12 @@ impl AarView {
                 Condition::Operational => symbols::heading_staff(f, p, u.heading, 8.0, Rgba(200, 200, 200, 160)),
             }
             if let Some(cs) = rec.callsigns.get(&u.id) {
+                let cs = match u.squad {
+                    Some(((n, of), _)) => format!("{cs} {n}/{of}"),
+                    None => cs.clone(),
+                };
                 f.text(
-                    cs,
+                    &cs,
                     p[0] + 16.0,
                     p[1] - 5.0,
                     style::FONT,
@@ -279,6 +308,12 @@ impl AarView {
                 format!("  ROUNDS {}  HITS {}  KILLS {}  LOSSES {}", s.rounds, s.hits, s.kills, s.losses),
                 style::TEXT,
             ));
+            if s.volleys > 0 || s.men_lost > 0 || s.men_hit > 0 {
+                lines.push((
+                    format!("  MG/SMALL ARMS VOLLEYS {}  MEN HIT {}  MEN LOST {}", s.volleys, s.men_hit, s.men_lost),
+                    style::TEXT,
+                ));
+            }
             let bands: Vec<String> = s
                 .by_range
                 .iter()

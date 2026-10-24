@@ -152,6 +152,12 @@ impl Game {
             self.posture_item(Posture::Ammo, "Q"),
             item("BREAK CONTACT", "X", Cmd::BreakContact, self.sel_platoon.is_some()),
             {
+                let t = self.troops_order();
+                let label = if t.is_some_and(|t| t.1) { "MOUNT" } else { "DISMOUNT" };
+                let it = MenuItem::new(label, MenuAct::Cmd(Cmd::Dismount)).key("U");
+                if t.is_some() { it } else { it.disabled("NO TROOPS") }
+            },
+            {
                 let it = MenuItem::new("RESUPPLY", MenuAct::Cmd(Cmd::Resupply)).key("R");
                 match self.sel_platoon {
                     _ if self.picture().supply_points.is_empty() => it.disabled("NO SUPPLY POINT"),

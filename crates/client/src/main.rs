@@ -1035,6 +1035,7 @@ fn script(g: &mut Game, o: &Opts) -> Result<(), String> {
                 "D" => g.press(Cmd::Reverse),
                 "K" => g.press(Cmd::Contingency),
                 "Q" => g.press(Cmd::Ammo),
+                "U" => g.press(Cmd::Dismount),
                 _ => {}
             }
         }

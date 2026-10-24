@@ -7,7 +7,10 @@
 //! selected-vehicle card (I).
 
 use sim::gunnery;
-use sim_data::{AmmoDef, Confidence, DataSet, DoctrinePack, LandCoverDef, ServiceDates, SoilDef, Stat, VehicleDef};
+use sim_data::{
+    AmmoDef, Confidence, DataSet, DoctrinePack, LandCoverDef, PostureSignature, ServiceDates, SmallArmDef, SoilDef,
+    SquadDef, Stat, VehicleDef,
+};
 
 use crate::hud::{self, Button, Look, Rect};
 use crate::menu::{self, Backdrop};
@@ -17,6 +20,7 @@ use crate::style;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Vehicles,
+    Infantry,
     Ammunition,
     Terrain,
     Doctrine,
@@ -24,11 +28,12 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 5] = [Tab::Vehicles, Tab::Ammunition, Tab::Terrain, Tab::Doctrine, Tab::Combat];
+    pub const ALL: [Tab; 6] = [Tab::Vehicles, Tab::Infantry, Tab::Ammunition, Tab::Terrain, Tab::Doctrine, Tab::Combat];
 
     fn label(self) -> &'static str {
         match self {
             Tab::Vehicles => "VEHICLES",
+            Tab::Infantry => "INFANTRY",
             Tab::Ammunition => "AMMUNITION",
             Tab::Terrain => "TERRAIN",
             Tab::Doctrine => "DOCTRINE",
@@ -99,7 +104,7 @@ pub struct Sheet {
 pub struct Database {
     pub tab: Tab,
     /// Selected entry per tab.
-    sel: [usize; 5],
+    sel: [usize; 6],
     scroll: f32,
     /// Show only what is in service in this year (vehicles, ammunition, batteries).
     pub year: Option<i32>,
@@ -188,6 +193,14 @@ pub fn entries(ds: &DataSet, tab: Tab, year: Option<i32>) -> Vec<(usize, String,
             .filter(|(_, v)| live(&v.in_service))
             .map(|(k, v)| (k, v.name.clone(), years(&v.in_service)))
             .collect(),
+        Tab::Infantry => ds
+            .squads
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| live(&s.in_service))
+            .map(|(k, s)| (k, s.name.clone(), years(&s.in_service)))
+            .chain(std::iter::once((ds.squads.len(), "INFANTRY COMBAT MODEL".to_owned(), String::new())))
+            .collect(),
         Tab::Ammunition => ds
             .ammo
             .iter()
@@ -240,6 +253,8 @@ fn next_year(y: Option<i32>) -> Option<i32> {
 pub fn sheet(ds: &DataSet, tab: Tab, k: usize) -> Option<Sheet> {
     Some(match tab {
         Tab::Vehicles => vehicle_sheet(ds, ds.vehicles.get(k)?),
+        Tab::Infantry if k == ds.squads.len() => infantry_model_sheet(ds),
+        Tab::Infantry => squad_sheet(ds, ds.squads.get(k)?),
         Tab::Ammunition => ammo_sheet(ds, ds.ammo.get(k)?),
         Tab::Terrain => {
             let n = ds.terrain.landcover.len();
@@ -313,6 +328,19 @@ fn vehicle_sheet(ds: &DataSet, v: &VehicleDef) -> Sheet {
                 sim_data::AmmoStowage::Exposed => "EXPOSED (HIGH COOK-OFF RISK)",
             },
         ),
+    ]);
+    if let Some(c) = &v.coax {
+        l.extend(small_arm_lines("COAX", c));
+    }
+    if let Some(t) = &v.troops {
+        l.extend([
+            section("TROOPS"),
+            fact("SEATS", format!("{} MEN", t.capacity_men)),
+            stat("DISMOUNT DRILL", &t.dismount_s, secs),
+            stat("MOUNT DRILL", &t.mount_s, secs),
+        ]);
+    }
+    l.extend([
         section("FIRE CONTROL"),
         fact("LASER RANGEFINDER", yes(fc.laser_rangefinder)),
         stat("LASER RANGE ERROR", &fc.laser_range_error_m, |x| format!("{x:.0} M (1 SD)")),
@@ -453,6 +481,119 @@ fn defeat_text(ds: &DataSet, a: &AmmoDef, v: &VehicleDef) -> String {
 }
 
 const DEFEAT_FORMULA: &str = "PENETRATION AT REMAINING VELOCITY ≥ ARMOUR, TO THE ROUND'S MAX RANGE (CHEMICAL ROUNDS: × CE FACTOR; ERA TILE ASSUMED TO FIRE)";
+
+/// Rows for one small arm or MG (burst model, plan M8B-INFANTRY §4).
+fn small_arm_lines(head: &str, w: &SmallArmDef) -> Vec<Line> {
+    let mut l = vec![section(&format!("{head}: {}", w.name))];
+    if let Some(d) = &w.in_service {
+        l.push(fact("IN SERVICE", years(d)));
+    }
+    l.extend([
+        fact("WEAPONS", format!("{}", w.count)),
+        stat("ROUNDS PER BURST", &w.rounds_per_burst, plain),
+        stat("BURST INTERVAL", &w.burst_interval_s, secs),
+        calc(
+            "SUSTAINED RATE",
+            format!("{:.0} RDS/MIN", w.rounds_per_burst.get() * 60.0 / w.burst_interval_s.get()),
+            "ROUNDS PER BURST · 60 / INTERVAL",
+        ),
+        stat("MAX RANGE", &w.max_range_m, |x| format!("{x:.0} M")),
+        stat("DISPERSION", &w.dispersion_mrad, mrad),
+        fact("BASIC LOAD", format!("{} BURSTS PER WEAPON", w.bursts)),
+    ]);
+    l
+}
+
+fn posture_lines(head: &str, p: &PostureSignature) -> Vec<Line> {
+    vec![
+        section(head),
+        stat("WIDTH SEEN", &p.width_m, m),
+        stat("HEIGHT SEEN", &p.height_m, m),
+        calc(
+            "CRITICAL SIZE",
+            m((p.width_m.get() * p.height_m.get()).sqrt()),
+            "SQRT(WIDTH · HEIGHT) (JOHNSON CRITERIA INPUT)",
+        ),
+        stat("EXPOSED AREA PER MAN", &p.man_area_m2, |x| format!("{x:.2} M²")),
+        stat("EYE HEIGHT", &p.eye_height_m, m),
+    ]
+}
+
+fn squad_sheet(ds: &DataSet, s: &SquadDef) -> Sheet {
+    let mut l = vec![
+        section("GENERAL"),
+        fact("MIRRORS", s.mirrors.to_uppercase()),
+        fact("IN SERVICE", years(&s.in_service)),
+        fact("MEN", format!("{}", s.men)),
+        stat("DIG-IN TIME", &s.dig_in_s, |x| format!("{:.0} MIN", x / 60.0)),
+    ];
+    for w in &s.weapons {
+        l.extend(small_arm_lines("WEAPON", w));
+    }
+    l.push(section("SENSORS"));
+    for se in &s.sensors {
+        l.push(stat(&format!("{} ({})", se.name, years(&se.in_service)), &se.cycles_per_mrad, |x| {
+            format!("{x:.1} CYC/MRAD")
+        }));
+    }
+    let sig = &s.signature;
+    l.extend(posture_lines("SIGNATURE: MOVING", &sig.moving));
+    l.extend(posture_lines("SIGNATURE: HALTED", &sig.halted));
+    l.extend(posture_lines("SIGNATURE: DUG IN", &sig.dug_in));
+    l.extend(posture_lines("SIGNATURE: IN A BUILDING", &sig.in_building));
+    let carriers: Vec<String> = ds
+        .vehicles
+        .iter()
+        .filter(|v| v.troops.as_ref().is_some_and(|t| t.capacity_men >= s.men))
+        .map(|v| v.name.clone())
+        .collect();
+    l.push(section("CARRIED BY"));
+    l.push(Line::Text(if carriers.is_empty() { "NONE".into() } else { carriers.join(", ") }));
+    Sheet { title: s.name.clone(), sub: "SQUAD (ONE ELEMENT WITH A STRENGTH, DESIGN.MD §14 #29)".into(), lines: l }
+}
+
+fn infantry_model_sheet(ds: &DataSet) -> Sheet {
+    let m = &ds.infantry;
+    let mut l = vec![
+        section("SMALL ARMS (ONE DRAW PER BURST)"),
+        stat("LETHALITY PER HIT", &m.lethality_per_hit, pct),
+        stat("MAX HIT PER ROUND", &m.max_round_hit, pct),
+        calc(
+            "PRONE MAN, PK BURST AT 300 M",
+            format!("{:.2} CASUALTIES", 8.0 * m.round_hit(0.15, 5.0, 300.0) * m.lethality_per_hit.get()),
+            "8 RDS · AREA / (2π (σ R)²) · LETHALITY",
+        ),
+        stat("SUPPRESSION PER 10 RDS", &m.suppression_per_burst, plain),
+        stat("SUPPRESSION ON VEHICLES", &m.vehicle_suppression_per_burst, plain),
+        stat("PINNED ABOVE", &m.pinned_above, plain),
+        stat("FIRE AT VEHICLES INSIDE", &m.vehicle_engage_m, |x| format!("{x:.0} M")),
+        section("HE"),
+        stat("SQUAD SPREAD RADIUS", &m.spread_radius_m, |x| format!("{x:.0} M")),
+        stat("EXPOSURE MOVING", &m.he_exposure.moving, plain),
+        stat("EXPOSURE HALTED", &m.he_exposure.halted, plain),
+        stat("EXPOSURE DUG IN", &m.he_exposure.dug_in, plain),
+        section("DETECTION"),
+        stat("THERMAL CROSSOVER SHARE", &m.thermal_crossover_share, plain),
+        stat("OPTICAL CONTRAST", &m.optical_contrast, |x| format!("× {x:.2}")),
+        stat("TALL CROPS VISIBLE", &m.tall_crops.visible_fraction, pct),
+        fact("TALL CROP MONTHS", m.tall_crops.months.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")),
+        section("MOUNTED SQUADS"),
+        stat("LOST ON CATASTROPHIC KILL", &m.mounted_loss.catastrophic, pct),
+        stat("LOST ON PENETRATION", &m.mounted_loss.penetration, pct),
+        section("BUILDINGS"),
+    ];
+    for b in &ds.terrain.buildings {
+        let n = format!("{:?}", b.class).to_uppercase();
+        l.extend([
+            stat(&format!("{n} WALL"), &b.wall_thickness_m, |x| format!("{x:.2} M")),
+            stat(&format!("{n} VS SMALL ARMS"), &b.protection.small_arms, pct),
+            stat(&format!("{n} VS FRAGMENTS"), &b.protection.fragments, pct),
+            stat(&format!("{n} VS BLAST"), &b.protection.blast, pct),
+            stat(&format!("{n} SQUADS PER 100 M²"), &b.squads_per_100m2, plain),
+        ]);
+    }
+    Sheet { title: "INFANTRY COMBAT MODEL".into(), sub: "DATA/COMBAT/INFANTRY.RON".into(), lines: l }
+}
 
 fn ammo_sheet(ds: &DataSet, a: &AmmoDef) -> Sheet {
     let mut l = vec![
@@ -816,13 +957,18 @@ fn tag(o: &Origin) -> (&'static str, Rgba) {
 
 impl Database {
     pub fn new(from_pause: bool) -> Self {
-        Self { tab: Tab::Vehicles, sel: [0; 5], scroll: 0.0, year: None, from_pause }
+        Self { tab: Tab::Vehicles, sel: [0; 6], scroll: 0.0, year: None, from_pause }
     }
 
-    /// Open on a vehicle (the game's selected-vehicle card).
+    /// Open on a vehicle or squad type (the game's selected-unit card).
     pub fn vehicle(ds: &DataSet, id: &str, from_pause: bool) -> Self {
         let mut d = Self::new(from_pause);
-        d.sel[0] = ds.vehicles.iter().position(|v| v.id == id).unwrap_or(0);
+        if let Some(k) = ds.squads.iter().position(|s| s.id == id) {
+            d.tab = Tab::Infantry;
+            d.sel[Tab::Infantry.index()] = k;
+        } else {
+            d.sel[0] = ds.vehicles.iter().position(|v| v.id == id).unwrap_or(0);
+        }
         d
     }
 

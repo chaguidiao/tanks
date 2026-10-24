@@ -1,0 +1,51 @@
+// M8b tech demo: Blue mechanised infantry (three M2 with a squad each) reaches the village
+// ahead of a Red tank and BMP attack. Play as Blue: dismount (U) short of the village, send
+// the squads into houses (right click a building with the dismount platoon selected) and use
+// the carriers as a fire base. Red's commander does not dismount its squads yet (TODO F11).
+(
+    id: "m8b-dismounts",
+    name: "DISMOUNTS IN THE VILLAGE",
+    date: (1985, 6, 15),
+    start_time_s: 36000, // 10:00
+    map: (id: "demo", recipe: "rolling-farmland", seed: 42, size_m: 8000.0),
+    seed: 8,
+    briefing: "SITUATION: A RED TANK PLATOON AND A BMP PLATOON ARE EXPECTED FROM THE NORTH-EAST.\n\nMISSION: 1ST MECHANISED PLATOON SEIZES AND HOLDS THE VILLAGE FOR 30 MINUTES. RED WINS BY HOLDING THE VILLAGE UNCONTESTED FOR 2 MINUTES.\n\nNOTES: DISMOUNT (U) SHORT OF THE VILLAGE, OCCUPY HOUSES WITH THE SQUADS (RIGHT CLICK A BUILDING), KEEP THE M2S BACK AS A FIRE BASE. SQUADS IN MASONRY HOUSES NEED HE TO BE CLEARED.",
+    objectives: [(name: "VILLAGE", centre: (4500.0, 4300.0), radius_m: 350.0)],
+    victory: (time_limit_s: 1800.0, objective: "VILLAGE", attacker: 1, destroyed_fraction: 0.75),
+    sides: [
+        (
+            name: "BLUE",
+            doctrine: "western-combined",
+            units: [
+                (callsign: "1-1", vehicle: "ward_m2", position: (4560.0, 3620.0), heading_deg: 30.0, platoon: "1"),
+                (callsign: "1-2", vehicle: "ward_m2", position: (4640.0, 3600.0), heading_deg: 30.0, platoon: "1"),
+                (callsign: "1-3", vehicle: "ward_m2", position: (4480.0, 3590.0), heading_deg: 30.0, platoon: "1"),
+                (callsign: "1-1A", squad: "rifle_squad_b", mounted_in: "1-1", position: (0.0, 0.0), heading_deg: 0.0),
+                (callsign: "1-2A", squad: "rifle_squad_b", mounted_in: "1-2", position: (0.0, 0.0), heading_deg: 0.0),
+                (callsign: "1-3A", squad: "rifle_squad_b", mounted_in: "1-3", position: (0.0, 0.0), heading_deg: 0.0),
+            ],
+            ai: (tasks: [
+                (platoons: ["1"], mission: Defend(centre: (4600.0, 4100.0), radius_m: 200.0, facing_deg: 45.0)),
+            ]),
+        ),
+        (
+            name: "RED",
+            doctrine: "generic-opfor",
+            units: [
+                (callsign: "211", vehicle: "kurgan_a", position: (6400.0, 7500.0), heading_deg: 225.0, platoon: "21"),
+                (callsign: "212", vehicle: "kurgan_a", position: (6460.0, 7560.0), heading_deg: 225.0, platoon: "21"),
+                (callsign: "213", vehicle: "kurgan_a", position: (6520.0, 7620.0), heading_deg: 225.0, platoon: "21"),
+                (callsign: "221", vehicle: "skif_m0", position: (6700.0, 7450.0), heading_deg: 225.0, platoon: "22"),
+                (callsign: "222", vehicle: "skif_m0", position: (6760.0, 7510.0), heading_deg: 225.0, platoon: "22"),
+                (callsign: "223", vehicle: "skif_m0", position: (6820.0, 7570.0), heading_deg: 225.0, platoon: "22"),
+                (callsign: "221A", squad: "mr_squad", mounted_in: "221", position: (0.0, 0.0), heading_deg: 0.0),
+                (callsign: "222A", squad: "mr_squad", mounted_in: "222", position: (0.0, 0.0), heading_deg: 0.0),
+                (callsign: "223A", squad: "mr_squad", mounted_in: "223", position: (0.0, 0.0), heading_deg: 0.0),
+            ],
+            ai: (tasks: [
+                (platoons: ["21", "22"], start_s: 120.0,
+                 mission: Attack(axis: [(6000.0, 6600.0), (5400.0, 5500.0)], objective: "VILLAGE")),
+            ]),
+        ),
+    ],
+)

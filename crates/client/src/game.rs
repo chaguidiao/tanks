@@ -130,6 +130,8 @@ pub enum Cmd {
     BreakContact,
     /// Service-station resupply at the supply point nearest the platoon.
     Resupply,
+    /// DISMOUNT the selected carrier platoon's squads, or MOUNT a dismount platoon.
+    Dismount,
     Contingency,
     NextPlatoon,
     PhaseLine,
@@ -449,6 +451,18 @@ impl Game {
 
     /// As `issue_move`, with this order's own speed limit (the platoon's own speed setting is what `issue_move` passes).
     pub fn issue_move_at(&mut self, via: Vec<[f64; 2]>, dest: [f64; 2], speed_limit_mps: Option<f64>) {
+        // Squads sent onto a building occupy it (TODO B7).
+        if via.is_empty()
+            && let Some(to) = self.addressee()
+            && self.members_of(to).iter().filter_map(|m| self.picture().unit(*m)).all(|u| u.squad.is_some())
+            && let Some(b) = self.sim.map().building_at(dest[0], dest[1]).filter(|b| !b.entrances.is_empty())
+        {
+            let id = b.id;
+            let cs = self.addressee_cs(to);
+            self.radio(format!("TO {cs}: OCCUPY BUILDING AT GRID {}.", format::grid(dest)));
+            self.order(Command::OccupyBuilding { to, building: id });
+            return;
+        }
         let start = self.selection_centre();
         let cps: Vec<String> =
             via.iter().enumerate().map(|(i, p)| format!("CP {} GRID {}", i + 1, format::grid(*p))).collect();
@@ -753,6 +767,7 @@ impl Game {
             (Key::Char('q'), C::Ammo),
             (Key::Char('x'), C::BreakContact),
             (Key::Char('r'), C::Resupply),
+            (Key::Char('u'), C::Dismount),
             (Key::Char('h'), C::Halt),
             (Key::Char('m'), C::Move),
             (Key::Char('a'), C::Engage),
@@ -1188,6 +1203,19 @@ impl Game {
                     self.radio(format!("TO {cs}: BREAK CONTACT."));
                 }
             }
+            Cmd::Dismount => {
+                if let Some((p, mount, _)) = self.troops_order() {
+                    let cs = self.platoon_cs(p);
+                    self.remember_replaced(p);
+                    if mount {
+                        self.order(Command::Mount { platoon: p });
+                        self.radio(format!("TO {cs}: MOUNT UP."));
+                    } else {
+                        self.order(Command::Dismount { platoon: p });
+                        self.radio(format!("TO {cs}: DISMOUNT."));
+                    }
+                }
+            }
             Cmd::Resupply => {
                 if let Some(p) = self.sel_platoon
                     && let Some((id, sp)) = self.resupply_point(p).map(|sp| (sp.id, sp.callsign.clone()))
@@ -1488,6 +1516,33 @@ impl Game {
 
     /// The supply point a RESUPPLY order sends platoon `p` to: the one it is already going to,
     /// else the nearest to the platoon.
+    /// DISMOUNT / MOUNT for the selected platoon (plan M8B-INFANTRY §6, TODO B14): (platoon,
+    /// mount?, squads concerned). A carrier platoon with squads aboard dismounts them; a dismount
+    /// platoon, or a carrier platoon whose squads are all out, mounts.
+    fn troops_order(&self) -> Option<(PlatoonId, bool, usize)> {
+        let p = self.sel_platoon?;
+        let pic = self.picture();
+        let pv = pic.platoon(p)?;
+        let squads: Vec<&OwnUnit> =
+            pic.own.iter().filter(|u| u.squad.is_some() && u.condition != Condition::Destroyed).collect();
+        let mounted = |u: &&OwnUnit| u.squad.as_ref().is_some_and(|s| s.posture == sim::view::SquadPosture::Mounted);
+        let carried: Vec<&&OwnUnit> = squads
+            .iter()
+            .filter(|u| u.squad.as_ref().and_then(|s| s.carrier).is_some_and(|c| pv.members.contains(&c)))
+            .collect();
+        let own: Vec<&&OwnUnit> = squads.iter().filter(|u| u.platoon == Some(p)).collect();
+        if !carried.is_empty() {
+            let aboard = carried.iter().filter(|u| mounted(u)).count();
+            return Some(if aboard > 0 { (p, false, aboard) } else { (p, true, carried.len()) });
+        }
+        let aboard = own.iter().filter(|u| mounted(u)).count();
+        if aboard > 0 {
+            return Some((p, false, aboard));
+        }
+        let out = own.iter().filter(|u| !mounted(u) && u.squad.as_ref().is_some_and(|s| s.carrier.is_some())).count();
+        (out > 0).then_some((p, true, out))
+    }
+
     fn resupply_point(&self, p: PlatoonId) -> Option<&sim::view::SupplyPointView> {
         let pic = self.picture();
         if let Some(id) = pic.platoon(p).and_then(|v| v.resupply_at) {
@@ -1940,14 +1995,18 @@ impl Game {
             let p = cam.to_screen(c.pos);
             let age = pic.time_s - c.last_report_s;
             let fade = if age > 60.0 { 110 } else { 255 };
+            let infantry = c.kind == Some(sim::view::ContactKind::Infantry);
             let label = match (&c.type_name, c.level) {
                 (Some(t), _) => t.clone(),
+                (None, ContactLevel::Recognised) if infantry => "INF".into(),
                 (None, ContactLevel::Recognised) => "TANK".into(),
                 (None, _) => "UNK".into(),
             };
+            let hostile = Rgba(style::HOSTILE.0, style::HOSTILE.1, style::HOSTILE.2, fade);
             match c.level {
                 ContactLevel::Detected => symbols::unknown_frame(f, p, Rgba(214, 196, 110, fade)),
-                _ => symbols::hostile_armour(f, p, Rgba(style::HOSTILE.0, style::HOSTILE.1, style::HOSTILE.2, fade)),
+                _ if infantry => symbols::hostile_infantry(f, p, hostile, symbols::SQUAD_SCALE),
+                _ => symbols::hostile_armour(f, p, hostile),
             }
             if c.destroyed {
                 symbols::destroyed(f, p, Rgba(220, 200, 180, fade));
@@ -2000,10 +2059,30 @@ impl Game {
             let followers = self.followers();
             let (pos, hdg) = self.interp(u.id, u.pos, u.heading);
             let p = cam.to_screen(pos);
-            if cam.mpp < 0.6 {
-                symbols::hull(f, cam, pos, hdg, u.turret, 7.9, 3.7, style::FRIENDLY);
+            let squad = u.squad.as_ref();
+            if squad.is_some_and(|s| s.posture == sim::view::SquadPosture::Mounted) {
+                continue; // inside its carrier, which shows the troops aboard
             }
-            symbols::friendly_armour(f, p, style::FRIENDLY);
+            if let Some(s) = squad {
+                if cam.mpp < 0.6 {
+                    // The ground the squad's men are spread over.
+                    f.circle_lines(
+                        p,
+                        (15.0 / cam.mpp) as f32,
+                        Rgba(style::FRIENDLY.0, style::FRIENDLY.1, style::FRIENDLY.2, 90),
+                    );
+                }
+                symbols::friendly_infantry(f, p, style::FRIENDLY, symbols::SQUAD_SCALE);
+                symbols::echelon_squad(f, p, 6.5, style::FRIENDLY);
+                if s.ineffective {
+                    symbols::damaged(f, p, style::AMBER);
+                }
+            } else {
+                if cam.mpp < 0.6 {
+                    symbols::hull(f, cam, pos, hdg, u.turret, 7.9, 3.7, style::FRIENDLY);
+                }
+                symbols::friendly_armour(f, p, style::FRIENDLY);
+            }
             match u.condition {
                 Condition::Destroyed => symbols::destroyed(f, p, style::FRIENDLY),
                 Condition::MobilityKill | Condition::FirepowerKill => symbols::damaged(f, p, style::AMBER),
@@ -2012,7 +2091,20 @@ impl Game {
             if u.speed > 0.3 {
                 symbols::heading_staff(f, p, hdg, 14.0, style::FRIENDLY);
             }
-            f.text(&u.callsign, p[0] + 16.0, p[1] - 5.0, style::FONT, style::FRIENDLY);
+            // Squads show men fit; carriers the men aboard.
+            let aboard: u8 = pic
+                .own
+                .iter()
+                .filter_map(|q| q.squad.as_ref())
+                .filter(|q| q.carrier == Some(u.id) && q.posture == sim::view::SquadPosture::Mounted)
+                .map(|q| q.strength.0)
+                .sum();
+            let tag = match squad {
+                Some(s) => format!("{} {}/{}", u.callsign, s.strength.0, s.strength.1),
+                None if aboard > 0 => format!("{} +{aboard}", u.callsign),
+                None => u.callsign.clone(),
+            };
+            f.text(&tag, p[0] + 16.0, p[1] - 5.0, style::FONT, style::FRIENDLY);
             let selected = self.sel_unit == Some(u.id)
                 || (self.sel_platoon.is_some() && u.platoon == self.sel_platoon)
                 || u.platoon.is_some_and(|p| followers.contains(&p));
@@ -2474,6 +2566,15 @@ impl Game {
                     .enabled(sel)
                     .tip("AMMUNITION TYPE: AUTO (BY TARGET CLASS) OR HELD ON ONE TYPE (LIST)"),
             ),
+            (15, {
+                let t = self.troops_order();
+                let label = if t.is_some_and(|t| t.1) { "MOUNT" } else { "DISMOUNT" };
+                b(label, Cmd::Dismount)
+                    .key("U")
+                    .value(t.map_or(String::new(), |t| format!("{} SQD", t.2)))
+                    .enabled(t.is_some())
+                    .tip("DISMOUNT THE CARRIERS' SQUADS (CARRIERS HALT FOR THE RAMP DRILL, SQUADS TAKE UP SECURITY), OR MOUNT THEM AGAIN (SQUADS WALK BACK AND BOARD)")
+            }),
             (14, {
                 let state = self.addressee().and_then(|to| self.engine_smoke(to));
                 b("ENG SMOKE", Cmd::EngineSmoke)
@@ -2607,9 +2708,10 @@ impl Game {
             members = pv.members.iter().filter_map(|m| pic.unit(*m)).collect();
             let mut types: Vec<(String, usize)> = Vec::new();
             for u in &members {
-                match types.iter_mut().find(|(n, _)| *n == u.vehicle_name) {
+                let name = type_name(u);
+                match types.iter_mut().find(|(n, _)| *n == name) {
                     Some(t) => t.1 += 1,
-                    None => types.push((u.vehicle_name.clone(), 1)),
+                    None => types.push((name, 1)),
                 }
             }
             let types: Vec<String> = types.iter().map(|(n, k)| format!("{k}× {n}")).collect();
@@ -2634,6 +2736,17 @@ impl Game {
                     style::TEXT_DIM,
                 ));
             }
+            let squads: Vec<&sim::view::SquadView> = members.iter().filter_map(|u| u.squad.as_ref()).collect();
+            if !squads.is_empty() {
+                let (fit, est): (u32, u32) =
+                    squads.iter().fold((0, 0), |a, s| (a.0 + s.strength.0 as u32, a.1 + s.strength.1 as u32));
+                let effective = squads.iter().filter(|s| !s.ineffective && s.strength.0 > 0).count();
+                let aboard = squads.iter().filter(|s| s.posture == sim::view::SquadPosture::Mounted).count();
+                head.push((
+                    format!("MEN {fit}/{est}   EFFECTIVE {effective}/{}   MOUNTED {aboard}", squads.len()),
+                    if fit < est { style::AMBER } else { style::TEXT },
+                ));
+            }
             let up = members.iter().filter(|u| u.condition == Condition::Operational).count();
             let rounds: u32 = members.iter().filter(|u| u.condition != Condition::Destroyed).map(|u| u.ammo).sum();
             let fuel = members
@@ -2643,10 +2756,12 @@ impl Game {
                 .fold(f64::INFINITY, f64::min);
             let fuel = if fuel.is_finite() { format!("{:.0} %", fuel * 100.0) } else { "-".into() };
             let full: u32 = members.iter().filter(|u| u.condition != Condition::Destroyed).map(|u| u.full_load).sum();
-            head.push((
-                format!("UP {up}/{}   MAIN GUN {rounds}/{full} RDS   FUEL LOW {fuel}", members.len()),
-                if up < members.len() { style::AMBER } else { style::TEXT },
-            ));
+            if squads.is_empty() {
+                head.push((
+                    format!("UP {up}/{}   MAIN GUN {rounds}/{full} RDS   FUEL LOW {fuel}", members.len()),
+                    if up < members.len() { style::AMBER } else { style::TEXT },
+                ));
+            }
             if let Some(sp) = pv.resupply_at.and_then(|id| pic.supply_points.iter().find(|sp| sp.id == id)) {
                 let n = |s: ServiceStage| members.iter().filter(|u| u.service == Some(s)).count();
                 head.push((
@@ -2696,7 +2811,10 @@ impl Game {
             members.clear();
         }
         for m in members {
-            let label = format!("{:<5} {:>3} KM/H {:>3} RDS", m.callsign, format::kmh(m.speed), m.ammo);
+            let label = match &m.squad {
+                Some(s) => format!("{:<5} {}/{} MEN {}", m.callsign, s.strength.0, s.strength.1, s.posture.label()),
+                None => format!("{:<5} {:>3} KM/H {:>3} RDS", m.callsign, format::kmh(m.speed), m.ammo),
+            };
             rows.push(
                 Button::new(Rect::new(x + 6.0, cy, W - 12.0, 20.0), Look::Row, label, GameAction::SelectUnit(m.id))
                     .value(short_task(m))
@@ -2747,8 +2865,46 @@ impl Game {
             .unwrap_or_else(|| format!("WORD {}", word + 1))
     }
 
+    /// Status card of one own squad (plan M8B-INFANTRY §7): strength, posture, ammunition.
+    fn squad_card(&self, u: &OwnUnit, s: &sim::view::SquadView, pic: &PerceivedWorld) -> Vec<(String, Rgba)> {
+        let row = |k: &str, v: String| format!("{k:<8} {v}");
+        let mut out = vec![(format!("{}   {}", u.callsign, s.type_name), style::FRIENDLY)];
+        let state = match (u.condition, s.ineffective) {
+            (Condition::Destroyed, _) => "DESTROYED",
+            (_, true) => "COMBAT-INEFFECTIVE",
+            _ => "EFFECTIVE",
+        };
+        let c = if s.strength.0 < s.strength.1 { style::AMBER } else { style::TEXT };
+        out.push((format!("{state}   MEN {}/{}", s.strength.0, s.strength.1), c));
+        let mut posture = s.posture.label().to_owned();
+        if let Some(cs) = s.carrier.and_then(|c| pic.unit(c)).map(|c| c.callsign.clone()) {
+            posture = if s.posture == sim::view::SquadPosture::Mounted {
+                format!("{posture} IN {cs}")
+            } else {
+                format!("{posture} (CARRIER {cs})")
+            };
+        }
+        out.push((row("POSTURE", posture), style::TEXT));
+        out.push((row("TASK", short_task(u)), style::TEXT));
+        out.push((row("GRID", format!("{}   HDG {}", format::grid8(u.pos), format::mils(u.heading))), style::TEXT));
+        out.push((row("SPEED", format!("{} KM/H", format::kmh(u.speed))), style::TEXT));
+        out.push((row("AMMO", format!("{} BURSTS   WEAPONS {}", s.bursts, weapons_str(u.weapons))), style::TEXT));
+        let sup = if u.suppression > 0.6 {
+            "PINNED"
+        } else if u.suppression > 0.3 {
+            "UNDER FIRE"
+        } else {
+            "-"
+        };
+        out.push((row("FIRE", sup.to_owned()), if u.suppression > 0.3 { style::AMBER } else { style::TEXT_DIM }));
+        out
+    }
+
     /// Status card of one own vehicle: what its crew reports (own units are reported exactly).
     fn unit_card(&self, u: &OwnUnit, pic: &PerceivedWorld) -> Vec<(String, Rgba)> {
+        if let Some(s) = &u.squad {
+            return self.squad_card(u, s, pic);
+        }
         let ds = self.sim.data();
         let def = ds.vehicle(&u.vehicle_id);
         let year = self.scenario.date.0;
@@ -2820,6 +2976,9 @@ impl Game {
         let target = u.target.and_then(|c| pic.contact(c)).map_or("NONE".to_owned(), |c| {
             let what = match (&c.type_name, c.level) {
                 (Some(t), _) => t.clone(),
+                (None, ContactLevel::Recognised) if c.kind == Some(sim::view::ContactKind::Infantry) => {
+                    "INFANTRY".into()
+                }
                 (None, ContactLevel::Recognised) => "TANK".into(),
                 (None, _) => "UNKNOWN".into(),
             };
@@ -3100,6 +3259,11 @@ fn checkpoints(f: &mut Frame, cam: &Camera, pts: &[[f64; 2]], c: Rgba) {
     f.line([s[0] - 6.0, s[1] + 6.0], [s[0] + 6.0, s[1] - 6.0], 1.5, c);
 }
 
+/// Vehicle or squad type of an own unit.
+fn type_name(u: &OwnUnit) -> String {
+    u.squad.as_ref().map_or_else(|| u.vehicle_name.clone(), |s| s.type_name.clone())
+}
+
 fn speed_short(v: Option<f64>) -> String {
     v.map_or("MAX".into(), |v| format!("{} KM/H", format::kmh(v)))
 }
@@ -3239,10 +3403,12 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
         Event::SpotReport { side, reporter, contact, level, new, range_m } if *side == pic.side => {
             let c = pic.contact(*contact)?;
             let r = unit(*reporter)?;
+            let infantry = c.kind == Some(sim::view::ContactKind::Infantry);
             let what = match (&c.type_name, level) {
                 (Some(t), _) => t.clone(),
+                (None, ContactLevel::Recognised) if infantry => "DISMOUNTED INFANTRY".into(),
                 (None, ContactLevel::Recognised) => "TANK".into(),
-                (None, _) => "UNKNOWN VEHICLE".into(),
+                (None, _) => "UNKNOWN".into(),
             };
             let dir = format::mils(ai::drive::bearing(r.pos, c.pos));
             let head = if *new { "CONTACT" } else { "UPDATE" };
@@ -3270,6 +3436,13 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                 (Some(k), _) => format!("{}: HIT. {}.", u.callsign, kill_text(*k)),
                 (None, false) => format!("{}: HIT, NO PENETRATION.", u.callsign),
                 (None, true) => format!("{}: HIT, MINOR DAMAGE.", u.callsign),
+            }
+        }
+        Event::Casualties { unit: u, lost, left, .. } => {
+            let u = unit(*u)?;
+            match left {
+                0 => format!("{}: SQUAD DESTROYED AT GRID {}.", u.callsign, format::grid(u.pos)),
+                _ => format!("{}: {lost} CASUALTIES, {left} FIT TO FIGHT.", u.callsign),
             }
         }
         Event::TriggerFired { side, id } if *side == pic.side => {
@@ -3340,7 +3513,13 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                 PlatoonReport::Bounding { section } => format!("{cs}: SECTION {section} BOUNDING."),
                 PlatoonReport::Dismounted => format!("{cs}: DISMOUNTED."),
                 PlatoonReport::Mounted => format!("{cs}: MOUNTED."),
-                PlatoonReport::Strength { remaining, of } => format!("{cs}: {remaining} OF {of} VEHICLES OPERATIONAL."),
+                PlatoonReport::Strength { remaining, of } => {
+                    let squads = pic
+                        .platoon(*platoon)
+                        .is_some_and(|pv| pv.members.iter().filter_map(|m| pic.unit(*m)).any(|u| u.squad.is_some()));
+                    let what = if squads { "SQUADS" } else { "VEHICLES" };
+                    format!("{cs}: {remaining} OF {of} {what} OPERATIONAL.")
+                }
             }
         }
         Event::FireSupport { side, battery, at, report } if *side == pic.side => {
