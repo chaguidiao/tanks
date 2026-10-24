@@ -6,6 +6,7 @@
 pub mod combat;
 pub mod doctrine;
 pub mod fires;
+pub mod infantry;
 pub mod logistics;
 pub mod scenario;
 pub mod smoke;
@@ -18,6 +19,7 @@ use std::path::{Path, PathBuf};
 pub use combat::*;
 pub use doctrine::*;
 pub use fires::*;
+pub use infantry::*;
 pub use logistics::*;
 pub use scenario::*;
 pub use smoke::*;
@@ -54,6 +56,7 @@ pub fn ron_options() -> ron::Options {
 #[derive(Debug, Clone)]
 pub struct DataSet {
     pub vehicles: Vec<VehicleDef>,
+    pub squads: Vec<SquadDef>,
     pub ammo: Vec<AmmoDef>,
     pub doctrine: Vec<DoctrinePack>,
     pub detection: DetectionModel,
@@ -63,6 +66,7 @@ pub struct DataSet {
     pub weather: WeatherTable,
     pub fires: FireSupportModel,
     pub logistics: LogisticsModel,
+    pub infantry: InfantryModel,
     pub terrain: TerrainData,
 }
 
@@ -83,6 +87,11 @@ impl DataSet {
             vehicles.push(load_ron::<VehicleDef>(&p)?);
         }
         vehicles.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut squads = Vec::new();
+        for p in ron_files(&root.join("infantry"))? {
+            squads.push(load_ron::<SquadDef>(&p)?);
+        }
+        squads.sort_by(|a, b| a.id.cmp(&b.id));
         let mut ammo = Vec::new();
         for p in ron_files(&root.join("ammo"))? {
             ammo.push(load_ron::<AmmoDef>(&p)?);
@@ -108,6 +117,7 @@ impl DataSet {
         terrain.validate().map_err(|message| DataError { path: root.join("terrain"), message })?;
         let ds = Self {
             vehicles,
+            squads,
             ammo,
             doctrine,
             detection: load_ron(&root.join("combat/detection.ron"))?,
@@ -117,6 +127,7 @@ impl DataSet {
             weather: load_ron(&root.join("combat/weather.ron"))?,
             fires: load_ron(&root.join("combat/fires.ron"))?,
             logistics: load_ron(&root.join("combat/logistics.ron"))?,
+            infantry: load_ron(&root.join("combat/infantry.ron"))?,
             terrain,
         };
         for a in &ds.ammo {
@@ -131,6 +142,14 @@ impl DataSet {
                     _ => return Err(bad("smoke round needs a known smoke kind")),
                 },
                 _ => {}
+            }
+        }
+        for s in &ds.squads {
+            if ds.vehicle(&s.id).is_some() || s.men == 0 || s.weapons.is_empty() {
+                return Err(DataError {
+                    path: root.join("infantry"),
+                    message: format!("{}: squad ids must differ from vehicle ids; needs men and weapons", s.id),
+                });
             }
         }
         for v in &ds.vehicles {
@@ -201,6 +220,10 @@ impl DataSet {
 
     pub fn vehicle(&self, id: &str) -> Option<&VehicleDef> {
         self.vehicles.iter().find(|v| v.id == id)
+    }
+
+    pub fn squad(&self, id: &str) -> Option<&SquadDef> {
+        self.squads.iter().find(|s| s.id == id)
     }
 }
 

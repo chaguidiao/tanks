@@ -9,5 +9,6 @@
     velocity_loss_mps_per_km: (value: 50.0, source: "estimate", confidence: estimate),
     flat_penetration_mm: (value: 450.0, source: "open-source estimates for early 125 mm HEAT (~450 mm RHA)", confidence: low),
     dispersion_mrad: (value: 0.6, source: "estimate", confidence: estimate),
-    preferred_vs: [ifv, recon],
+    preferred_vs: [ifv, recon, infantry],
+    lethal_radius_m: (value: 8.0, source: "estimate: HEAT shell body fragments", confidence: estimate, notes: "Secondary fragment effect of a HEAT round."),
 )

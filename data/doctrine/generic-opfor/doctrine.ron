@@ -59,4 +59,12 @@
         (value: 6.94, source: "estimate", confidence: estimate, notes: "25 km/h: cross-country move keeping formation over rough ground."),
         (value: 4.17, source: "estimate", confidence: estimate, notes: "15 km/h: slow, deliberate movement (less dust and noise, easier to keep station)."),
     ],
+    // Dismounted infantry (plan M8B-INFANTRY §6).
+    infantry: (
+        security_radius_m: (value: 20.0, source: "FM 100-2-1 (1984), dismounted attack; estimate", confidence: estimate),
+        cover_search_m: (value: 50.0, source: "estimate", confidence: estimate),
+        ineffective_fraction: (value: 0.5, source: "estimate", confidence: estimate),
+        close_infantry_m: (value: 500.0, source: "estimate", confidence: estimate),
+        squad_spacing_m: (value: 50.0, source: "FM 100-2-1 (1984): dismounted platoon frontage about 100-150 m; estimate", confidence: estimate),
+    ),
 )

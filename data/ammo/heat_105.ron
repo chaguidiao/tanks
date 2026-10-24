@@ -10,5 +10,6 @@
     flat_penetration_mm: (value: 400.0, source: "open-source estimates for 105 mm HEAT (range ~380-430 mm RHA)", confidence: low,
         notes: "Shaped-charge penetration is nearly independent of range."),
     dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate),
-    preferred_vs: [ifv, recon],
+    preferred_vs: [ifv, recon, infantry],
+    lethal_radius_m: (value: 8.0, source: "estimate: HEAT shell body fragments", confidence: estimate, notes: "Secondary fragment effect of a HEAT round."),
 )

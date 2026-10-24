@@ -1,0 +1,36 @@
+// Infantry combat model (docs/plans/M8B-INFANTRY.md §4; DESIGN.md §14 #29). A squad is one
+// element: bursts of aimed fire are resolved as one draw each, HE as a burst over the squad's
+// spread. No public source gives these as model constants; values are estimates with the
+// reasoning in the notes, to be checked with the validation harness.
+(
+    lethality_per_hit: (value: 0.6, source: "estimate", confidence: estimate,
+        notes: "Most rifle and MG hits on a man take him out of the fight (killed or seriously wounded); hits on limbs or kit sometimes do not."),
+    max_round_hit: (value: 0.5, source: "estimate", confidence: estimate,
+        notes: "Even at very short range a man under fire moves, so a single round is never a sure hit."),
+    he_exposure: (
+        moving: (value: 1.0, source: "estimate", confidence: estimate, notes: "Standing or moving: the reference case for lethal radius."),
+        halted: (value: 0.4, source: "estimate", confidence: estimate, notes: "Prone: the body presents a fraction of the area to fragments from a ground burst."),
+        dug_in: (value: 0.1, source: "estimate", confidence: estimate, notes: "Fighting positions stop all but near-vertical fragments and direct hits."),
+    ),
+    spread_radius_m: (value: 15.0, source: "ATP 3-21.8 (2016) ch. 2, squad formations; estimate", confidence: estimate,
+        notes: "Two fire teams in wedge with about 10 m between men cover a circle of roughly this radius."),
+    suppression_per_burst: (value: 0.15, source: "estimate", confidence: estimate,
+        notes: "A burst cracking past makes a squad go to ground; three or four in a few seconds pin it."),
+    vehicle_suppression_per_burst: (value: 0.04, source: "estimate", confidence: estimate,
+        notes: "Small arms cannot hurt armour but force an exposed commander down."),
+    pinned_above: (value: 0.6, source: "estimate", confidence: estimate,
+        notes: "A pinned squad stays down: it neither moves nor returns fire until suppression decays."),
+    thermal_crossover_share: (value: 0.3, source: "estimate", confidence: estimate,
+        notes: "Body heat keeps people hotter than their background around dawn and dusk, unlike a vehicle's soaked hull."),
+    tall_crops: (
+        months: [6, 7, 8, 9],
+        visible_fraction: (value: 0.3, source: "TERRAIN.md §5.3; estimate", confidence: estimate,
+            notes: "Maize and cereals in summer hide kneeling and prone men; only heads and movement show."),
+    ),
+    mounted_loss: (
+        catastrophic: (value: 1.0, source: "estimate", confidence: estimate,
+            notes: "A burning IFV with a full troop compartment: the squad is lost as a fighting element."),
+        penetration: (value: 0.35, source: "estimate", confidence: estimate,
+            notes: "Spall and fire in the compartment from a penetration that does not destroy the vehicle."),
+    ),
+)

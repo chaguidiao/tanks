@@ -1,0 +1,67 @@
+// Blue mechanised rifle squad as carried by one IFV (plan M8B-INFANTRY §1: one squad is what one
+// IFV carries). Mirrors the dismount element of a Bradley (six men per M2; FM 7-7J (1986)). The
+// real platoon cross-loads three nine-man squads over four vehicles; that detail does not change
+// a tank decision and is cut (plan §0).
+(
+    id: "rifle_squad_b",
+    name: "RIFLE SQUAD (MECH)",
+    mirrors: "US mechanised infantry dismount team, M2-mounted (FM 7-7J, 1986)",
+    in_service: (from: 1975),
+    men: 6,
+    weapons: [
+        (name: "5.56 MM RIFLES", count: 5,
+            rounds_per_burst: (value: 3.0, source: "FM 3-22.9 (2008), rates of fire: rapid semiautomatic", confidence: low, notes: "Three aimed shots per engagement."),
+            burst_interval_s: (value: 10.0, source: "FM 3-22.9 (2008): sustained 12-15 rounds/min, rapid 45", confidence: low, notes: "About 18 rounds per minute per rifle."),
+            max_range_m: (value: 500.0, source: "FM 3-22.9 (2008): maximum effective range, point target 460-550 m", confidence: medium),
+            dispersion_mrad: (value: 3.0, source: "estimate", confidence: estimate, notes: "Combat aiming error under fire at fleeting targets, several times range-firing dispersion."),
+            bursts: 70),
+        (name: "7.62 MM MG", in_service: (from: 1960, to: 1984), count: 1,
+            rounds_per_burst: (value: 8.0, source: "FM 3-22.68 (2003): bursts of 6-9 rounds", confidence: medium),
+            burst_interval_s: (value: 5.0, source: "FM 3-22.68 (2003): M60 sustained rate 100 rounds/min", confidence: medium),
+            max_range_m: (value: 1100.0, source: "FM 3-22.68 (2003): M60 bipod, area target", confidence: medium),
+            dispersion_mrad: (value: 3.5, source: "estimate", confidence: estimate, notes: "Bipod beaten zone plus aiming error."),
+            bursts: 90),
+        (name: "5.56 MM SAW", in_service: (from: 1985), count: 1,
+            rounds_per_burst: (value: 6.0, source: "FM 3-22.68 (2003): M249 bursts of 3-5 to 6-9 rounds", confidence: medium),
+            burst_interval_s: (value: 6.0, source: "FM 3-22.68 (2003): M249 sustained rate 50 rounds/min", confidence: medium),
+            max_range_m: (value: 800.0, source: "FM 3-22.68 (2003): M249 bipod, area target", confidence: medium),
+            dispersion_mrad: (value: 4.0, source: "estimate", confidence: estimate),
+            bursts: 100),
+    ],
+    sensors: [
+        (name: "EYES", kind: optical, in_service: (from: 1900),
+            cycles_per_mrad: (value: 1.7, source: "estimate: visual acuity of about 1 arcminute per detail", confidence: estimate)),
+        (name: "BINOCULARS", kind: optical, in_service: (from: 1900),
+            cycles_per_mrad: (value: 4.0, source: "estimate", confidence: estimate, notes: "7x glasses used by the squad leader part of the time; well below their full resolution.")),
+        (name: "STARLIGHT SCOPE", kind: night_channel, in_service: (from: 1967, to: 1989),
+            cycles_per_mrad: (value: 0.6, source: "estimate", confidence: estimate),
+            max_range_m: (value: 400.0, source: "estimate: AN/PVS-2 class, first-generation intensifier", confidence: estimate)),
+        (name: "NIGHT VISION GOGGLES", kind: night_channel, in_service: (from: 1990),
+            cycles_per_mrad: (value: 1.0, source: "estimate", confidence: estimate),
+            max_range_m: (value: 300.0, source: "estimate: AN/PVS-7 class goggles", confidence: estimate)),
+    ],
+    signature: (
+        moving: (
+            width_m: (value: 1.5, source: "plan M8B-INFANTRY §3; estimate", confidence: estimate, notes: "A group of two or three men in view at once."),
+            height_m: (value: 1.8, source: "estimate", confidence: estimate),
+            man_area_m2: (value: 0.75, source: "estimate", confidence: estimate, notes: "0.45 x 1.7 m standing man."),
+            eye_height_m: (value: 1.6, source: "estimate", confidence: estimate)),
+        halted: (
+            width_m: (value: 1.0, source: "estimate", confidence: estimate, notes: "Kneeling and prone men among cover."),
+            height_m: (value: 0.6, source: "estimate", confidence: estimate),
+            man_area_m2: (value: 0.25, source: "estimate", confidence: estimate, notes: "Between kneeling (0.45 m2) and prone (0.15 m2)."),
+            eye_height_m: (value: 0.7, source: "estimate", confidence: estimate)),
+        dug_in: (
+            width_m: (value: 0.8, source: "estimate", confidence: estimate),
+            height_m: (value: 0.3, source: "estimate", confidence: estimate, notes: "Head and shoulders above the parapet."),
+            man_area_m2: (value: 0.12, source: "estimate", confidence: estimate),
+            eye_height_m: (value: 0.5, source: "estimate", confidence: estimate)),
+        in_building: (
+            width_m: (value: 0.6, source: "plan M8B-INFANTRY §3; estimate", confidence: estimate, notes: "A window."),
+            height_m: (value: 0.8, source: "estimate", confidence: estimate),
+            man_area_m2: (value: 0.2, source: "estimate", confidence: estimate, notes: "Head and shoulders in a window or firing port."),
+            eye_height_m: (value: 1.5, source: "estimate", confidence: estimate, notes: "Above the floor; upper floors add a storey each.")),
+    ),
+    dig_in_s: (value: 1200.0, source: "estimate", confidence: estimate,
+        notes: "Hasty fighting positions and use of folds in the ground after about 20 minutes halted."),
+)

@@ -1,0 +1,16 @@
+// Fictional 73 mm rocket-assisted HEAT round for a low-pressure gun, mirroring the PG-15V class.
+(
+    id: "heat_73",
+    name: "HEAT 73",
+    mirrors: "PG-15V",
+    kind: heat,
+    in_service: (from: 1966),
+    muzzle_velocity_mps: (value: 665.0, source: "Zaloga, BMP (Osprey, 1995): 400 m/s at the muzzle, about 665 m/s after rocket burn", confidence: low,
+        notes: "The rocket motor fires after launch; the boosted speed is used for the whole flight."),
+    velocity_loss_mps_per_km: (value: 80.0, source: "estimate", confidence: estimate),
+    flat_penetration_mm: (value: 300.0, source: "Zaloga, BMP (Osprey, 1995); open sources give about 300 mm RHA", confidence: low),
+    dispersion_mrad: (value: 1.2, source: "estimate", confidence: estimate, notes: "Light fin-stabilised round, sensitive to crosswind: notoriously inaccurate beyond about 800 m."),
+    max_range_m: (value: 1300.0, source: "Zaloga, BMP (Osprey, 1995): effective range about 800 m, sight graduated to 1300 m", confidence: low),
+    preferred_vs: [mbt, ifv, recon, infantry],
+    lethal_radius_m: (value: 6.0, source: "estimate: HEAT shell body fragments", confidence: estimate, notes: "Secondary fragment effect of a light HEAT round."),
+)

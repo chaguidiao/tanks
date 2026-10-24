@@ -248,7 +248,16 @@ pub struct BatteryAssign {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnitDef {
     pub callsign: String,
+    /// Vehicle type id; empty for a squad.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub vehicle: String,
+    /// Squad type id (`data/infantry`); the unit is then a squad, not a vehicle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub squad: Option<String>,
+    /// Callsign of the carrier a squad starts in. Its platoon then defaults to the carrier's
+    /// platoon callsign plus `-D` (plan M8B-INFANTRY §6), and `position` is ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mounted_in: Option<String>,
     /// Position in local map metres (x east, y north).
     pub position: [f64; 2],
     /// Compass heading, degrees clockwise from north.

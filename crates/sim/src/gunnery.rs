@@ -388,7 +388,7 @@ pub fn select_round(
         return Some(li);
     }
     if let Some(&li) =
-        all.iter().find(|&&li| ammo[loadout[li]].preferred_vs.contains(&target.class) && margin(li) >= 1.0)
+        all.iter().find(|&&li| ammo[loadout[li]].preferred_vs.contains(&target.class.into()) && margin(li) >= 1.0)
     {
         return Some(li);
     }

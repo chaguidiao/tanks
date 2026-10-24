@@ -59,4 +59,12 @@
         (value: 6.94, source: "estimate", confidence: estimate, notes: "25 km/h: cross-country move keeping formation over rough ground."),
         (value: 4.17, source: "estimate", confidence: estimate, notes: "15 km/h: slow, deliberate movement (less dust and noise, easier to keep station)."),
     ],
+    // Dismounted infantry (plan M8B-INFANTRY §6).
+    infantry: (
+        security_radius_m: (value: 20.0, source: "ATP 3-21.71 (2010) ch. 3, dismount: squads establish local security around the vehicles; estimate", confidence: estimate, notes: "Close enough to protect the vehicles, far enough to clear the ramps."),
+        cover_search_m: (value: 50.0, source: "ATP 3-21.8 (2016) battle drill 'React to contact': move to covered positions; estimate", confidence: estimate),
+        ineffective_fraction: (value: 0.5, source: "estimate", confidence: estimate, notes: "Half the men lost: the squad can defend in place but no longer manoeuvre."),
+        close_infantry_m: (value: 500.0, source: "estimate", confidence: estimate, notes: "Inside RPG and short-range anti-tank range infantry is the more dangerous target."),
+        squad_spacing_m: (value: 50.0, source: "ATP 3-21.8 (2016) ch. 2, platoon formations; estimate", confidence: estimate),
+    ),
 )

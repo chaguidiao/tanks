@@ -16,6 +16,11 @@ A reading list grouped by subsystem. ★ = read first. Public sources only — n
 - **TC 3-25.26 *Map Reading and Land Navigation*** — grid, contours, military crest, intervisibility.
 
 - **FM 90-10-1 *An Infantryman's Guide to Combat in Built-up Areas*** (1993) — movement inside buildings, ch. 7 weapons effects and wall protection (building classes, `data/terrain/buildings.ron`).
+- **ATP 3-21.8 *Infantry Platoon and Squad*** (2016) — squad formations, battle drill "React to contact" (squad AI, `data/combat/infantry.ron`).
+- **FM 7-7J *Mechanized Infantry Platoon and Squad (Bradley)*** (1986) and **ATP 3-21.71 *Mechanized Infantry Platoon and Squad (Bradley)*** (2010) — dismounts per M2, dismount and security drills.
+- **FM 3-22.68 *Crew-Served Machine Guns*** (2003) — rates of fire, burst lengths, ranges (squad MGs and vehicle coax).
+- **FM 3-22.9 *Rifle Marksmanship*** (2008) — rifle rates of fire and effective ranges.
+- **R. P. Hunnicutt, *Bradley: A History of American Fighting and Support Vehicles*** (1999) — M2/M3 stowage and troop compartment.
 - **FM 3-21.18 *Foot Marches*** (2017) — rates of march by day and night, road and cross-country (`data/terrain/foot.ron`).
 
 ## Doctrine — Red (OPFOR)

@@ -27,6 +27,12 @@ pub struct VehicleDef {
     /// Engine exhaust smoke.
     #[serde(default)]
     pub engine_smoke: Option<crate::EngineSmokeDef>,
+    /// Coaxial machine gun (bursts at infantry, TODO B3).
+    #[serde(default)]
+    pub coax: Option<crate::SmallArmDef>,
+    /// Troop compartment (IFVs).
+    #[serde(default)]
+    pub troops: Option<crate::TroopsDef>,
 }
 
 /// What a vehicle is, as a crew would call it when recognising it.
@@ -39,6 +45,26 @@ pub enum VehicleClass {
     Ifv,
     /// Light reconnaissance vehicle.
     Recon,
+}
+
+/// What a round is meant for: a vehicle class or dismounted infantry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetClass {
+    Mbt,
+    Ifv,
+    Recon,
+    Infantry,
+}
+
+impl From<VehicleClass> for TargetClass {
+    fn from(c: VehicleClass) -> Self {
+        match c {
+            VehicleClass::Mbt => TargetClass::Mbt,
+            VehicleClass::Ifv => TargetClass::Ifv,
+            VehicleClass::Recon => TargetClass::Recon,
+        }
+    }
 }
 
 impl VehicleClass {
@@ -227,7 +253,11 @@ pub struct AmmoDef {
     pub max_range_m: Option<Stat<f64>>,
     /// Target classes the crew picks this round for, in the AI's first choice.
     #[serde(default)]
-    pub preferred_vs: Vec<VehicleClass>,
+    pub preferred_vs: Vec<TargetClass>,
+    /// Radius within which the burst incapacitates men standing in the open (HE and
+    /// multipurpose rounds; plan M8B-INFANTRY §4).
+    #[serde(default)]
+    pub lethal_radius_m: Option<Stat<f64>>,
     /// Command-guided round (ATGM): flies to the aim point the gunner keeps on the target, so
     /// there is no superelevation (ranging) error, no ballistic bias and no lead error; only the
     /// gunner's tracking error and the missile's own dispersion remain.

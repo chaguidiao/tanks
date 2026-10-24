@@ -296,6 +296,8 @@ impl ScenarioEditor {
             position: at,
             heading_deg: heading,
             platoon: Some(platoon.clone()),
+            squad: None,
+            mounted_in: None,
         });
         self.platoon[side] = Some(platoon);
         self.sel = Some(Sel::Unit(side, self.def.sides[side].units.len() - 1));

@@ -43,6 +43,8 @@ pub fn unit(cs: &str, vehicle: &str, pos: [f64; 2], heading_deg: f64, platoon: O
         position: pos,
         heading_deg,
         platoon: platoon.map(str::to_owned),
+        squad: None,
+        mounted_in: None,
     }
 }
 

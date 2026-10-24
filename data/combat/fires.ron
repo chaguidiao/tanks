@@ -37,6 +37,7 @@
     ],
     effects: (
         direct_radius_m: (value: 6.0, source: "estimate: a 150 mm shell has to land within a few metres to hit a vehicle's roof or tracks", confidence: estimate),
+        personnel_lethal_radius_m: (value: 35.0, source: "estimate: open descriptions give a lethal radius against standing men of a few tens of metres for 150 mm HE", confidence: estimate),
         near_radius_m: (value: 35.0, source: "estimate: lethal fragment radius against light vehicles tens of metres", confidence: estimate),
         classes: [
         (class: mbt,

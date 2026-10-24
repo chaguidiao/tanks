@@ -1465,6 +1465,8 @@ mod tests {
             position: [x, 400.0],
             heading_deg: 0.0,
             platoon: Some(platoon.into()),
+            squad: None,
+            mounted_in: None,
         }
     }
 

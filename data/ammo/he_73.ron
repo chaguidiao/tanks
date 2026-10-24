@@ -1,0 +1,15 @@
+// Fictional 73 mm HE-FRAG round for a low-pressure gun, mirroring the OG-15V class.
+(
+    id: "he_73",
+    name: "HE-FRAG 73",
+    mirrors: "OG-15V",
+    kind: he_frag,
+    in_service: (from: 1974),
+    muzzle_velocity_mps: (value: 290.0, source: "open sources: OG-15V is not rocket-assisted, about 290 m/s", confidence: low),
+    velocity_loss_mps_per_km: (value: 40.0, source: "estimate", confidence: estimate),
+    flat_penetration_mm: (value: 10.0, source: "estimate", confidence: estimate, notes: "Blast and fragments: defeats only thin sheet."),
+    dispersion_mrad: (value: 1.5, source: "estimate", confidence: estimate),
+    max_range_m: (value: 1300.0, source: "estimate", confidence: estimate),
+    preferred_vs: [infantry],
+    lethal_radius_m: (value: 10.0, source: "estimate: a 73 mm fragmentation shell", confidence: estimate, notes: "Meant for infantry and soft targets."),
+)

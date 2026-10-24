@@ -57,6 +57,8 @@ pub struct ClassEffect {
 pub struct HeEffects {
     pub direct_radius_m: Stat<f64>,
     pub near_radius_m: Stat<f64>,
+    /// Radius within which a shell incapacitates men standing in the open.
+    pub personnel_lethal_radius_m: Stat<f64>,
     pub classes: Vec<ClassEffect>,
 }
 

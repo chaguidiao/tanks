@@ -70,6 +70,15 @@
         turret_traverse_rad_s: (value: 0.6, source: "estimate", confidence: estimate),
         max_engagement_range_m: (value: 4000.0, source: "estimate", confidence: estimate, notes: "The missile's reach; each round type carries its own limit."),
     ),
+    coax: (name: "7.62 MM COAX (M240C)", count: 1,
+        rounds_per_burst: (value: 10.0, source: "FM 3-22.68 (2003): coax bursts of about 10-20 rounds; estimate", confidence: low),
+        burst_interval_s: (value: 5.0, source: "FM 3-22.68 (2003): sustained fire about 100 rounds/min", confidence: low),
+        max_range_m: (value: 900.0, source: "FM 3-22.68 (2003): 7.62 mm tracer burnout about 900 m", confidence: medium),
+        dispersion_mrad: (value: 2.0, source: "estimate", confidence: estimate, notes: "Rigid mount laid through the gunner's sight; beaten zone of the burst dominates."),
+        bursts: 220),  // Hunnicutt, Bradley (1999): 2,200 rounds of 7.62 mm; bursts of 10
+    troops: (capacity_men: 6,
+        dismount_s: (value: 20.0, source: "Hunnicutt, Bradley (1999): power ramp; estimate", confidence: estimate, notes: "Halt, open, squad out and into its security posture."),
+        mount_s: (value: 30.0, source: "Hunnicutt, Bradley (1999): power ramp; estimate", confidence: estimate, notes: "Squad in from its security posture, doors closed.")),  // FM 7-7J (1986): six dismounts in the M2
     armour: (
         ce_factor: (value: 1.0, source: "estimate: aluminium armour has no special CE protection", confidence: estimate),
         turret_front: (value: 38.0, source: "open-source estimates: welded aluminium turret (the M2A0 has no applique armour)", confidence: low),

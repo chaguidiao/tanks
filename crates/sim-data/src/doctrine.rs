@@ -100,6 +100,8 @@ pub struct DoctrinePack {
     /// Defence: displacement to alternate positions and commitment of the reserve.
     #[serde(default)]
     pub defence: Option<DefenceDoctrine>,
+    /// Dismounted infantry (plan M8B-INFANTRY §6).
+    pub infantry: crate::InfantryDoctrine,
 }
 
 /// Attack position / line of departure (FM 3-90 ch. 3; FM 100-2-1 ch. 5: the echeloned attack

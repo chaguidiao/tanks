@@ -10,5 +10,6 @@
     flat_penetration_mm: (value: 120.0, source: "estimate", confidence: estimate,
         notes: "Not penetration in the KE sense: the blast and fragments defeat thin armour (light vehicles) and not tank armour, which a hit then only shakes and may blind."),
     dispersion_mrad: (value: 0.7, source: "estimate", confidence: estimate),
-    preferred_vs: [ifv, recon],
+    preferred_vs: [ifv, recon, infantry],
+    lethal_radius_m: (value: 20.0, source: "estimate: open descriptions of 125 mm HE-FRAG give lethal fragment effect over a radius of about 20 m", confidence: estimate, notes: "The tank round meant for infantry and soft targets."),
 )

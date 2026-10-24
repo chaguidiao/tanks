@@ -1,0 +1,17 @@
+// Fictional manually guided wire-guided anti-tank missile mirroring the 9M14 Malyutka class.
+(
+    id: "atgm_malyutka",
+    name: "ATGM MALYSH",
+    mirrors: "9M14 Malyutka",
+    kind: heat,
+    guided: true,
+    in_service: (from: 1963),
+    muzzle_velocity_mps: (value: 115.0, source: "open-source estimates: about 115 m/s, 26 s to 3 km", confidence: low),
+    velocity_loss_mps_per_km: (value: 0.0, source: "a sustainer motor holds cruise speed", confidence: low),
+    flat_penetration_mm: (value: 400.0, source: "open-source estimates (about 400 mm RHA)", confidence: low),
+    dispersion_mrad: (value: 0.6, source: "estimate", confidence: estimate,
+        notes: "Manual command to line of sight: the operator flies the missile with a joystick, so the miss is about twice a SACLOS missile's (the SK-5's 0.28 mrad); open sources quote hit rates of roughly 0.6-0.7 in good hands."),
+    reload_s: (value: 50.0, source: "estimate", confidence: estimate, notes: "Reloading the launch rail from inside the turret is slow."),
+    max_range_m: (value: 3000.0, source: "open-source estimates: 500-3000 m", confidence: low),
+    preferred_vs: [mbt],
+)

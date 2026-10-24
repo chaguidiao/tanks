@@ -10,5 +10,6 @@
     flat_penetration_mm: (value: 480.0, source: "open-source estimates for HEAT-MP (range ~430-500 mm RHA)", confidence: low,
         notes: "Shaped-charge penetration is nearly independent of range."),
     dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate, notes: "Larger than a sabot: lower velocity, fin-stabilised."),
-    preferred_vs: [ifv, recon],
+    preferred_vs: [ifv, recon, infantry],
+    lethal_radius_m: (value: 10.0, source: "estimate: multipurpose HEAT has a fragmenting body, smaller effect than a dedicated HE shell", confidence: estimate, notes: "Multipurpose round: crews fire it at infantry and buildings."),
 )
