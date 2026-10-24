@@ -18,7 +18,7 @@ const USAGE: &str = "usage: tanks-headless <command> [options]
   run     --scenario <id> [--seconds <s>] [--move <x,y>] [--seed <n>] [--summary]
                                                                        run a scenario headless (--summary: one CSV line;
                                                                        default --seconds: time limit + 60)
-  detect  [--observer <vehicle>] [--squad <id>] [--posture moving,halted,dug_in] [--ranges m,..] [--hour h]
+  detect  [--observer <vehicle|squad>] [--squad <id>] [--posture moving,halted,dug_in] [--ranges m,..] [--hour h]
           [--cover <landcover>] [--year y] [--trials n] [--out <csv>]   infantry time-to-detect by posture
   firefight [--shooter <squad>] [--target <squad>] [--weapons all|<name part>,..] [--posture halted,..]
           [--ranges m,..] [--seconds s] [--year y] [--hour h] [--cover <landcover>] [--trials n] [--mutual]
@@ -590,6 +590,12 @@ fn detect(ds: &DataSet, a: &Args) -> Result<(), String> {
         fire_support: vec![],
         supply_points: vec![],
     };
+    // The observer is a vehicle, or a squad (its eyes, binoculars and night devices).
+    let observer_squad = ds.squad(&observer).is_some();
+    let observer_unit = |x: f64| match observer_squad {
+        true => unit("O", "", Some(&observer), [x, 200.0], 0.0),
+        false => unit("O", &observer, None, [x, 200.0], 0.0),
+    };
     let mut csv =
         String::from("posture,range_m,trials,p_detect_120s,mean_detect_s,p_recognise_120s,mean_recognise_s\n");
     for posture in &postures {
@@ -606,7 +612,7 @@ fn detect(ds: &DataSet, a: &Args) -> Result<(), String> {
                     map: MapRef { id: "detect".into(), recipe: String::new(), seed: 1, size_m: 0.0 },
                     seed: trial + 1,
                     sides: vec![
-                        side("A", "western-combined", unit("O", &observer, None, [x, 200.0], 0.0)),
+                        side("A", "western-combined", observer_unit(x)),
                         side("B", "generic-opfor", unit("T", "", Some(&squad), [x, 200.0 + r], 180.0)),
                     ],
                     objectives: vec![],

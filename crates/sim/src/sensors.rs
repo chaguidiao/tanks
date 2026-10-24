@@ -25,7 +25,7 @@ use terrain::los::{Sight, sight};
 
 use crate::smoke::Band;
 use crate::weather::Atmosphere;
-use crate::world::{LocalTrack, World};
+use crate::world::{LocalTrack, Posture, World};
 
 /// Sensor checks every 5th tick = 4 Hz (DESIGN.md §4.1).
 pub const SENSOR_EVERY: u64 = 5;
@@ -168,7 +168,7 @@ pub fn step(
             // seen only through the facade facing the observer; low in standing crops).
             enum Look<'a> {
                 Vehicle(&'a VehicleDef),
-                Squad { w: f64, h: f64, floor: f64, building: Option<u32>, crops: f64 },
+                Squad { w: f64, h: f64, floor: f64, building: Option<u32>, crops: f64, camo: f64 },
             }
             let look = match (world.vehicle[t], world.squad[t].as_ref()) {
                 (Some(tvi), _) => Look::Vehicle(&vehicles[tvi]),
@@ -180,7 +180,21 @@ pub fn step(
                         && inf.model.tall_crops.months.contains(&inf.month)
                         && inf.td.landcover(g.map.landcover.get(ci, cj)).name == "cropland";
                     let crops = if in_crop { inf.model.tall_crops.visible_fraction.get() } else { 1.0 };
-                    Look::Squad { w: sig.width_m.get(), h: sig.height_m.get(), floor, building: s.in_building, crops }
+                    let c = &inf.model.camouflage;
+                    let camo = match s.posture {
+                        _ if s.in_building.is_some() => 1.0,
+                        Posture::Moving => c.moving.get(),
+                        Posture::Halted => c.halted.get(),
+                        Posture::DugIn => c.dug_in.get(),
+                    };
+                    Look::Squad {
+                        w: sig.width_m.get(),
+                        h: sig.height_m.get(),
+                        floor,
+                        building: s.in_building,
+                        crops,
+                        camo,
+                    }
                 }
                 _ => continue,
             };
@@ -218,10 +232,10 @@ pub fn step(
                     (libm::sqrt(w * vis_h), atm.thermal, 1.0)
                 }
                 // People stay warmer than their background through the crossover.
-                Look::Squad { w, h, .. } => (
+                Look::Squad { w, h, camo, .. } => (
                     libm::sqrt(w * h * f),
                     1.0 - (1.0 - atm.thermal) * inf.model.thermal_crossover_share.get(),
-                    inf.model.optical_contrast.get(),
+                    inf.model.optical_contrast.get() * camo,
                 ),
             };
             let sens = world.sensors[o].as_ref().expect("checked");

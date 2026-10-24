@@ -171,6 +171,10 @@ pub struct InfantryModel {
     /// Multiplier on optical (visible-band) cycles against men: camouflage clothing and
     /// vegetation give far less contrast than a vehicle's hull and shadow.
     pub optical_contrast: Stat<f64>,
+    /// Further multiplier on optical and night-channel cycles per posture: halted men use cover
+    /// and dug-in men camouflage their positions (calibration notes §2.3 D1). Thermal sights are
+    /// not affected; nor are squads in buildings (the window row already applies).
+    pub camouflage: PostureFactors,
     pub tall_crops: TallCrops,
     pub mounted_loss: MountedLoss,
     /// Small-arms aiming error multiplier in full darkness without an aiming aid; scaled by

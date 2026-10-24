@@ -135,6 +135,32 @@ Blue rifle squad firing at a halted Red MR squad that holds fire; one weapon typ
   It is model-wide, so it changes the golden hash and needs a re-run of the detection and
   balance batches. It deserves its own step.
 
+### 2.4 D1 result (2026-10-24, `tanks-headless detect`, 200 trials, flat grass)
+
+Implemented as `camouflage` in `data/combat/infantry.ron`: halted ×0.8, dug in ×0.5 on
+optical and night-channel cycles; thermal unchanged; squads in buildings unchanged.
+
+Share of trials with the target squad found within 2 minutes, and mean time to find it.
+Before → after:
+
+| Observer | Target | Range | Found in 2 min | Mean time |
+|---|---|---|---|---|
+| M1A1 by day (thermal) | dug in | 2,000 m | 83 % → 82 % | 21 → 23 s |
+| T-72A by day (optics only) | dug in | 1,000 m | 93 % → 92 % | 5 → 19 s |
+| T-72A by day | dug in | 2,000 m | 78 % → 46 % | 26 → 50 s |
+| T-72A by day | halted | 2,000 m | 100 % → 100 % | 8 → 12 s |
+| Rifle squad by day (eyes, binoculars) | dug in | 500 m | 89 % → 89 % | 3.5 → 14 s |
+| T-72A at night (active IR) | dug in | 250 m | 98 % → 53 % | 27 → 49 s |
+
+- **Thermal sights are unaffected, by design.** The M1A1 still finds most dug-in squads at
+  2 km, because the head-and-shoulders signature row already makes the target small.
+- **Optics and night devices find dug-in men 2–4× more slowly.** Over 2 minutes, though, most
+  are still found. The cause is the search-time issue (D2): each look gets ACQUIRE's 3.4 s mean
+  time as if the target were already in the field of view, so repeated looks soon add up. D1
+  sets the contrast and D2 will set the search time.
+- Test: `m8b::camouflage_slows_optical_detection_of_a_dug_in_squad` (T-72B, 1 km, 20 seeds:
+  13.8 s against 4.7 s).
+
 ## 3. Era changes up to 2005
 
 The squads were frozen at about 1990. Squad weapons and sensors already carry service dates, so

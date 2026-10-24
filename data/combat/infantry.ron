@@ -27,6 +27,13 @@
         notes: "Body heat keeps people hotter than their background around dawn and dusk, unlike a vehicle's soaked hull."),
     optical_contrast: (value: 0.5, source: "estimate", confidence: estimate,
         notes: "NVESD-style models scale resolvable cycles with target contrast; men in camouflage against grass and hedges show perhaps half the apparent contrast of a vehicle and its shadow. Thermal sights are not affected (body heat)."),
+    camouflage: (
+        moving: (value: 1.0, source: "reference case", confidence: estimate, notes: "Men on the move cannot keep to cover."),
+        halted: (value: 0.8, source: "estimate (docs/plans/M8B-CALIBRATION-NOTES.md §2.3 D1)", confidence: estimate,
+            notes: "Halted men pick folds in the ground, hedges and shadow; on top of optical_contrast."),
+        dug_in: (value: 0.5, source: "estimate (calibration notes §2.3 D1); Army camouflage Phase IV test plan (2010): 50 % detection distances of camouflaged soldiers within 35-500 m", confidence: estimate,
+            notes: "Hasty positions are camouflaged with spoil hidden and vegetation; most should be found when they fire (firing cue in detection.ron)."),
+    ),
     tall_crops: (
         months: [6, 7, 8, 9],
         visible_fraction: (value: 0.3, source: "TERRAIN.md §5.3; estimate", confidence: estimate,

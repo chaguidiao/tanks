@@ -575,6 +575,8 @@ fn infantry_model_sheet(ds: &DataSet) -> Sheet {
         section("DETECTION"),
         stat("THERMAL CROSSOVER SHARE", &m.thermal_crossover_share, plain),
         stat("OPTICAL CONTRAST", &m.optical_contrast, |x| format!("× {x:.2}")),
+        stat("CAMOUFLAGE HALTED", &m.camouflage.halted, |x| format!("× {x:.2}")),
+        stat("CAMOUFLAGE DUG IN", &m.camouflage.dug_in, |x| format!("× {x:.2}")),
         stat("TALL CROPS VISIBLE", &m.tall_crops.visible_fraction, pct),
         fact("TALL CROP MONTHS", m.tall_crops.months.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")),
         section("MOUNTED SQUADS"),

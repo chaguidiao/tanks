@@ -517,3 +517,38 @@ fn a_squad_under_fire_in_the_open_runs_for_cover() {
     assert!(reacted || at[1] > 705.0, "the squad turned for the wood; at {at:?}");
     assert!(sim.truth().ai[0].as_ref().unwrap().held.is_some(), "its move is held for later");
 }
+
+#[test]
+fn camouflage_slows_optical_detection_of_a_dug_in_squad() {
+    // Calibration notes §2.3 D1: dug-in squads are camouflaged (data: camouflage.dug_in), so an
+    // observer without a thermal sight takes longer to find them. Mean time to detect a dug-in
+    // squad at 1 km from a T-72B by day, over 20 seeds, with and without the factor.
+    let mean_detect = |camo: f64| {
+        let mut ds = (*data()).clone();
+        ds.infantry.camouflage.dug_in.value = camo;
+        let ds = std::sync::Arc::new(ds);
+        let m = map(&ds, 300, 600, "grassland", |_, _| 0.0);
+        let mut total = 0.0;
+        for seed in 1..=20 {
+            let blue = vec![squad("A", "rifle_squad_b", [600.0, 1200.0], Some("1-D"), None)];
+            let red = vec![unit("211", "kurgan_b", [600.0, 200.0], 0.0, Some("21"))];
+            let mut sc = scenario(10 * 3600, blue, red);
+            sc.seed = seed;
+            let mut sim = Sim::new(&sc, ds.clone(), m.clone()).unwrap();
+            sim.set_ai_enabled(SideId(1), false);
+            sim.truth_mut().squad[0].as_mut().unwrap().halted_s = 1.0e6;
+            let mut t = 120.0;
+            for _ in 0..(120 * sim::TICK_HZ) {
+                sim.step();
+                if sim.truth().sensors[1].as_ref().unwrap().track(0).is_some() {
+                    t = sim.time_s();
+                    break;
+                }
+            }
+            total += t;
+        }
+        total / 20.0
+    };
+    let (open, camo) = (mean_detect(1.0), mean_detect(data().infantry.camouflage.dug_in.get()));
+    assert!(camo > 2.0 * open, "camouflaged {camo:.1} s vs not {open:.1} s");
+}
