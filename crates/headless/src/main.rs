@@ -21,8 +21,9 @@ const USAGE: &str = "usage: tanks-headless <command> [options]
   detect  [--observer <vehicle>] [--squad <id>] [--posture moving,halted,dug_in] [--ranges m,..] [--hour h]
           [--cover <landcover>] [--year y] [--trials n] [--out <csv>]   infantry time-to-detect by posture
   firefight [--shooter <squad>] [--target <squad>] [--weapons all|<name part>,..] [--posture halted,..]
-          [--ranges m,..] [--seconds s] [--year y] [--hour h] [--cover <landcover>] [--trials n] [--out <csv>]
-                                                                       small-arms validation: rounds per casualty
+          [--ranges m,..] [--seconds s] [--year y] [--hour h] [--cover <landcover>] [--trials n] [--mutual]
+          [--out <csv>]                                                small-arms validation: rounds per casualty
+                                                                       (--mutual: the target fires back; exchange ratio)
   replay  --file <replay.ron>                                          re-simulate a replay, verify its hash
   bench   [--samples <n>] [--ticks <n>] [--csv]                        timings: LOS, viewshed, battle-position search, sim throughput
   duel    [--shooter <id>] [--target <id>] [--ranges 500,1000,..] [--trials <n>] [--aspect front|side] [--year <y>]
@@ -688,6 +689,7 @@ fn detect(ds: &DataSet, a: &Args) -> Result<(), String> {
 /// fires at another on flat ground; the target holds fire and stays in its posture. Per range and
 /// posture: rounds fired, casualties, rounds per casualty and casualties per weapon-minute from the
 /// first volley, for the shooter's weapons whose names contain one of `--weapons` (others silent).
+/// `--mutual` lets the target fire back with all its weapons (V5: exchange ratio by year).
 fn firefight(ds: &DataSet, a: &Args) -> Result<(), String> {
     use std::fmt::Write as _;
     use std::sync::Arc;
@@ -713,6 +715,7 @@ fn firefight(ds: &DataSet, a: &Args) -> Result<(), String> {
     let postures: Vec<String> =
         a.get("--posture").unwrap_or("halted").split(',').map(|p| p.trim().to_owned()).collect();
     let picks: Vec<String> = a.get("--weapons").unwrap_or("all").split(',').map(|w| w.trim().to_uppercase()).collect();
+    let mutual = a.0.iter().any(|x| x == "--mutual");
     let sdef = ds.squad(&shooter).ok_or_else(|| format!("no squad '{shooter}'"))?;
     let kept: Vec<usize> = (0..sdef.weapons.len())
         .filter(|&i| {
@@ -759,11 +762,12 @@ fn firefight(ds: &DataSet, a: &Args) -> Result<(), String> {
         supply_points: vec![],
     };
     let mut csv = String::from(
-        "posture,range_m,weapons,guns,trials,p_engaged,mean_first_volley_s,rounds,casualties,rounds_per_casualty,casualties_per_gun_min\n",
+        "posture,range_m,weapons,guns,trials,p_engaged,mean_first_volley_s,rounds,casualties,rounds_per_casualty,casualties_per_gun_min,shooter_casualties,exchange_ratio\n",
     );
     for posture in &postures {
         for &r in &ranges {
             let (mut engaged, mut first_sum, mut rounds, mut lost, mut gun_min) = (0u64, 0.0, 0.0, 0u64, 0.0);
+            let mut own_lost = 0u64;
             for trial in 0..trials {
                 let x = 300.0 + (trial % 100) as f64 * 9.7;
                 let sc = ScenarioDef {
@@ -784,10 +788,12 @@ fn firefight(ds: &DataSet, a: &Args) -> Result<(), String> {
                     logistics: vec![],
                 };
                 let mut sim = Sim::new(&sc, data.clone(), map.clone())?;
-                sim.submit_immediate(
-                    SideId(1),
-                    Command::WeaponsControl { to: Addressee::Unit(EntityId(2)), status: WeaponsStatus::Hold },
-                );
+                if !mutual {
+                    sim.submit_immediate(
+                        SideId(1),
+                        Command::WeaponsControl { to: Addressee::Unit(EntityId(2)), status: WeaponsStatus::Hold },
+                    );
+                }
                 if let Some(s) = sim.truth_mut().squad[0].as_mut() {
                     for w in s.weapons.iter_mut().filter(|w| !kept.contains(&w.def)) {
                         w.bursts = 0;
@@ -823,10 +829,16 @@ fn firefight(ds: &DataSet, a: &Args) -> Result<(), String> {
                             } => {
                                 lost += n as u64;
                             }
+                            Event::Casualties {
+                                unit: EntityId(1), lost: n, cause: CasualtyCause::SmallArms, ..
+                            } => {
+                                own_lost += n as u64;
+                            }
                             _ => {}
                         }
                     }
-                    if sim.truth().squad[1].as_ref().is_none_or(|s| s.strength == 0) {
+                    let w = sim.truth();
+                    if (0..2).any(|k| w.squad[k].as_ref().is_none_or(|s| s.strength == 0)) {
                         break;
                     }
                 }
@@ -847,11 +859,12 @@ fn firefight(ds: &DataSet, a: &Args) -> Result<(), String> {
             let div = |a: f64, b: f64| if b > 0.0 { a / b } else { f64::NAN };
             let _ = writeln!(
                 csv,
-                "{posture},{r:.0},{label},{guns},{trials},{:.3},{:.1},{rounds:.0},{lost},{:.0},{:.3}",
+                "{posture},{r:.0},{label},{guns},{trials},{:.3},{:.1},{rounds:.0},{lost},{:.0},{:.3},{own_lost},{:.2}",
                 engaged as f64 / trials as f64,
                 div(first_sum, engaged as f64),
                 div(rounds, lost as f64),
-                div(lost as f64, gun_min)
+                div(lost as f64, gun_min),
+                div(lost as f64, own_lost as f64)
             );
         }
     }

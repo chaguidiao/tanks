@@ -33,9 +33,13 @@
             cycles_per_mrad: (value: 1.7, source: "estimate: visual acuity of about 1 arcminute per detail", confidence: estimate)),
         (name: "BINOCULARS", kind: optical, in_service: (from: 1900),
             cycles_per_mrad: (value: 4.0, source: "estimate", confidence: estimate, notes: "6x-8x glasses used by the squad leader part of the time.")),
-        (name: "NIGHT WEAPON SIGHT", kind: night_channel, in_service: (from: 1965),
+        (name: "NIGHT WEAPON SIGHT", kind: night_channel, in_service: (from: 1965, to: 1974),
             cycles_per_mrad: (value: 0.5, source: "estimate", confidence: estimate),
             max_range_m: (value: 300.0, source: "FM 100-2-3 (1991): NSP-3 / NSPU class weapon night sights", confidence: low)),
+        (name: "NIGHT WEAPON SIGHT (1PN58 CLASS)", kind: night_channel, in_service: (from: 1975),
+            cycles_per_mrad: (value: 0.7, source: "estimate (calibration notes §3)", confidence: low,
+                notes: "1PN58 (early 1970s): detection 970 m, recognition 400 m under starlight (target type not given). 1975 is an estimate for issue."),
+            max_range_m: (value: 400.0, source: "1PN58 recognition range under starlight (Wikipedia, 1PN58)", confidence: low)),
     ],
     signature: (
         moving: (
@@ -61,4 +65,10 @@
     ),
     dig_in_s: (value: 1200.0, source: "estimate", confidence: estimate,
         notes: "Hasty fighting positions and use of folds in the ground after about 20 minutes halted."),
+    body_armour: [
+        (name: "FRAGMENT VEST (6B2/6B3 CLASS), PART ISSUE", in_service: (from: 1985),
+            bullet_factor: (value: 1.0, source: "calibration notes §3", confidence: low, notes: "Fragment protection only."),
+            fragment_factor: (value: 0.95, source: "estimate (calibration notes §3)", confidence: estimate,
+                notes: "6B2/6B3 in Afghanistan, 6B5 from 1985, issued only in part and still partial in 2005: a third of the Blue effect.")),
+    ],
 )

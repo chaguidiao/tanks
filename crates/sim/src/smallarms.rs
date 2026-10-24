@@ -9,6 +9,8 @@
 //! - HE: each man inside the squad's spread is hit with the probability that he lies within the
 //!   lethal radius (circle overlap over the spread), scaled by posture exposure and building
 //!   protection.
+//! - Era (calibration notes §3): body armour scales the bullet hit-out chance and fragment
+//!   exposure; squads aim worse in the dark (`night_aiming_factor`, or their aiming aid's).
 
 use ai::picture::{Condition, ContactLevel, WeaponsStatus};
 use rand_chacha::ChaCha8Rng;
@@ -30,6 +32,8 @@ pub struct Ctx<'a> {
     pub ineffective: &'a [f64],
     /// Suppression slows aimed fire: intervals × (1 + slow_gain · s).
     pub slow_gain: f64,
+    /// Optical light level (1 = full daylight): squads aim worse in the dark.
+    pub light: f64,
     pub tick: u64,
     pub rng: &'a mut ChaCha8Rng,
     pub events: &'a mut Vec<Event>,
@@ -174,7 +178,9 @@ pub fn step(ctx: &mut Ctx) -> Vec<Volley> {
                 w.bursts -= guns as u32;
                 w.cooldown = wd.burst_interval_s.get() * slow;
                 let moving = s.speed > 0.1;
-                if let Some(v) = fire(ctx, k, t, wd, guns, moving) {
+                let dark = (1.0 - ctx.light).clamp(0.0, 1.0);
+                let night = 1.0 + (s.night_aid.unwrap_or(ctx.model.night_aiming_factor.get()) - 1.0) * dark;
+                if let Some(v) = fire(ctx, k, t, wd, guns, moving, night) {
                     out.push(v);
                 }
             }
@@ -197,15 +203,16 @@ pub fn step(ctx: &mut Ctx) -> Vec<Volley> {
         }
         c.bursts -= 1;
         c.cooldown = cd.burst_interval_s.get() * slow;
-        if let Some(v) = fire(ctx, k, t, cd, 1, moving) {
+        // The coax is aimed through the vehicle's day and night sights.
+        if let Some(v) = fire(ctx, k, t, cd, 1, moving, 1.0) {
             out.push(v);
         }
     }
     out
 }
 
-/// Resolve `guns` bursts of weapon `wd` from `k` at `t`.
-fn fire(ctx: &mut Ctx, k: usize, t: usize, wd: &SmallArmDef, guns: u8, moving: bool) -> Option<Volley> {
+/// Resolve `guns` bursts of weapon `wd` from `k` at `t`; `night` multiplies the aiming error.
+fn fire(ctx: &mut Ctx, k: usize, t: usize, wd: &SmallArmDef, guns: u8, moving: bool, night: f64) -> Option<Volley> {
     let from = ctx.world.transform[k].pos;
     let to = ctx.world.transform[t].pos;
     let r = dist(from, to).max(1.0);
@@ -218,10 +225,12 @@ fn fire(ctx: &mut Ctx, k: usize, t: usize, wd: &SmallArmDef, guns: u8, moving: b
     let mut casualties = 0;
     if ctx.world.squad[t].is_some() {
         // A suppressed or moving firer aims worse.
-        let sigma = wd.dispersion_mrad.get() * (1.0 + ctx.world.suppression[k]) * if moving { 2.0 } else { 1.0 };
+        let sigma =
+            wd.dispersion_mrad.get() * (1.0 + ctx.world.suppression[k]) * if moving { 2.0 } else { 1.0 } * night;
         let area = man_area(ctx.squads, ctx.map, ctx.td, ctx.world, t);
+        let armour = ctx.world.squad[t].as_ref().map_or(1.0, |s| s.bullet_factor);
         let prot = protection(ctx.map, ctx.td, ctx.world, t, BuildingThreat::SmallArms);
-        let lambda = burst_lambda(ctx.model, rounds, area, sigma, r, visible, prot);
+        let lambda = burst_lambda(ctx.model, rounds, area, sigma, r, visible, prot) * armour;
         let strength = ctx.world.squad[t].as_ref().map_or(0, |s| s.strength);
         casualties = poisson(lambda, strength, ctx.rng);
         let s = &mut ctx.world.suppression[t];
@@ -291,7 +300,7 @@ pub fn he_burst(
             Posture::Halted => model.he_exposure.halted.get(),
             Posture::DugIn => model.he_exposure.dug_in.get(),
         };
-        let p = (frac * exposure * prot).clamp(0.0, 1.0);
+        let p = (frac * exposure * prot * s.fragment_factor).clamp(0.0, 1.0);
         let lost = (0..s.strength).filter(|_| uniform(rng) < p).count() as u8;
         let thr = ineffective[world.side[k].0 as usize];
         crate::infantry::casualties(world, k, lost, by, CasualtyCause::HighExplosive, thr, events);

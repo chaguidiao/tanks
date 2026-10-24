@@ -24,6 +24,12 @@ pub struct SquadDef {
     pub signature: SquadSignature,
     /// Time halted in the open before the squad counts as dug in (hasty fighting positions).
     pub dig_in_s: Stat<f64>,
+    /// Body armour by period (calibration notes §3); none listed = no armour.
+    #[serde(default)]
+    pub body_armour: Vec<BodyArmourDef>,
+    /// Night aiming aids by period (aiming lasers with goggles); none = unaided at night.
+    #[serde(default)]
+    pub aiming_aids: Vec<AimingAidDef>,
 }
 
 impl SquadDef {
@@ -31,6 +37,35 @@ impl SquadDef {
     pub fn weapons_in(&self, year: i32) -> impl Iterator<Item = &SmallArmDef> {
         self.weapons.iter().filter(move |w| w.in_service.is_none_or(|d| d.contains(year)))
     }
+
+    /// Body armour worn in `year` (the last listed row in service).
+    pub fn armour_in(&self, year: i32) -> Option<&BodyArmourDef> {
+        self.body_armour.iter().rev().find(|a| a.in_service.contains(year))
+    }
+
+    /// Night aiming aid carried in `year` (the last listed row in service).
+    pub fn aiming_aid_in(&self, year: i32) -> Option<&AimingAidDef> {
+        self.aiming_aids.iter().rev().find(|a| a.in_service.contains(year))
+    }
+}
+
+/// Body armour of a squad in one period: multipliers on the chance that a bullet hit takes a man
+/// out of the fight and on HE fragment exposure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BodyArmourDef {
+    pub name: String,
+    pub in_service: ServiceDates,
+    pub bullet_factor: Stat<f64>,
+    pub fragment_factor: Stat<f64>,
+}
+
+/// A night aiming aid (an infrared aiming laser seen through goggles): at night the squad's
+/// small-arms aiming error grows by `night_factor` instead of the model's unaided factor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AimingAidDef {
+    pub name: String,
+    pub in_service: ServiceDates,
+    pub night_factor: Stat<f64>,
 }
 
 /// What the enemy sees and shoots at in one posture.
@@ -138,6 +173,9 @@ pub struct InfantryModel {
     pub optical_contrast: Stat<f64>,
     pub tall_crops: TallCrops,
     pub mounted_loss: MountedLoss,
+    /// Small-arms aiming error multiplier in full darkness without an aiming aid; scaled by
+    /// darkness (1 − light), so it builds through dusk.
+    pub night_aiming_factor: Stat<f64>,
 }
 
 impl InfantryModel {
@@ -218,5 +256,20 @@ mod tests {
         // Calibration notes §1.3 V1: 0.24 ± 0.03.
         let p = model().round_hit(0.43, 2.0, 274.3);
         assert!((p - 0.24).abs() <= 0.03, "{p}");
+    }
+
+    #[test]
+    fn era_rows_resolve_by_year() {
+        // Calibration notes §3: red-dot rifles from 2003, plates from 2004, aiming laser from 2002.
+        let b = ds().squad("rifle_squad_b").unwrap().clone();
+        let rifle = |y: i32| b.weapons_in(y).find(|w| w.name.contains("RIFLES")).unwrap().dispersion_mrad.get();
+        assert_eq!((rifle(2002), rifle(2003)), (6.0, 5.0));
+        assert!(b.armour_in(1980).is_none());
+        assert_eq!(b.armour_in(1990).unwrap().bullet_factor.get(), 1.0);
+        assert!(b.armour_in(2005).unwrap().bullet_factor.get() < 0.9);
+        assert!(b.aiming_aid_in(1995).is_none() && b.aiming_aid_in(2005).is_some());
+        let r = ds().squad("mr_squad").unwrap().clone();
+        assert!(r.aiming_aid_in(2005).is_none());
+        assert!(r.armour_in(2005).unwrap().fragment_factor.get() > b.armour_in(2005).unwrap().fragment_factor.get());
     }
 }

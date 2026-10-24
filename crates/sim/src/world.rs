@@ -171,6 +171,12 @@ pub struct SquadState {
     pub target: Option<usize>,
     /// Below the doctrine's strength threshold: defends in place, counts as lost.
     pub ineffective: bool,
+    /// Body armour worn (from the definition by year): multipliers on the chance a bullet hit
+    /// takes a man out and on HE fragment exposure (1 = none).
+    pub bullet_factor: f64,
+    pub fragment_factor: f64,
+    /// Night aiming error multiplier of its aiming aid, if it carries one.
+    pub night_aid: Option<f64>,
 }
 
 /// An IFV's troop compartment.
@@ -313,6 +319,9 @@ impl World {
             speed: 0.0,
             target: None,
             ineffective: false,
+            bullet_factor: def.armour_in(year).map_or(1.0, |a| a.bullet_factor.get()),
+            fragment_factor: def.armour_in(year).map_or(1.0, |a| a.fragment_factor.get()),
+            night_aid: def.aiming_aid_in(year).map(|a| a.night_factor.get()),
         }));
         self.carrier.push(None);
         self.coax.push(None);

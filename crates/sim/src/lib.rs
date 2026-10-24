@@ -865,6 +865,7 @@ impl Sim {
                 model: &self.data.infantry,
                 ineffective: &ineffective,
                 slow_gain: self.data.fires.suppression.slow_gain.get(),
+                light: self.weather.at(self.start_time_s as f64 + tick as f64 * DT, &self.data.detection).light,
                 tick,
                 rng: &mut self.rngs.gunnery,
                 events: &mut events,

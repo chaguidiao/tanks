@@ -75,7 +75,18 @@ Blue rifle squad firing at a halted Red MR squad that holds fire; one weapon typ
   HE, with the carrier). But no side's AI dismounts its squads yet (TODO F11), so in
   `m8b-dismounts` all losses happen with the carrier. Measure V4 when F11 or a scenario with
   fighting dismounts exists.
-- **V5** waits on the era data (B21–B23).
+- **V5** passes, at the low edge (B21–B23 done 2026-10-24). Mutual fire (`--mutual`), Blue
+  rifle squad against Red MR squad, both halted at 250 m by day, 500 trials per year: the
+  exchange ratio (Red men lost per Blue man lost) is 0.129 in 1990 and 0.185 in 2005, a
+  **1.43×** gain (target 1.4–1.9×). At night (01:00, 150 m, 200 trials) the gain is 3.0× (0.35
+  → 1.04), from the aiming laser and the newer goggles. One-way rifle fire at 250 m: 198 → 126
+  rounds per casualty from 2002 to 2003 (300 trials), against 1.44× expected from 6 → 5 mrad.
+- **Noise:** 100 trials give V2 anywhere from about 200 to 250 rounds per casualty. Use at least
+  300 trials for comparisons.
+- **Observation, not changed:** in mutual fire the Red squad wins about 7:1 in men lost. Its
+  PK (7.62 mm general-purpose MG) causes about 8× a rifle's casualties, while Blue's SAW causes
+  about 4×, and Red has seven men to Blue's six. This fits the V3 ratio. Revisit it if squad
+  balance matters once AI uses infantry (F11).
 - The Q1 decision stands: no value changed. Small-arms fire against men is on the lethal side
   of what history suggests, but inside the V2 band of this harness.
 
@@ -140,6 +151,18 @@ most of this is data. Body armour and night aiming need small model changes.
 
 Out of scope until scenarios go past 2005: small drones, general issue of thermal weapon sights
 (2007), the M4 with MIL-STD-1913 rails as a separate row, and Russian Ratnik kit (2013 on).
+
+**Implemented 2026-10-24 (B21–B23):**
+- `SquadDef.body_armour` and `aiming_aids`: dated rows, resolved when a squad spawns.
+- `InfantryModel.night_aiming_factor` 1.6, scaled by darkness (1 − light).
+- The coax is unchanged, because it is aimed through the vehicle's sights.
+
+Two values differ from the table above:
+- The Red 1PN58-class sight is dated from 1975. Its early-1970s introduction is in the table;
+  the issue year is an estimate.
+- AN/PAQ-4-class IR aiming lights from the late 1980s are not listed, because the sources here
+  don't give their issue dates. Check before adding them: if they were issued with the PVS-7,
+  Blue in 1990 would also get an aiming aid at night.
 
 ## 4. Open questions for alignment
 

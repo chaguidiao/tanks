@@ -38,4 +38,6 @@
         penetration: (value: 0.35, source: "estimate", confidence: estimate,
             notes: "Spall and fire in the compartment from a penetration that does not destroy the vehicle."),
     ),
+    night_aiming_factor: (value: 1.6, source: "estimate (docs/plans/M8B-CALIBRATION-NOTES.md §3)", confidence: estimate,
+        notes: "Aimed fire at night through iron sights, or through the few weapon night sights a squad has: the aiming error grows x1.6 (hits per round fall to about 40 %). Squads with an aiming aid use its factor instead. Scaled by darkness (1 - light), so it builds through dusk."),
 )
