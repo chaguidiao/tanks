@@ -8,6 +8,7 @@ Rules for every item (CLAUDE.md): data in `data/**/*.ron` with source and confid
 
 ## Waiting on the user (decisions; check here first)
 Added 2026-10-21. Remove a line when it is decided, and record the decision on the item it belongs to.
+- **M8b-b plan review**: `docs/plans/M8B-AT-TEAMS.md` §9 (10 decisions with recommendations). Gates B2, B6, B9, B12, B19.
 
 ## Phase map (v1.x = M8, v1.5 = M9, then v2+)
 
@@ -91,6 +92,7 @@ Notes, sources and proposed values: `docs/plans/M8B-CALIBRATION-NOTES.md`. §4 q
 - [ ] B25 Validation harness for infantry: targets V1–V5 (formula test against Hitchman, rounds per casualty, MG/rifle ratio, share of losses from small arms with artillery, 2005 against 1990 exchange ratio) (notes §1.3). Must run before the M8b-b anti-tank teams are tuned, and the lethality call (calibration Q1) is made from its results. 2026-10-24: `tanks-headless firefight` and men lost by cause in `run`; V1–V3 pass (notes §1.4); V4 waits on F11 (no AI dismounts yet); V5 passes at 1.43× by day (notes §1.4)
 
 ## M8b-b — Anti-tank teams
+Plan: `docs/plans/M8B-AT-TEAMS.md` (draft 2026-10-24, waiting on review).
 - [ ] B2 ATGM teams on the existing guided-round model — §13.2
 - [ ] B6 AI preference for ATGM range — §13.1 M7b
 - [ ] B9 Unguided short-range launchers (RPG-7 class): short range, hold-fire-until-close, side/rear-weighted hit chance, back-blast reveals the shooter
