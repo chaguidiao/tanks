@@ -32,8 +32,21 @@ pub fn map(ds: &DataSet, w: usize, h: usize, cover: &str, z: impl Fn(f64, f64) -
             p.elevation_base.set(i, j, (100.0 + z(x, y)) as f32);
         }
     }
-    let classes: Vec<MobilityClass> = ds.vehicles.iter().map(MobilityClass::from).collect();
+    let classes: Vec<MobilityClass> = terrain::mobility::all_classes(ds);
     Arc::new(bake(&p, &ds.terrain, &classes))
+}
+
+/// A squad on the ground, or mounted in `carrier` (listed before it).
+pub fn squad(cs: &str, squad: &str, pos: [f64; 2], platoon: Option<&str>, carrier: Option<&str>) -> UnitDef {
+    UnitDef {
+        callsign: cs.into(),
+        vehicle: String::new(),
+        position: pos,
+        heading_deg: 0.0,
+        platoon: platoon.map(str::to_owned),
+        squad: Some(squad.into()),
+        mounted_in: carrier.map(str::to_owned),
+    }
 }
 
 pub fn unit(cs: &str, vehicle: &str, pos: [f64; 2], heading_deg: f64, platoon: Option<&str>) -> UnitDef {

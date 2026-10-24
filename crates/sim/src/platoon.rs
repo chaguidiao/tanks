@@ -83,6 +83,10 @@ pub struct Platoon {
     pub contact_reaction: ContactReaction,
     /// Orders to carry out in turn once the current task is finished.
     pub queue: Vec<crate::command::Command>,
+    /// Every member is a squad (a dismount platoon, plan M8B-INFANTRY §6).
+    pub dismount: bool,
+    /// The carrier platoon a dismount platoon belongs to (`1-D` belongs to `1`).
+    pub carrier_platoon: Option<PlatoonId>,
 }
 
 impl PlatoonOrder {

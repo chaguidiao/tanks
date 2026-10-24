@@ -98,6 +98,47 @@ pub struct OwnUnit {
     pub engine_smoke: Option<bool>,
     /// Crew suppression 0..1 (rises under fire).
     pub suppression: f64,
+    /// Set for a squad (plan M8B-INFANTRY §7); vehicle fields are then empty.
+    pub squad: Option<SquadView>,
+}
+
+/// What a squad's posture looks like to its own side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SquadPosture {
+    Mounted,
+    Moving,
+    Halted,
+    DugIn,
+    InBuilding,
+}
+
+impl SquadPosture {
+    pub fn label(self) -> &'static str {
+        match self {
+            SquadPosture::Mounted => "MOUNTED",
+            SquadPosture::Moving => "MOVING",
+            SquadPosture::Halted => "HALTED",
+            SquadPosture::DugIn => "DUG IN",
+            SquadPosture::InBuilding => "IN BUILDING",
+        }
+    }
+}
+
+/// An own squad's state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SquadView {
+    pub type_id: String,
+    pub type_name: String,
+    /// Men fit to fight, of the establishment.
+    pub strength: (u8, u8),
+    pub posture: SquadPosture,
+    /// Carrier it rides in or belongs to.
+    pub carrier: Option<EntityId>,
+    pub building: Option<u32>,
+    /// Below the combat-effective threshold.
+    pub ineffective: bool,
+    /// Bursts left, all weapons.
+    pub bursts: u32,
 }
 
 /// Where a vehicle is in a service-station resupply (M8c; FM 17-15 (1996) service-station method).

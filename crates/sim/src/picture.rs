@@ -7,14 +7,15 @@
 //! reporting; era-dependent lag is future work).
 
 use ai::picture::{
-    Contact, ContactId, ContactLevel, GunActivity, OwnUnit, PerceivedWorld, PlatoonView, ShotView, SideId, Task,
+    Contact, ContactId, ContactLevel, GunActivity, OwnUnit, PerceivedWorld, PlatoonView, ShotView, SideId,
+    SquadPosture, SquadView, Task,
 };
 use rand_chacha::ChaCha8Rng;
 use sim_data::{DoctrinePack, VehicleDef};
 
 use crate::gunnery::Phase;
 use crate::sensors::uniform;
-use crate::world::{Order, World};
+use crate::world::{Order, Posture, World};
 use crate::{DT, Event, Vec2, dist};
 
 /// Correlation radius for fusing a report into an existing contact (m).
@@ -229,10 +230,12 @@ impl SideState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn rebuild_own(
         &mut self,
         w: &World,
         vehicles: &[VehicleDef],
+        squads: &[sim_data::SquadDef],
         round_labels: &[Vec<&'static str>],
         platoons: &[PlatoonView],
         tick: u64,
@@ -336,6 +339,30 @@ impl SideState {
                     .filter(|&vi| vehicles[vi].engine_smoke.is_some())
                     .map(|_| w.smoke[k].engine_on),
                 suppression: w.suppression[k],
+                squad: w.squad[k].as_ref().map(|s| {
+                    let d = &squads[s.def];
+                    let posture = if s.mounted_in.is_some() {
+                        SquadPosture::Mounted
+                    } else if s.in_building.is_some() {
+                        SquadPosture::InBuilding
+                    } else {
+                        match s.posture {
+                            Posture::Moving => SquadPosture::Moving,
+                            Posture::Halted => SquadPosture::Halted,
+                            Posture::DugIn => SquadPosture::DugIn,
+                        }
+                    };
+                    SquadView {
+                        type_id: d.id.clone(),
+                        type_name: d.name.clone(),
+                        strength: (s.strength, s.men),
+                        posture,
+                        carrier: s.carrier.map(|c| w.id[c]),
+                        building: s.in_building,
+                        ineffective: s.ineffective,
+                        bursts: s.weapons.iter().map(|x| x.bursts).sum(),
+                    }
+                }),
             });
         }
     }

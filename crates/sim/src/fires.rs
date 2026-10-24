@@ -214,6 +214,9 @@ pub struct Ctx<'a> {
     pub rng: &'a mut ChaCha8Rng,
     pub events: &'a mut Vec<Event>,
     pub impacts: &'a mut Vec<Impact>,
+    pub infantry: &'a sim_data::InfantryModel,
+    /// Per side: squad strength fraction below which it is combat-ineffective.
+    pub ineffective: &'a [f64],
 }
 
 /// One tick of every battery. Returns (shooter side, position) of vehicles destroyed by bursts.
@@ -325,7 +328,7 @@ fn burst(ctx: &mut Ctx, side: SideId, at: Vec2) -> Vec<(SideId, Vec2)> {
     let reach = eff.near_radius_m.get().max(sup.burst_radius_m.get());
     let mut destroyed = Vec::new();
     for k in 0..ctx.world.len() {
-        if !ctx.world.alive(k) {
+        if !ctx.world.alive(k) || ctx.world.mounted(k) {
             continue;
         }
         let pos = ctx.world.transform[k].pos;
@@ -346,6 +349,8 @@ fn burst(ctx: &mut Ctx, side: SideId, at: Vec2) -> Vec<(SideId, Vec2)> {
         let kill = gunnery::roll(if direct { &ce.direct } else { &ce.near }, 1.0, uniform(ctx.rng));
         let sights = !direct && uniform(ctx.rng) < ce.near_sights.get();
         let kill = gunnery::apply_damage(ctx.world, k, kill, sights);
+        let pen = kill.is_some_and(|kk| kk != KillKind::Crew);
+        crate::infantry::carrier_hit(ctx.world, k, pen, kill, ctx.infantry, ctx.ineffective, None, ctx.rng, ctx.events);
         if let Some(kk) = kill {
             ctx.events.push(Event::Hit { unit: ctx.world.id[k], penetrated: kk != KillKind::Crew, kill });
             if ctx.world.condition[k] == Condition::Destroyed {

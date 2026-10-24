@@ -79,7 +79,7 @@ Scope: abstracted per `docs/plans/M8B-INFANTRY.md` §0. Tank combat is the theme
 - [ ] B15 Client display of infantry: NATO infantry symbols in `symbols.rs`, small contacts in the picture, roster and status card, AAR, database entries
 - [ ] B16 Doctrine and data: infantry drills in `western-combined` and `generic-opfor` with citations (ATP 3-21.x); squad weapon data per era, sourced
 - [x] B17 BMP-1 class IFV (from I1) so Cold War scenarios have dismounts; duel harness re-run. (Done 2026-10-24: `skif_m0` with 73 mm HEAT/HE-FRAG and a manually guided missile; duels: its missile defeats an M1 side-on, Ph 0.94 at 1 km, 0.53 at 2 km, and not the M1 or T-72A front)
-- [ ] B18 Replay/save versioning for the grown entity model (old replays load or are rejected cleanly, as decided in Z6)
+- [x] B18 Replay/save versioning for the grown entity model (old replays load or are rejected cleanly, as decided in Z6). (Done 2026-10-24: `sim::SIM_VERSION`, `Replay.sim_version`; `Replay::from_ron` rejects another version with "replay from sim version N; this build is M")
 - Exit: IFV platoon dismounts and remounts by player command; tank vs infantry and infantry vs infantry unit tests; infantry detection CSV; golden hash updated deliberately.
 
 ## M8b-b — Anti-tank teams

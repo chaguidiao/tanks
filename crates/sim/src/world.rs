@@ -2,7 +2,7 @@
 //! non-tank entity types can be added without touching vehicle code (CLAUDE.md rule 5).
 
 use ai::picture::{Condition, PlatoonId, WeaponsStatus};
-use sim_data::{SensorKind, VehicleDef};
+use sim_data::{SensorKind, SmallArmDef, SquadDef, VehicleDef};
 use terrain::hash::StableHasher;
 
 use crate::Vec2;
@@ -111,6 +111,78 @@ pub struct SmokeState {
     pub last_targeted: Option<(u64, f64)>,
 }
 
+/// A squad's posture (plan M8B-INFANTRY §0: three postures; occupying a building uses the
+/// building's own signature and protection).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Posture {
+    Moving,
+    /// Kneeling and prone, at a halt or under fire.
+    Halted,
+    /// Halted long enough to dig in, or occupying a building.
+    DugIn,
+}
+
+/// One small-arm type carried by a squad, or a vehicle's coax.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SmallArmState {
+    /// Index into the squad definition's `weapons` (unused for a coax).
+    pub def: usize,
+    /// Weapons of this type at full strength.
+    pub count: u8,
+    /// Bursts left, all weapons of the type together.
+    pub bursts: u32,
+    /// Bursts carried at the start.
+    pub full: u32,
+    /// Seconds until the next burst.
+    pub cooldown: f64,
+}
+
+impl SmallArmState {
+    pub fn new(def: usize, w: &SmallArmDef) -> Self {
+        let bursts = w.bursts * w.count as u32;
+        Self { def, count: w.count, bursts, full: bursts, cooldown: 0.0 }
+    }
+}
+
+/// A dismounted squad: one abstract element (plan M8B-INFANTRY §1–§2, DESIGN.md §14 #29).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SquadState {
+    /// Index into the sim's squad definition table.
+    pub def: usize,
+    /// Men at full strength.
+    pub men: u8,
+    /// Men fit to fight.
+    pub strength: u8,
+    pub posture: Posture,
+    /// Seconds halted in place (digging in).
+    pub halted_s: f64,
+    /// Carrier (world index) it rides in; while mounted it has no position of its own.
+    pub mounted_in: Option<usize>,
+    /// Carrier it belongs to (where MOUNT sends it).
+    pub carrier: Option<usize>,
+    /// Building (`BakedBuilding::id`) it occupies.
+    pub in_building: Option<u32>,
+    pub weapons: Vec<SmallArmState>,
+    /// Seconds left of the mount drill once at the carrier.
+    pub boarding: Option<f64>,
+    /// Current foot speed (m/s).
+    pub speed: f64,
+    /// Target of its small arms (world index).
+    pub target: Option<usize>,
+    /// Below the doctrine's strength threshold: defends in place, counts as lost.
+    pub ineffective: bool,
+}
+
+/// An IFV's troop compartment.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CarrierState {
+    pub capacity_men: u8,
+    /// Squads aboard (world indices), in boarding order.
+    pub embarked: Vec<usize>,
+    /// Ramp drill in progress: seconds left before the squads are out.
+    pub dismounting: Option<f64>,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct World {
     next_id: u32,
@@ -134,6 +206,11 @@ pub struct World {
     pub era: Vec<u32>,
     /// Crew suppression, 0..1: rises under fire, decays (fires.ron).
     pub suppression: Vec<f64>,
+    /// Dismounted infantry (plan M8B-INFANTRY §2).
+    pub squad: Vec<Option<SquadState>>,
+    pub carrier: Vec<Option<CarrierState>>,
+    /// Coaxial machine gun.
+    pub coax: Vec<Option<SmallArmState>>,
 }
 
 impl World {
@@ -158,6 +235,96 @@ impl World {
         matches!(self.condition[k], Condition::Operational | Condition::FirepowerKill)
     }
 
+    /// A squad riding in a carrier: not on the ground, not seen, not shot at.
+    pub fn mounted(&self, k: usize) -> bool {
+        self.squad[k].as_ref().is_some_and(|s| s.mounted_in.is_some())
+    }
+
+    /// Still a fighting element: vehicles with a gun or able to move, squads above their
+    /// combat-effective threshold.
+    pub fn fighting(&self, k: usize) -> bool {
+        match &self.squad[k] {
+            Some(s) => self.alive(k) && !s.ineffective,
+            None => matches!(self.condition[k], Condition::Operational | Condition::MobilityKill),
+        }
+    }
+
+    fn push_common(&mut self, side: SideId, callsign: &str, pos: Vec2, z: f64, heading: f64) -> EntityId {
+        self.next_id += 1;
+        let id = EntityId(self.next_id);
+        self.id.push(id);
+        self.side.push(side);
+        self.callsign.push(callsign.to_owned());
+        self.transform.push(Transform { pos, z, heading, pitch: 0.0, roll: 0.0 });
+        self.condition.push(Condition::Operational);
+        self.weapons.push(WeaponsStatus::Free);
+        self.platoon.push(None);
+        self.last_fired.push(None);
+        self.suppression.push(0.0);
+        self.smoke.push(SmokeState { salvos: 0, engine_on: false, last_launch: None, last_targeted: None });
+        self.era.push(0);
+        id
+    }
+
+    /// Spawn a squad, on the ground or (with `carrier`) mounted in it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn spawn_squad(
+        &mut self,
+        side: SideId,
+        callsign: &str,
+        squad_index: usize,
+        def: &SquadDef,
+        pos: Vec2,
+        z: f64,
+        heading: f64,
+        year: i32,
+        carrier: Option<usize>,
+    ) -> EntityId {
+        let id = self.push_common(side, callsign, pos, z, heading);
+        self.vehicle.push(None);
+        self.mobility.push(None);
+        self.ai.push(Some(VehicleAi { order: Order::Idle, position_note: None, set: false, held: None }));
+        let sensors = def
+            .sensors
+            .iter()
+            .filter(|s| s.in_service.contains(year))
+            .map(|s| (s.kind, s.cycles_per_mrad.get(), s.max_range_m.as_ref().map_or(f64::INFINITY, |r| r.get())))
+            .collect();
+        self.sensors.push(Some(SensorState { sensors, tracks: Vec::new(), degraded: false }));
+        self.gun.push(None);
+        let weapons = def
+            .weapons
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| w.in_service.is_none_or(|d| d.contains(year)))
+            .map(|(i, w)| SmallArmState::new(i, w))
+            .collect();
+        self.squad.push(Some(SquadState {
+            def: squad_index,
+            men: def.men,
+            strength: def.men,
+            posture: Posture::Halted,
+            halted_s: 0.0,
+            mounted_in: carrier,
+            carrier,
+            in_building: None,
+            weapons,
+            boarding: None,
+            speed: 0.0,
+            target: None,
+            ineffective: false,
+        }));
+        self.carrier.push(None);
+        self.coax.push(None);
+        let k = self.len() - 1;
+        if let Some(c) = carrier
+            && let Some(cs) = self.carrier[c].as_mut()
+        {
+            cs.embarked.push(k);
+        }
+        id
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn spawn_vehicle(
         &mut self,
@@ -171,12 +338,7 @@ impl World {
         year: i32,
         stock: Vec<u32>,
     ) -> EntityId {
-        self.next_id += 1;
-        let id = EntityId(self.next_id);
-        self.id.push(id);
-        self.side.push(side);
-        self.callsign.push(callsign.to_owned());
-        self.transform.push(Transform { pos, z, heading, pitch: 0.0, roll: 0.0 });
+        let id = self.push_common(side, callsign, pos, z, heading);
         self.vehicle.push(Some(vehicle_index));
         self.mobility.push(Some(MobilityState {
             speed: 0.0,
@@ -196,18 +358,16 @@ impl World {
             .collect();
         self.sensors.push(Some(SensorState { sensors, tracks: Vec::new(), degraded: false }));
         self.gun.push(Some(crate::gunnery::GunState::new(heading, stock)));
-        self.condition.push(Condition::Operational);
-        self.weapons.push(WeaponsStatus::Free);
-        self.platoon.push(None);
-        self.last_fired.push(None);
-        self.era.push(def.armour.era.as_ref().filter(|e| e.in_service.contains(year)).map_or(0, |e| e.tiles));
-        self.suppression.push(0.0);
-        self.smoke.push(SmokeState {
-            salvos: def.smoke_launcher.as_ref().map_or(0, |l| l.salvos),
-            engine_on: false,
-            last_launch: None,
-            last_targeted: None,
-        });
+        let k = self.len() - 1;
+        self.era[k] = def.armour.era.as_ref().filter(|e| e.in_service.contains(year)).map_or(0, |e| e.tiles);
+        self.smoke[k].salvos = def.smoke_launcher.as_ref().map_or(0, |l| l.salvos);
+        self.squad.push(None);
+        self.carrier.push(def.troops.as_ref().map(|t| CarrierState {
+            capacity_men: t.capacity_men,
+            embarked: Vec::new(),
+            dismounting: None,
+        }));
+        self.coax.push(def.coax.as_ref().map(|c| SmallArmState::new(0, c)));
         id
     }
 
@@ -302,6 +462,34 @@ impl World {
             h.f64(self.suppression[k]);
             h.u8(sm.engine_on as u8);
             h.u64(sm.last_launch.unwrap_or(u64::MAX));
+            if let Some(s) = &self.squad[k] {
+                h.u8(s.strength);
+                h.u8(s.posture as u8);
+                h.f64(s.halted_s);
+                h.u64(s.mounted_in.map_or(u64::MAX, |c| c as u64));
+                h.u32(s.in_building.unwrap_or(0));
+                h.f64(s.boarding.unwrap_or(-1.0));
+                h.f64(s.speed);
+                h.u64(s.target.map_or(u64::MAX, |t| t as u64));
+                h.u8(s.ineffective as u8);
+                for w in &s.weapons {
+                    h.u32(w.bursts);
+                    h.f64(w.cooldown);
+                }
+            }
+            if let Some(c) = &self.carrier[k]
+                && (!c.embarked.is_empty() || c.dismounting.is_some())
+            {
+                h.u64(c.embarked.len() as u64);
+                h.f64(c.dismounting.unwrap_or(-1.0));
+            }
+            // Only once used, so scenarios without infantry keep their hashes.
+            if let Some(c) = &self.coax[k]
+                && (c.cooldown > 0.0 || c.bursts != c.full)
+            {
+                h.u32(c.bursts);
+                h.f64(c.cooldown);
+            }
             if let Some(ai) = &self.ai[k] {
                 match &ai.order {
                     Order::Idle => h.u8(0),

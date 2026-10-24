@@ -15,6 +15,7 @@ pub mod command;
 pub mod control;
 pub mod fires;
 pub mod gunnery;
+pub mod infantry;
 pub mod logistics;
 pub mod mobility;
 pub mod picture;
@@ -33,7 +34,7 @@ use std::sync::Arc;
 use ai::picture::{Condition, PlatoonId, ShotView, SpeedSetting, WeaponsStatus};
 use rand_chacha::ChaCha8Rng;
 use rand_chacha::rand_core::SeedableRng;
-use sim_data::{AmmoDef, DataSet, ScenarioDef, VehicleDef};
+use sim_data::{AmmoDef, DataSet, ScenarioDef, SquadDef, VehicleDef};
 use terrain::BakedMap;
 use terrain::ground::Ground;
 use terrain::hash::StableHasher;
@@ -90,6 +91,8 @@ pub struct Sim {
     map: Arc<BakedMap>,
     data: Arc<DataSet>,
     vehicles: Vec<VehicleDef>,
+    /// Squad types in use, indexed by `SquadState::def`.
+    squads: Vec<SquadDef>,
     /// Per vehicle definition: index into `ammo` for each entry of its loadout.
     loadouts: Vec<Vec<usize>>,
     round_labels: Vec<Vec<&'static str>>,
@@ -173,6 +176,56 @@ fn logpacs(
     Ok(out)
 }
 
+/// Spawn a scenario squad, on the ground or mounted in a carrier listed before it. Returns its
+/// world index.
+#[allow(clippy::too_many_arguments)]
+fn spawn_squad(
+    world: &mut World,
+    squads: &mut Vec<SquadDef>,
+    data: &DataSet,
+    g: &Ground,
+    side: SideId,
+    u: &sim_data::UnitDef,
+    id: &str,
+    year: i32,
+) -> Result<usize, String> {
+    let def = data.squad(id).ok_or_else(|| format!("{}: unknown squad '{id}'", u.callsign))?;
+    if !def.in_service.contains(year) {
+        return Err(format!("{}: {} is not in service in {year}", u.callsign, def.name));
+    }
+    if g.map.mobility(terrain::mobility::FOOT_CLASS).is_none() {
+        return Err("map has no foot mobility layer; re-bake".to_owned());
+    }
+    let si = match squads.iter().position(|s| s.id == def.id) {
+        Some(i) => i,
+        None => {
+            squads.push(def.clone());
+            squads.len() - 1
+        }
+    };
+    let carrier = match &u.mounted_in {
+        None => None,
+        Some(cs) => {
+            let c = (0..world.len())
+                .find(|&c| world.side[c] == side && &world.callsign[c] == cs)
+                .ok_or_else(|| format!("{}: carrier '{cs}' must be listed before the squad", u.callsign))?;
+            let cap = world.carrier[c].as_ref().ok_or_else(|| format!("{}: '{cs}' carries no troops", u.callsign))?;
+            let aboard: u32 = cap.embarked.iter().filter_map(|&k| world.squad[k].as_ref()).map(|s| s.men as u32).sum();
+            if aboard + def.men as u32 > cap.capacity_men as u32 {
+                return Err(format!("{}: no room in '{cs}' ({} seats)", u.callsign, cap.capacity_men));
+            }
+            Some(c)
+        }
+    };
+    let (pos, heading) = match carrier {
+        Some(c) => (world.transform[c].pos, world.transform[c].heading),
+        None => (u.position, u.heading_deg.to_radians()),
+    };
+    let z = g.height(pos[0], pos[1]);
+    world.spawn_squad(side, &u.callsign, si, def, pos, z, heading, year, carrier);
+    Ok(world.len() - 1)
+}
+
 /// Commander AI decision interval: 0.2 Hz (DESIGN.md §4.1).
 pub const COMMANDER_EVERY: u64 = 100;
 /// Smoke clouds are in a side's picture when within this distance of one of its vehicles (m).
@@ -189,6 +242,7 @@ impl Sim {
         let mut ammo: Vec<AmmoDef> = Vec::new();
         let mut loadouts: Vec<Vec<usize>> = Vec::new();
         let mut platoons: Vec<platoon::Platoon> = Vec::new();
+        let mut squads: Vec<SquadDef> = Vec::new();
         let mut sides = Vec::new();
         let g = Ground::new(&map, &data.terrain);
         for (si, side) in scenario.sides.iter().enumerate() {
@@ -198,53 +252,70 @@ impl Sim {
                 .ok_or_else(|| format!("side {}: unknown doctrine pack '{}'", side.name, side.doctrine))?
                 .clone();
             for u in &side.units {
-                let def = data
-                    .vehicle(&u.vehicle)
-                    .ok_or_else(|| format!("{}: unknown vehicle '{}'", u.callsign, u.vehicle))?;
-                if !def.in_service.contains(year) {
-                    return Err(format!("{}: {} is not in service in {year}", u.callsign, def.name));
-                }
-                if map.mobility(&def.id).is_none() {
-                    return Err(format!("map has no mobility layer for '{}'; re-bake", def.id));
-                }
-                let vi = match vehicles.iter().position(|v| v.id == def.id) {
-                    Some(i) => i,
-                    None => {
-                        vehicles.push(def.clone());
-                        let mut lo = Vec::new();
-                        for l in &def.armament.load {
-                            let round = data.ammo(&l.ammo).ok_or_else(|| format!("{}: no ammunition", def.id))?;
-                            lo.push(match ammo.iter().position(|a| a.id == round.id) {
-                                Some(i) => i,
-                                None => {
-                                    ammo.push(round.clone());
-                                    ammo.len() - 1
-                                }
-                            });
-                        }
-                        loadouts.push(lo);
-                        vehicles.len() - 1
+                let k = if let Some(sq) = &u.squad {
+                    spawn_squad(&mut world, &mut squads, &data, &g, SideId(si as u8), u, sq, year)?
+                } else {
+                    let def = data
+                        .vehicle(&u.vehicle)
+                        .ok_or_else(|| format!("{}: unknown vehicle '{}'", u.callsign, u.vehicle))?;
+                    if !def.in_service.contains(year) {
+                        return Err(format!("{}: {} is not in service in {year}", u.callsign, def.name));
                     }
+                    if map.mobility(&def.id).is_none() {
+                        return Err(format!("map has no mobility layer for '{}'; re-bake", def.id));
+                    }
+                    let vi = match vehicles.iter().position(|v| v.id == def.id) {
+                        Some(i) => i,
+                        None => {
+                            vehicles.push(def.clone());
+                            let mut lo = Vec::new();
+                            for l in &def.armament.load {
+                                let round = data.ammo(&l.ammo).ok_or_else(|| format!("{}: no ammunition", def.id))?;
+                                lo.push(match ammo.iter().position(|a| a.id == round.id) {
+                                    Some(i) => i,
+                                    None => {
+                                        ammo.push(round.clone());
+                                        ammo.len() - 1
+                                    }
+                                });
+                            }
+                            loadouts.push(lo);
+                            vehicles.len() - 1
+                        }
+                    };
+                    // Rounds not yet in service at the side's date are not carried (unless none are).
+                    let in_service = |id: &str| data.ammo(id).is_some_and(|a| a.in_service.contains(year));
+                    let any = def.armament.load.iter().any(|l| in_service(&l.ammo));
+                    let stock: Vec<u32> = def
+                        .armament
+                        .load
+                        .iter()
+                        .map(|l| if !any || in_service(&l.ammo) { l.count } else { 0 })
+                        .collect();
+                    let z = g.height(u.position[0], u.position[1]);
+                    world.spawn_vehicle(
+                        SideId(si as u8),
+                        &u.callsign,
+                        vi,
+                        &vehicles[vi],
+                        u.position,
+                        z,
+                        u.heading_deg.to_radians(),
+                        year,
+                        stock,
+                    );
+                    world.len() - 1
                 };
-                // Rounds not yet in service at the side's date are not carried (unless none are).
-                let in_service = |id: &str| data.ammo(id).is_some_and(|a| a.in_service.contains(year));
-                let any = def.armament.load.iter().any(|l| in_service(&l.ammo));
-                let stock: Vec<u32> =
-                    def.armament.load.iter().map(|l| if !any || in_service(&l.ammo) { l.count } else { 0 }).collect();
-                let z = g.height(u.position[0], u.position[1]);
-                world.spawn_vehicle(
-                    SideId(si as u8),
-                    &u.callsign,
-                    vi,
-                    &vehicles[vi],
-                    u.position,
-                    z,
-                    u.heading_deg.to_radians(),
-                    year,
-                    stock,
-                );
-                let k = world.len() - 1;
-                if let Some(pc) = &u.platoon {
+                // A mounted squad joins its carrier platoon's dismount platoon unless named.
+                let carrier_pc = world.squad[k]
+                    .as_ref()
+                    .and_then(|s| s.carrier)
+                    .and_then(|c| world.platoon[c])
+                    .and_then(|pid| platoons.iter().find(|p| p.id == pid))
+                    .map(|p| (p.id, format!("{}-D", p.callsign)));
+                let pc = u.platoon.clone().or_else(|| carrier_pc.as_ref().map(|c| c.1.clone()));
+                if let Some(pc) = &pc {
+                    let is_squad = world.squad[k].is_some();
                     let p = match platoons.iter_mut().find(|p| p.side.0 as usize == si && &p.callsign == pc) {
                         Some(p) => p,
                         None => {
@@ -273,10 +344,15 @@ impl Sim {
                                 finished: Vec::new(),
                                 contact_reaction: Default::default(),
                                 queue: Vec::new(),
+                                dismount: is_squad,
+                                carrier_platoon: carrier_pc.as_ref().map(|c| c.0),
                             });
                             platoons.last_mut().expect("pushed")
                         }
                     };
+                    if p.dismount != is_squad {
+                        return Err(format!("{}: platoon {pc} mixes squads and vehicles", u.callsign));
+                    }
                     p.members.push(k);
                     world.platoon[k] = Some(p.id);
                 }
@@ -380,6 +456,7 @@ impl Sim {
             map,
             data,
             vehicles,
+            squads,
             round_labels: loadouts.iter().map(|lo| lo.iter().map(|&i| ammo[i].kind.label()).collect()).collect(),
             loadouts,
             ammo,
@@ -450,6 +527,10 @@ impl Sim {
 
     pub fn vehicle_defs(&self) -> &[VehicleDef] {
         &self.vehicles
+    }
+
+    pub fn squad_defs(&self) -> &[SquadDef] {
+        &self.squads
     }
 
     pub fn ended(&self) -> bool {
@@ -777,7 +858,20 @@ impl Sim {
                 if o.era_fired {
                     self.world.era[target] = self.world.era[target].saturating_sub(1);
                 }
-                gunnery::apply_damage(&mut self.world, target, o.kill, o.sights_damaged)
+                let kill = gunnery::apply_damage(&mut self.world, target, o.kill, o.sights_damaged);
+                let thr = self.ineffective_fractions();
+                infantry::carrier_hit(
+                    &mut self.world,
+                    target,
+                    o.penetrated,
+                    kill,
+                    &self.data.infantry,
+                    &thr,
+                    Some(p.shooter),
+                    &mut self.rngs.gunnery,
+                    &mut events,
+                );
+                kill
             } else {
                 None
             };
@@ -793,6 +887,7 @@ impl Sim {
 
         // 7a. Fire support: volleys, rounds in flight, bursts; suppression decays.
         {
+            let ineffective = self.ineffective_fractions();
             let mut fctx = fires::Ctx {
                 model: &self.data.fires,
                 world: &mut self.world,
@@ -802,6 +897,8 @@ impl Sim {
                 rng: &mut self.rngs.fires,
                 events: &mut events,
                 impacts: &mut self.impacts,
+                infantry: &self.data.infantry,
+                ineffective: &ineffective,
             };
             for (side, pos) in fires::step(&mut self.batteries, &mut fctx) {
                 self.sides[side.0 as usize].mark_destroyed(pos);
@@ -828,6 +925,8 @@ impl Sim {
             &mut events,
         );
 
+        infantry::follow_carriers(&mut self.world);
+
         // 9. Victory conditions (1 Hz).
         if tick.is_multiple_of(PLATOON_AI_EVERY)
             && !self.ended
@@ -841,6 +940,11 @@ impl Sim {
         self.tick += 1;
         self.update_pictures();
         events
+    }
+
+    /// Per side: the strength fraction below which its squads are combat-ineffective.
+    fn ineffective_fractions(&self) -> Vec<f64> {
+        self.sides.iter().map(|s| s.doctrine.infantry.ineffective_fraction.get()).collect()
     }
 
     fn platoon_mut(&mut self, side: SideId, id: PlatoonId) -> Option<&mut platoon::Platoon> {
@@ -1403,7 +1507,7 @@ impl Sim {
         for side in self.sides.iter_mut() {
             let views: Vec<_> =
                 self.platoons.iter().filter(|p| p.side == side.picture.side).map(|p| p.view(&self.world)).collect();
-            side.rebuild_own(&self.world, &self.vehicles, &self.round_labels, &views, self.tick);
+            side.rebuild_own(&self.world, &self.vehicles, &self.squads, &self.round_labels, &views, self.tick);
         }
         for (dst, src) in self.pictures.iter_mut().zip(&self.sides) {
             dst.clone_from(&src.picture);
@@ -1517,6 +1621,11 @@ impl Sim {
     }
 }
 
+/// Behaviour version of the simulation. A replay records it and is only played back by a build
+/// with the same version: bump it whenever a change makes an old command log play out
+/// differently (plan M8B-INFANTRY §8, DESIGN.md §14 #29). Replays from before versioning read as 0.
+pub const SIM_VERSION: u32 = 1;
+
 /// A recorded game: scenario id plus the external command log. Re-simulating it reproduces the
 /// game exactly (determinism), which is what the after-action review and replays rely on.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1528,6 +1637,9 @@ pub struct Replay {
     /// Sides played by a human (commander AI switched off).
     #[serde(default)]
     pub player_sides: Vec<SideId>,
+    /// `SIM_VERSION` of the build that recorded it.
+    #[serde(default)]
+    pub sim_version: u32,
 }
 
 impl Replay {
@@ -1542,6 +1654,7 @@ impl Replay {
             final_tick: sim.tick,
             final_hash: sim.state_hash(),
             player_sides,
+            sim_version: SIM_VERSION,
         }
     }
 
@@ -1549,8 +1662,14 @@ impl Replay {
         ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default()).unwrap_or_default()
     }
 
+    /// Parse a replay. One recorded by a build with another `SIM_VERSION` is rejected: it would
+    /// not reproduce the game.
     pub fn from_ron(s: &str) -> Result<Self, String> {
-        ron::from_str(s).map_err(|e| e.to_string())
+        let r: Self = ron::from_str(s).map_err(|e| e.to_string())?;
+        if r.sim_version != SIM_VERSION {
+            return Err(format!("replay from sim version {}; this build is {SIM_VERSION}", r.sim_version));
+        }
+        Ok(r)
     }
 
     /// Re-simulate on a fresh `Sim` to the recorded tick, calling `each` after every step.

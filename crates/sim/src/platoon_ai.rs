@@ -97,6 +97,9 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
             ctx.report(p, r);
         }
         p.last_strength = strength;
+        if p.dismount {
+            continue; // dismount platoons: crate::infantry
+        }
         let doctrine = ctx.doctrines[p.side.0 as usize].clone();
         if !matches!(p.order, PlatoonOrder::Move { .. }) {
             p.withdraw = false;

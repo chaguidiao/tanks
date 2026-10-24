@@ -340,6 +340,21 @@ pub enum Event {
         winner: Option<SideId>,
         reason: EndReason,
     },
+    /// A squad lost men: `by` fired the burst or round, if a unit did (None: artillery or the
+    /// loss of its carrier).
+    Casualties {
+        unit: EntityId,
+        by: Option<EntityId>,
+        lost: u8,
+        left: u8,
+    },
+    /// Squads left their carrier (`unit`), or boarded it.
+    Dismounted {
+        unit: EntityId,
+    },
+    Mounted {
+        unit: EntityId,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

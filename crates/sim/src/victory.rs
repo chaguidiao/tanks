@@ -2,7 +2,7 @@
 //! tanks loses; an attacker holding the objective with no defender inside for
 //! `SEIZE_HOLD_S` wins; at the time limit the objective holder wins, ties going to the defender.
 
-use ai::picture::{Condition, SideId};
+use ai::picture::SideId;
 use sim_data::{ScenarioDef, VictoryDef};
 
 use crate::command::EndReason;
@@ -18,7 +18,7 @@ pub struct VictoryState {
 }
 
 fn fighting(w: &World, k: usize) -> bool {
-    matches!(w.condition[k], Condition::Operational | Condition::MobilityKill)
+    w.fighting(k)
 }
 
 impl VictoryState {
