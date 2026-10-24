@@ -1,8 +1,9 @@
 # M8b-b anti-tank teams: design plan
 
-Status: **draft for review, 2026-10-24; nothing implemented.** Covers TODO.md B2, B6, B9, B12 and
-B19. Builds on M8b-a (`docs/plans/M8B-INFANTRY.md`) and the calibration work
-(`docs/plans/M8B-CALIBRATION-NOTES.md`). §9 lists the decisions, each with a recommendation.
+Status: **agreed 2026-10-24** (all recommendations in §9 accepted). Calibrated against public
+sources on 2026-10-24 (§12); nothing implemented yet. Covers TODO.md B2, B6, B9, B12 and B19.
+Builds on M8b-a (`docs/plans/M8B-INFANTRY.md`) and the calibration work
+(`docs/plans/M8B-CALIBRATION-NOTES.md`).
 
 Goal: infantry becomes a real danger to tanks at close range and in villages. A Red RPG gunner
 in a house can kill a tank from the flank. A missile team on a treeline makes tanks use ground
@@ -74,18 +75,30 @@ AntiArmourDef { name, in_service, count, ammo: "<AmmoDef id>", rounds, fire_cont
   - ballistic error, which stands in for crosswind sensitivity (wind is not modelled per shot
     in v1).
 
-  The values are tuned so the published "effective range" is about a 50 % first-round hit:
-  - RPG-7: about 500 m on a stationary tank-sized target, 300 m on a moving one;
-  - M72: 200 m;
-  - AT4: 300 m.
-
-  This is *our* reading of "effective range" and is marked `estimate`.
+  **Calibration (§12):** published "effective range" is **not** a 50 % hit range. For the
+  RPG-7, test tables give 91 % at 100 m, 52 % at 200 m, 27 % at 300 m and 5 % at 500 m on a
+  stationary tank-sized target (Isby 1988). Against a crossing target at 4 m/s, a 1975 US Army
+  evaluation gives 96 / 51 / 22 / 4 % at 100 / 200 / 300 / 500 m. Hit chance falls faster than
+  a constant aiming error would give. The cause is range estimation: US tests found trained
+  gunners 10–15 % off in range, and on a slow rocket's curved path that becomes a vertical miss
+  that grows with range. So the physics is kept:
+  - the range error goes through the round's drop (`estimated_range_error_fraction` 0.12,
+    source: US tests);
+  - the aim error and a ballistic error carry wind and launch effects;
+  - each launcher is tuned to its table with the harness.
+  The M72 and AT4 have no public hit tables, only effective ranges (M72 200 m static / 100 m
+  moving, AT4 300 / 150 m, FM 3-23.25 via a secondary table). They are tuned to the same curve
+  shape so that the effective range is about a 25–30 % hit, as it is for the RPG-7
+  (*derived*).
 - **Guided missiles.** The existing guided path is used (no lead or ballistic error, plus
   dispersion). Two additions:
   1. **Operator in the loop (SACLOS/MCLOS).** If the firing squad is pinned (suppression above
      `pinned_above`) or destroyed (zero strength) while its missile is in flight, the missile
      misses. This is why crews return fire at a missile post: suppressing the gunner is part of
-     the react-to-ATGM drill (ATP 3-20.15 App. F). Fire-and-forget
+     the react-to-ATGM drill (ATP 3-20.15 App. F). The 1973 evidence is strong: the Sagger's hit
+     rate fell from about 25 % in Egyptian hands at the start to about 2 % for the Syrians at
+     the end. By then Israeli crews fired at every launch point and kept moving (Iyer 1995, via
+     Wikipedia). Proving-ground figures (90 % at 500–3,000 m) were never reached in combat. Fire-and-forget
      (Javelin-class, `guidance: fire_and_forget`) is immune.
   2. **Minimum range and setup time** (`setup_s`). A tripod ATGM team cannot fire on the move
      or straight after halting.
@@ -102,7 +115,30 @@ AntiArmourDef { name, in_service, count, ammo: "<AmmoDef id>", rounds, fire_cont
   vehicle's `last_targeted` is set, so the auto-smoke drill fires as it does today for a gun
   shot.
 
-### 2.3 Tandem warheads
+### 2.3 Behind-armour effect (new, from the calibration)
+
+Today any penetration rolls the same damage table. For a T-72, that gives a catastrophic kill
+in about 60 % of penetrations (0.30 × the exposed-carousel factor 2).
+
+The evidence says a light shoulder-fired HEAT penetration is much less lethal than that:
+- In Grozny, each destroyed vehicle took **3–6 lethal hits** on average, from five or six
+  hunter-killer teams firing at one vehicle (Grau 1997).
+- In Iraq in 2003, only two Abrams were disabled by enemy fire in the major combat phase. RPG
+  hits through the side skirts and into the engine compartment mostly caused mobility kills
+  (PM Abrams report via Jane's).
+
+The reason is physical: a 40–90 mm warhead's jet makes a narrow path behind the armour and
+kills only what it meets. So:
+- `AmmoDef.behind_armour` (default 1.0) scales the catastrophic, firepower and crew outcomes of
+  a penetration. The difference becomes a hit with no lasting effect. Mobility outcomes keep
+  their full value: hits on the engine and running gear still stop the vehicle.
+- Light rockets (RPG-7, M72, AT4, RPG-18/22/26) get about 0.4. Large ATGMs and 105–125 mm HEAT
+  keep 1.0.
+- `estimate`, calibrated to "about 3 hits to destroy" on a T-72 side with PG-7V class rockets
+  (target A8 in §11).
+- Existing rounds keep 1.0, so the golden hash is not changed by this.
+
+### 2.4 Tandem warheads
 
 `AmmoDef.tandem: bool` (default false). A tandem charge's precursor fires the ERA tile: the tile
 is spent, but `ce_defeat` does not apply. This covers the PG-7VR (1988), RPG-29 class, Kornet,
@@ -124,10 +160,16 @@ turrets and engine decks, fired from upper floors and basements. Front-armour hi
   (data, about 20°: an upper floor at close range), or the missile is top-attack, the round
   meets a new `top` armour value. Its obliquity is the plunge angle, and the turret or engine
   deck table applies.
-- **Top armour data:** one `top_mm` stat per vehicle (KE and CE through `ce_factor`, as for the
-  other faces), `estimate` with reasoning: usually 40–80 mm RHA equivalent on MBTs, 15–30 mm on
-  IFVs. Dedicated top-attack submunitions and EFP mines stay in M9 T2. Only the value is
-  brought forward.
+- **Top armour data:** one `top_mm` stat per vehicle. It is plain steel, so `ce_factor` does
+  not apply. No authoritative public figure exists; the only roof values found are from a game
+  database (T-72B: turret roof about 45 mm, engine deck about 20 mm). Values are `estimate`:
+  - MBTs 30–50 mm;
+  - IFVs 15–30 mm.
+
+  **The result is insensitive to them.** Every anti-tank warhead here penetrates 260 mm or
+  more, so any top hit penetrates whatever the value. The value matters only for autocannon
+  and HE fragments, and that is acceptable at low confidence. Dedicated top-attack submunitions
+  and EFP mines stay in M9 T2.
 - **Damage tables:** a top penetration uses `turret_penetration` (turret roof) or
   `hull_side_rear_penetration` (engine deck), chosen by impact point as today. No new table.
 - **Deferred:**
@@ -173,17 +215,17 @@ and clearing with dismounts.
 - Era sets (one per class and period; all `low`/`estimate` from public sources, fictional
   names):
 
-| Side | Class | Mirrors | In service | Notes |
+| Side | Class | Mirrors | In service | Calibrated public data (2026-10-24) |
 |---|---|---|---|---|
-| Blue | light disposable | M72 LAW | 1963 | about 200 m effective (FM 3-23.25) |
-| Blue | medium disposable | AT4 (M136) | 1987 | about 300 m (FM 3-23.25) |
-| Blue | medium ATGM team | M47 Dragon | 1975–2001 | about 1,000 m, SACLOS (FM 23-24) |
-| Blue | ATGM team | Javelin | 1996 | about 2,000 m, fire-and-forget, top attack (FM 3-22.37) |
-| Red | RPG in squads | RPG-7 with PG-7V, PG-7VL (1977), PG-7VR tandem (1988) | 1961 | about 500 m stationary / 300 m moving (FM 100-2-3) |
-| Red | light disposable | RPG-18, then RPG-22/26 | 1972 / 1985 | about 200 m |
-| Red | ATGM team | 9K111 Fagot | 1970 | about 2,000 m, SACLOS |
-| Red | ATGM team | 9K115 Metis | 1978 | about 1,000 m, SACLOS, two-man |
-| Red | ATGM team | 9K135 Kornet | about 1998 in units | about 5,000 m, beam riding, tandem |
+| Blue | light disposable | M72 LAW | 1963 | 200 m static / 100 m moving effective (FM 3-23.25 via a secondary table); penetration about 300 mm (`low`) |
+| Blue | medium disposable | AT4 (M136) | 1987 | 300 m static / 150 m moving; "more than 14 in" (356 mm) penetration (FM 3-23.25) |
+| Blue | ATGM team | M47 Dragon | 1975–2001 | 1,000 m, 11 s flight, SACLOS; 330 mm; Dragon II about 610 mm (dates to check) |
+| Blue | ATGM team | Javelin | 1996 | 65 m (direct) / 150 m (top attack) to 2,000 m; about 140 m/s; penetration classified, "over 760 mm" quoted (`low`); fire-and-forget |
+| Red | RPG in squads | RPG-7: PG-7V 1961, PG-7VL 1977, PG-7VR tandem 1988 | 1961 | hit table in §2.2 (Isby 1988); 260–330 / about 500 / 600 mm behind ERA (750 without) |
+| Red | light disposable | RPG-18, then RPG-22/26 | 1972 / 1985 | RPG-22 about 160 m, about 400 mm (secondary); RPG-26 to check |
+| Red | ATGM team | 9K111 Fagot | 1970 | 75–2,000 m, 400 mm; later 9M111M 2,500 m, about 600 mm |
+| Red | ATGM team | 9K115 Metis | 1978 | 40–1,000 m, 460 mm |
+| Red | ATGM team | 9K135 Kornet | 1998 in service (shown 1994) | 100–5,500 m, beam riding, tandem; 1,000–1,200 mm behind ERA |
 
 - Sources to add to REFERENCES.md:
   - FM 3-23.25 *Shoulder-Launched Munitions* (2001);
@@ -192,6 +234,8 @@ and clearing with dismounts.
   - FM 100-2-3 (1991);
   - Grau (FMSO 1997);
   - Grau and Thomas, "Russian Lessons Learned from the Battles for Grozny" (FMSO, 2000);
+  - Isby, *Weapons and Tactics of the Soviet Army* (Jane's, 1981/1988) for the RPG-7 hit
+    table (via a forum transcription; check against a copy);
   - Army Recognition/Wikipedia-class summaries only for penetration figures, marked `low`.
 
 ## 7. Client
@@ -205,7 +249,7 @@ and clearing with dismounts.
 
 ## 8. Hash, replays, balance
 
-- Golden scenario: no squads, so it is unchanged by §2 and §4–5. **The tandem flag (§2.3) and
+- Golden scenario: no squads, so it is unchanged by §2 and §4–5. **The tandem flag (§2.4) and
   `top_mm` (§3) touch existing vehicle-against-vehicle fights.** The RF-1 becomes tandem, and a
   shot from a ridge may plunge. So those commits update the golden hash deliberately and re-run
   the duel harness and the 16-seed balance batch.
@@ -215,7 +259,7 @@ and clearing with dismounts.
 - `SIM_VERSION` bump (new behaviour for squads). Old replays are rejected cleanly, as decided
   in Z6.
 
-## 9. Decisions (recommendations, for review)
+## 9. Decisions (agreed 2026-10-24: all recommendations accepted)
 
 | # | Question | Options | Recommendation and why |
 |---|---|---|---|
@@ -229,6 +273,8 @@ and clearing with dismounts.
 | 8 | Firing from inside buildings (backblast) | allowed for all / only "enclosure-safe" weapons | **Allowed for all**, abstracted. RPGs were routinely fired from rooms and basements in Grozny (Grau and Thomas 2000); a rule would cut the main ambush case |
 | 9 | Content | new tech demo `m8b-ambush` (village, Red AT teams and MR squads in houses, Blue tank platoon); AT teams in v1 scenarios later in M8i / now | **Tech demo now, v1 scenarios later.** The v1 balance stays independent of AI that does not yet use infantry (F11) |
 | 10 | Crosswind on unguided rockets | in the ballistic error (data) / per-shot from the scenario wind | **In the ballistic error for v1.** A per-shot wind term is a small later refinement (ENG backlog) |
+| 11 | Behind-armour effect of small warheads (added with the calibration) | per-round `behind_armour` factor on kill outcomes / one table for all rounds | **Per-round factor** (§2.3). Without it one RPG penetration kills a T-72 60 % of the time, against 3–6 hits per kill in Grozny |
+| 12 | Active protection and drones (added with the calibration) | model now / defer | **Defer.** The scenarios end in 2005. Drozd (1983) was fitted only to a few T-55AD; Arena and Trophy came later; loitering munitions are outside the era. Noted in TODO.md as later items |
 
 ## 10. Order of work (each line is about one reviewable commit)
 
@@ -236,7 +282,7 @@ and clearing with dismounts.
    unchanged (proves the refactor).
 2. Data: `AntiArmourDef`, ammo rows, `tandem`, `top_mm` on vehicles; loader tests; DATABASE
    rows.
-3. Tandem rule; duel harness re-run; golden hash update (deliberate); balance batch.
+3. Tandem rule and `behind_armour`; duel harness re-run; golden hash update (deliberate); balance batch.
 4. Top/plunging hits; unit tests: an upper-floor RPG penetrates an MBT roof and not its front;
    golden hash if changed.
 5. Squad anti-armour fire: setup time, trigger range, aspect preference, backblast cue,
@@ -255,12 +301,48 @@ and clearing with dismounts.
 
 ## 11. Validation targets
 
-| # | Target | Value |
+| # | Target | Value | Source |
+|---|---|---|---|
+| A1 | RPG-7 (PG-7V) first-round hit, stationary tank-sized target, no wind | 0.91 / 0.52 / 0.27 / 0.05 at 100 / 200 / 300 / 500 m (± 0.08) | Isby (1988) |
+| A2 | Same, target crossing at 4 m/s | 0.96 / 0.51 / 0.22 / 0.04 at 100 / 200 / 300 / 500 m (± 0.08) | US Army evaluation 1975–76 |
+| A3 | M72 / AT4 hit at their static effective range | about 0.25–0.30 | FM 3-23.25 ranges, same curve shape as A1 (*derived*) |
+| A4 | PG-7V against a T-72-class front / side | front not penetrated; side and rear penetrated | penetration data |
+| A5 | Upper-floor RPG against an MBT roof (plunge over 20°) | penetrated | §3 |
+| A6 | PG-7VR against Kontakt-type ERA | tile spent, penetration not reduced | §2.4 |
+| A7 | SACLOS missile with the operator pinned during flight | misses | §2.2; Sagger 1973 |
+| A8 | PG-7V-class hits on a T-72 side until it is destroyed (catastrophic or firepower kill) | mean 2–4 hits | Grau 1997 (3–6 lethal hits per destroyed vehicle, all aspects) |
+| A9 | Fire-and-forget missile (Javelin class) hit rate at 500–2,000 m, target in the open | about 0.85–0.9 | DoD, Ukraine 2022: 100 of 112 |
+| A10 | Exit scenario: RPG team in a house, tank passes at 100–150 m showing its flank | tank killed or disabled in more than half of 16 seeds | scenario test |
+
+## 12. Calibration against public data (2026-10-24)
+
+What matters physically, and what is abstracted statistically:
+
+| Aspect | Treatment | Why |
 |---|---|---|
-| A1 | RPG-7 first-round hit on a stationary tank-sized target | about 0.5 at 500 m, about 0.9 at 100 m (FM 100-2-3 effective range, *derived*) |
-| A2 | Same on a target crossing at 5 m/s | about 0.5 at 300 m |
-| A3 | PG-7V against a T-72-class front / side | front not penetrated; side and rear penetrated |
-| A4 | Upper-floor RPG against an MBT roof (plunge > 20°) | penetrated |
-| A5 | PG-7VR against Kontakt-1-type ERA | ERA spent, penetration not reduced |
-| A6 | SACLOS missile with the operator pinned during flight | misses |
-| A7 | Exit scenario: RPG team in a house, tank passes at 100–150 m showing its flank | tank killed or disabled in most seeds (more than half of 16) |
+| Rocket flight, drop and range estimation | **Physical**: the existing ballistic path with an estimated-range error | It produces the steep fall in hit chance with range in the test tables. A flat statistical table would lose it, and it would lose the effect of a laser rangefinder on later launchers |
+| Wind, launch jitter, gunner stress | **Statistical**: aim and ballistic error, plus the existing suppression growth | No per-shot data; wind is folded in (decision 10) |
+| Combat against proving ground | **Through suppression, not a flat factor** | Sagger 25 % → 2 % came from crews firing at launch points, which the model has: suppression and the operator-in-the-loop rule. A flat "combat factor" would double-count it |
+| Hit location: face, turret or hull, plunge | **Physical** (geometry) | The point of ambush doctrine. Grozny kills were 98 % on areas without ERA; the WWII T-34 survey has about half of all hits on the hull sides |
+| Behind-armour damage | **Statistical**: per-round factor on the damage table | Jet-path modelling is beyond the scope; the factor reproduces "3–6 hits per kill" |
+| Roof thickness | **Low-confidence estimate** | No public source, and the result does not depend on it (§3) |
+| Penetration figures | **Open-source values, `low`** | Manufacturer and encyclopedia figures disagree by about 20 %, which is inside the margin that decides most pairings |
+
+Sources used (secondary ones marked as such in the data):
+- Isby (1988), RPG-7 hit table, via a [Battlefront forum transcription](https://community.battlefront.com/topic/91032-why-use-an-m136at4-when-you-have-a-javelin/page/2) (secondary);
+- [generalstaff.org historical Ph/Pk page](https://generalstaff.org/BBOW/Weapons/Hist_PHitsPKills.htm) (secondary);
+- [GlobalSecurity RPG-7](https://www.globalsecurity.org/military/world/russia/rpg-7.htm);
+- Grau, [Russian-Manufactured Armored Vehicle Vulnerability in Urban Combat](https://man.fas.org/dod-101/sys/land/row/rusav.htm) (FMSO, 1997);
+- Grau, [Russian Urban Tactics: Lessons from the Battle for Grozny](https://apps.dtic.mil/sti/pdfs/ADA394517.pdf);
+- Iraq 2003 Abrams damage, via [Army Rumour Service](https://www.arrse.co.uk/community/threads/americans-dont-know-what-hit-them.3525/post-53095) and [StrategyPage](https://www.strategypage.com/htmw/htarm/articles/20030410.aspx) (secondary);
+- [Manual command to line of sight](https://en.wikipedia.org/wiki/Manual_command_to_line_of_sight) (Sagger 1973, citing Iyer 1995);
+- Javelin: [National Interest](https://nationalinterest.org/node/213728) (DoD 112 shots, 100 hits); [CSIS Missile Threat](https://missilethreat.csis.org/missile/fgm-148-javelin/); [Wikipedia](https://en.wikipedia.org/wiki/FGM-148_Javelin);
+- [M47 Dragon](https://en.wikipedia.org/wiki/M47_Dragon), [9K111 Fagot](https://en.wikipedia.org/wiki/9K111_Fagot), [AT-7 Metis](https://www.globalsecurity.org/military/world/russia/at-7.htm), [9M133 Kornet](https://en.wikipedia.org/wiki/9M133_Kornet), [Kontakt-5](https://en.wikipedia.org/wiki/Kontakt-5), [AT4](https://en.wikipedia.org/wiki/AT4) (FM 3-23.25 penetration), [RPG-22](https://modernfirearms.net/en/grenade-launchers/russia-grenade-launchers/rpg-22-eng/);
+- FM 3-23.25 *Light Antiarmor Weapons* (2001), [archive.org copy](https://archive.org/download/MManuals/UsArmyLightAntiarmorWeapons2001.pdf);
+- hit distributions: [1942 T-34 damage survey](https://tanks-encyclopedia.com/1942-combat-damage-analysis-of-the-t-34-and-t-70-tanks/).
+
+Still to check, before the data commit:
+- the Isby table against a copy of the book;
+- Dragon II and 9M111M service dates;
+- RPG-18 and RPG-26 penetration;
+- M72A2 penetration.

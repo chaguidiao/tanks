@@ -8,7 +8,6 @@ Rules for every item (CLAUDE.md): data in `data/**/*.ron` with source and confid
 
 ## Waiting on the user (decisions; check here first)
 Added 2026-10-21. Remove a line when it is decided, and record the decision on the item it belongs to.
-- **M8b-b plan review**: `docs/plans/M8B-AT-TEAMS.md` §9 (10 decisions with recommendations). Gates B2, B6, B9, B12, B19.
 
 ## Phase map (v1.x = M8, v1.5 = M9, then v2+)
 
@@ -92,13 +91,17 @@ Notes, sources and proposed values: `docs/plans/M8B-CALIBRATION-NOTES.md`. §4 q
 - [ ] B25 Validation harness for infantry: targets V1–V5 (formula test against Hitchman, rounds per casualty, MG/rifle ratio, share of losses from small arms with artillery, 2005 against 1990 exchange ratio) (notes §1.3). Must run before the M8b-b anti-tank teams are tuned, and the lethality call (calibration Q1) is made from its results. 2026-10-24: `tanks-headless firefight` and men lost by cause in `run`; V1–V3 pass (notes §1.4); V4 waits on F11 (no AI dismounts yet); V5 passes at 1.43× by day (notes §1.4)
 
 ## M8b-b — Anti-tank teams
-Plan: `docs/plans/M8B-AT-TEAMS.md` (draft 2026-10-24, waiting on review).
+Plan: `docs/plans/M8B-AT-TEAMS.md`. Agreed 2026-10-24, with all 12 recommendations in §9 accepted, and calibrated against public data (§12: RPG-7 hit tables, Grozny and Iraq damage, Sagger and Javelin combat hit rates). Work follows §10; validation targets A1–A10 are in §11. Before the data commit, check the open items at the end of §12.
 - [ ] B2 ATGM teams on the existing guided-round model — §13.2
 - [ ] B6 AI preference for ATGM range — §13.1 M7b
 - [ ] B9 Unguided short-range launchers (RPG-7 class): short range, hold-fire-until-close, side/rear-weighted hit chance, back-blast reveals the shooter
 - [ ] B12 Close-in vulnerability: tank damage tables for short-range side/rear/top hits (a top-armour value stays M9 T2 for dedicated top-attack)
 - [ ] B19 Anti-tank team data (RPG, ATGM per era, sourced) and ambush doctrine in `generic-opfor`
 - Exit: a scripted test where an RPG team in a village kills a tank from the flank; per-pairing unit tests; balance batch.
+- Deferred by the plan (§9 #7, #10, #12):
+  - AT teams moving after firing (F11);
+  - per-shot crosswind on rockets (ENG);
+  - active protection (Drozd/Arena/Trophy class) and loitering munitions, for scenarios after 2005.
 
 ## M8c — Logistics
 - [ ] C1 Vehicle ammunition and fuel resupply; supply point or trucks — §11, §13.1 M7b. Plan: `docs/plans/M8C-LOGISTICS.md`. **In progress 2026-10-21**: slices 1–4 done (data `logistics.ron`, scenario `supply_points`, `Command::Resupply` service-station resupply with stock accounting, re-arm events (C4), tests `m8c.rs`; client 2026-10-24: supply point symbol, RESUPPLY card button (R), resupply stage on the platoon/vehicle cards, supply point placement in the scenario editor); still open in the client: radio `AT SUPPLY POINT`, roster ammo/fuel warnings, choosing a point other than the nearest, re-arm events in the editor; next: tailgate trucks (slice 6)
