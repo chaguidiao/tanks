@@ -303,6 +303,15 @@ fn fire_support_is_deterministic() {
     assert_eq!(hash(), hash());
 }
 
+/// Blue's first vehicle holds fire.
+fn hold_fire(sim: &mut Sim) {
+    let id = sim.truth().id[0];
+    sim.submit_immediate(
+        BLUE,
+        Command::WeaponsControl { to: sim::Addressee::Unit(id), status: sim::view::WeaponsStatus::Hold },
+    );
+}
+
 fn with_ai(mut sc: ScenarioDef) -> ScenarioDef {
     sc.sides[0].ai = Some(sim_data::AiPlan { tasks: vec![] });
     sc
@@ -321,6 +330,7 @@ fn the_commander_ai_calls_fire_on_a_fresh_contact_in_range() {
         None,
     ));
     let mut sim = Sim::new(&sc, ds, m).unwrap();
+    hold_fire(&mut sim); // the tank would kill the contact first, and dead contacts get no fire
     let rep = fire_reports(&run_events(&mut sim, 60.0));
     assert!(rep.iter().any(|(_, r)| matches!(r, FireReport::Accepted { .. })), "no mission called: {rep:?}");
 }
@@ -438,6 +448,7 @@ fn the_commander_ai_screens_with_smoke_on_entering_battle() {
         }],
     });
     let mut sim = Sim::new(&sc, ds, m).unwrap();
+    hold_fire(&mut sim);
     let ev = run_events(&mut sim, 90.0);
     let smoke = ev.iter().any(|(_, e)| matches!(e, Event::FireSupport { report: FireReport::Accepted { .. }, .. }));
     assert!(smoke, "no smoke mission called on entering battle (battery has no HE)");

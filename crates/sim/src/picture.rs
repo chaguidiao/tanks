@@ -40,6 +40,8 @@ pub struct PendingReport {
     pub type_name: Option<String>,
     pub range_m: f64,
     pub anti_armour: bool,
+    /// The crew saw the target destroyed before the report went out.
+    pub destroyed: bool,
 }
 
 /// A squad seen launching this recently is reported as an anti-tank weapon (ticks, 60 s).
@@ -126,6 +128,7 @@ impl SideState {
             type_name,
             range_m: r,
             anti_armour: launched || missile_team,
+            destroyed: false,
         });
     }
 
@@ -172,6 +175,7 @@ impl SideState {
                         c.kind = r.kind;
                     }
                     c.anti_armour |= r.anti_armour;
+                    c.destroyed |= r.destroyed;
                     (cid, upgraded)
                 }
                 None => {
@@ -186,7 +190,7 @@ impl SideState {
                         first_report_s: now,
                         last_report_s: now,
                         reported_by: reporter,
-                        destroyed: false,
+                        destroyed: r.destroyed,
                         anti_armour: r.anti_armour,
                     });
                     (cid, true)
@@ -249,7 +253,9 @@ impl SideState {
         self.picture.shots.push(shot);
     }
 
-    /// Mark the contact nearest `pos` destroyed (an own crew saw its target brew up).
+    /// Mark the contact nearest `pos` destroyed (an own crew saw its target brew up). With no
+    /// contact there yet, the reports still on their way are marked, so the contact they make
+    /// arrives destroyed.
     pub fn mark_destroyed(&mut self, pos: Vec2) {
         if let Some(c) = self
             .picture
@@ -259,6 +265,10 @@ impl SideState {
             .min_by(|a, b| dist(a.pos, pos).total_cmp(&dist(b.pos, pos)))
         {
             c.destroyed = true;
+            return;
+        }
+        for r in self.pending.iter_mut().filter(|r| dist(r.pos, pos) < FUSE_RADIUS * 2.0) {
+            r.destroyed = true;
         }
     }
 
