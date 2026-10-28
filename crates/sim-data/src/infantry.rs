@@ -283,6 +283,19 @@ pub struct InfantryDoctrine {
     pub squad_spacing_m: Stat<f64>,
     /// Anti-armour ambush (plan M8B-AT-TEAMS §6).
     pub ambush: AmbushDoctrine,
+    /// Vehicles' react to ambush (near) (plan M8F1-INFANTRY-AI §2).
+    pub react_ambush: ReactAmbushDoctrine,
+}
+
+/// How vehicles react when rockets or missiles are fired at them from close range.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReactAmbushDoctrine {
+    /// A rocket or missile launched from inside this range counts as an ambush (m).
+    pub close_ambush_m: Stat<f64>,
+    /// REVERSE OUT: distance reversed out of the kill zone (m).
+    pub reverse_m: Stat<f64>,
+    /// DRIVE THROUGH: the contact drill does not halt the platoon for this long (s).
+    pub drive_through_s: Stat<f64>,
 }
 
 /// Anti-armour ambush rules: hold fire until a vehicle is inside the kill zone or the squad is

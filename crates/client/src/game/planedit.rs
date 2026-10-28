@@ -7,7 +7,10 @@
 
 use std::collections::BTreeMap;
 
-use sim::view::{Branch, ConditionSet, ContactReaction, LegSettings, Plan, PlanStep, SpeedSetting, StepAction};
+use sim::view::{
+    AmbushReaction, Branch, BuiltUp, ConditionSet, ContactReaction, LegSettings, Plan, PlanStep, SpeedSetting,
+    StepAction,
+};
 use terrain::path::{Pathfinder, segment_time};
 
 use super::ctx::{MenuAct, reaction_name};
@@ -174,6 +177,8 @@ pub enum PlanEdit {
     Technique(u16, Option<Technique>),
     Weapons(u16, Option<WeaponsStatus>),
     OnContact(u16, Option<ContactReaction>),
+    OnAmbush(u16, Option<AmbushReaction>),
+    BuiltUp(u16, Option<BuiltUp>),
     /// Add an action at the checkpoint (`true` = on release).
     Act(u16, bool, ActKind),
     ClearActs(u16, bool),
@@ -225,6 +230,33 @@ fn speed_text(s: SpeedSetting) -> String {
     match s {
         SpeedSetting::Max => "MAX".into(),
         SpeedSetting::Limit(v) => format!("{} KM/H", format::kmh(v)),
+    }
+}
+
+/// ON AMBUSH values (plan M8F1-INFANTRY-AI §2).
+pub(super) const AMBUSH_REACTIONS: [AmbushReaction; 3] =
+    [AmbushReaction::ReverseOut, AmbushReaction::DriveThrough, AmbushReaction::Halt];
+
+pub(super) fn ambush_name(r: AmbushReaction) -> &'static str {
+    match r {
+        AmbushReaction::ReverseOut => "REVERSE OUT",
+        AmbushReaction::DriveThrough => "DRIVE THROUGH",
+        AmbushReaction::Halt => "HALT AND FIGHT",
+    }
+}
+
+pub(super) fn ambush_short(r: AmbushReaction) -> &'static str {
+    match r {
+        AmbushReaction::ReverseOut => "REVERSE",
+        AmbushReaction::DriveThrough => "THROUGH",
+        AmbushReaction::Halt => "HALT",
+    }
+}
+
+pub(super) fn built_up_name(b: BuiltUp) -> &'static str {
+    match b {
+        BuiltUp::Avoid => "AVOID",
+        BuiltUp::Enter => "ENTER",
     }
 }
 
@@ -712,6 +744,20 @@ impl Game {
                     .checked(leg.on_contact == Some(r)),
             );
         }
+        let mut ambush = vec![keep(leg.on_ambush.is_some(), PlanEdit::OnAmbush(id, None))];
+        for r in AMBUSH_REACTIONS {
+            ambush.push(
+                MenuItem::new(ambush_name(r), Self::pa(PlanEdit::OnAmbush(id, Some(r))))
+                    .checked(leg.on_ambush == Some(r)),
+            );
+        }
+        let mut built = vec![keep(leg.built_up.is_some(), PlanEdit::BuiltUp(id, None))];
+        for b in [BuiltUp::Avoid, BuiltUp::Enter] {
+            built.push(
+                MenuItem::new(built_up_name(b), Self::pa(PlanEdit::BuiltUp(id, Some(b))))
+                    .checked(leg.built_up == Some(b)),
+            );
+        }
         let or_keep = |s: Option<String>| s.unwrap_or_else(|| "KEEP".into());
         vec![
             MenuItem::submenu("SPEED", speed).key("S").value(or_keep(leg.speed.map(speed_text))),
@@ -723,6 +769,14 @@ impl Game {
             MenuItem::submenu("ON CONTACT", react)
                 .key("C")
                 .value(or_keep(leg.on_contact.map(|r| reaction_short(r).into()))),
+            MenuItem::submenu("ON AMBUSH", ambush)
+                .key("A")
+                .value(or_keep(leg.on_ambush.map(|r| ambush_short(r).into())))
+                .tip("ROCKETS OR MISSILES FROM CLOSE RANGE: REVERSE OUT (DEFAULT), DRIVE THROUGH, OR HALT AND FIGHT"),
+            MenuItem::submenu("BUILT-UP", built)
+                .key("U")
+                .value(or_keep(leg.built_up.map(|b| built_up_name(b).into())))
+                .tip("TANK ROUTES AVOID BUILT-UP GROUND WITHOUT DISMOUNTS (DEFAULT) OR ENTER IT"),
         ]
     }
 
@@ -861,6 +915,7 @@ impl Game {
             ("CONTACT < 2 KM", TriggerCondition::ContactWithin { platoon: p, range_m: 2000.0 }),
             ("CONTACT < 3 KM", TriggerCondition::ContactWithin { platoon: p, range_m: 3000.0 }),
             ("UNDER FIRE", TriggerCondition::UnderFire { platoon: p }),
+            ("AMBUSHED", TriggerCondition::Ambushed { platoon: p }),
             ("STRENGTH <= 3", TriggerCondition::StrengthAtMost { platoon: p, remaining: 3 }),
             ("STRENGTH <= 2", TriggerCondition::StrengthAtMost { platoon: p, remaining: 2 }),
         ];
@@ -995,6 +1050,8 @@ impl Game {
                     | PlanEdit::Technique(id, _)
                     | PlanEdit::Weapons(id, _)
                     | PlanEdit::OnContact(id, _)
+                    | PlanEdit::OnAmbush(id, _)
+                    | PlanEdit::BuiltUp(id, _)
                     | PlanEdit::Act(id, ..)
                     | PlanEdit::ClearActs(id, _)
                     | PlanEdit::Wait(id, _)
@@ -1011,6 +1068,8 @@ impl Game {
                     PlanEdit::Technique(_, v) => s.leg.technique = v,
                     PlanEdit::Weapons(_, v) => s.leg.weapons = v,
                     PlanEdit::OnContact(_, v) => s.leg.on_contact = v,
+                    PlanEdit::OnAmbush(_, v) => s.leg.on_ambush = v,
+                    PlanEdit::BuiltUp(_, v) => s.leg.built_up = v,
                     PlanEdit::Act(_, release, k) => {
                         let a = match k {
                             ActKind::SmokeScreen => StepAction::SmokeScreen,
@@ -1060,6 +1119,7 @@ impl Game {
             TriggerCondition::EnemyInArea { graphic } => format!("ENEMY IN {}", label(*graphic, "AREA")),
             TriggerCondition::StrengthAtMost { remaining, .. } => format!("STRENGTH <= {remaining}"),
             TriggerCondition::UnderFire { .. } => "UNDER FIRE".into(),
+            TriggerCondition::Ambushed { .. } => "AMBUSHED".into(),
             TriggerCondition::PlatoonAt { platoon, step } => {
                 let v = pic.platoon(*platoon);
                 let n = v
@@ -1448,6 +1508,12 @@ fn leg_text(l: &sim::view::LegSettings) -> String {
     }
     if let Some(r) = l.on_contact {
         v.push(format!("CONTACT {}", reaction_short(r)));
+    }
+    if let Some(r) = l.on_ambush {
+        v.push(format!("AMBUSH {}", ambush_short(r)));
+    }
+    if let Some(b) = l.built_up {
+        v.push(format!("BUILT-UP {}", built_up_name(b)));
     }
     if v.is_empty() { "KEEP".into() } else { v.join(" · ") }
 }

@@ -1,6 +1,6 @@
 //! Platoons: membership, order state and the platoon view. Behaviour is in `platoon_ai.rs`.
 
-use ai::picture::{ContactReaction, PlatoonId, PlatoonView, SideId};
+use ai::picture::{AmbushReaction, BuiltUp, ContactReaction, PlatoonId, PlatoonView, SideId};
 use ai::position::Candidate;
 use sim_data::{Formation, Technique};
 
@@ -81,6 +81,15 @@ pub struct Platoon {
     /// Step ids passed by the plan that last ran to its end.
     pub finished: Vec<u16>,
     pub contact_reaction: ContactReaction,
+    pub ambush_reaction: AmbushReaction,
+    pub built_up: BuiltUp,
+    /// Rockets or missiles last fired at a member from inside the doctrine's close-ambush range:
+    /// (tick, launch point). The crew sees the launch at that range.
+    pub ambush: Option<(u64, Vec2)>,
+    /// Tick of the ambush the drill last reacted to.
+    pub ambush_handled: u64,
+    /// Driving through an ambush: the contact drill does not halt the platoon before this tick.
+    pub drive_through_until: u64,
     /// Orders to carry out in turn once the current task is finished.
     pub queue: Vec<crate::command::Command>,
     /// Every member is a squad (a dismount platoon, plan M8B-INFANTRY §6).
@@ -216,6 +225,9 @@ impl Platoon {
             speed_limit: self.speed_limit,
             plan: self.plan.as_ref().map(|s| s.view()),
             contact_reaction: self.contact_reaction,
+            ambush_reaction: self.ambush_reaction,
+            built_up: self.built_up,
+            ambushed_tick: (self.ambush_handled > 0).then_some(self.ambush_handled),
             queued: self.queue.len() as u8,
             resupply_at: match &self.order {
                 PlatoonOrder::Resupply { point, .. } => Some(*point as u32),

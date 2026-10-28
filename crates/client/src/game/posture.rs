@@ -1,13 +1,13 @@
 //! Posture orders (docs/plans/archive/CONTROL-UX.md §5.3, §7): FORMATION, TECHNIQUE, SPEED, WEAPONS,
-//! ON CONTACT and AMMO. Each is a value list: one pick is one radio order. With a checkpoint selected the pick
+//! ON CONTACT (with ON AMBUSH and BUILT-UP as its sub-lists) and AMMO. Each is a value list: one pick is one radio order. With a checkpoint selected the pick
 //! edits that leg of the plan, otherwise it goes to the selection now (and the sim writes it into
 //! the leg in progress, see `sim::plan::PlanState::rewrite_leg`).
 
 use super::ctx::{MenuAct, reaction_name};
-use super::planedit::{PlanEdit, reaction_short};
+use super::planedit::{AMBUSH_REACTIONS, PlanEdit, ambush_name, ambush_short, built_up_name, reaction_short};
 use super::*;
 use crate::hud::{MenuItem, PopupMenu};
-use ai::picture::{ContactReaction, SpeedSetting};
+use ai::picture::{AmbushReaction, BuiltUp, ContactReaction, SpeedSetting};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Posture {
@@ -16,6 +16,10 @@ pub enum Posture {
     Speed,
     Weapons,
     OnContact,
+    /// Sub-list of ON CONTACT (plan M8F1-INFANTRY-AI §2).
+    OnAmbush,
+    /// Sub-list of ON CONTACT (plan M8F1-INFANTRY-AI §3).
+    BuiltUp,
     Ammo,
 }
 
@@ -26,6 +30,8 @@ pub enum PostureVal {
     Speed(Option<f64>),
     Weapons(WeaponsStatus),
     OnContact(ContactReaction),
+    OnAmbush(AmbushReaction),
+    BuiltUp(BuiltUp),
     Ammo(Option<AmmoKind>),
     /// Leg scope: the leg does not set this; the platoon keeps what it has.
     Keep(Posture),
@@ -48,6 +54,8 @@ impl Posture {
             Posture::Speed => "SPEED",
             Posture::Weapons => "WEAPONS",
             Posture::OnContact => "ON CONTACT",
+            Posture::OnAmbush => "ON AMBUSH",
+            Posture::BuiltUp => "BUILT-UP",
             Posture::Ammo => "AMMUNITION",
         }
     }
@@ -59,13 +67,16 @@ impl Posture {
             Posture::Technique => 9,
             Posture::Speed => 10,
             Posture::Weapons => 11,
-            Posture::OnContact => 12,
+            Posture::OnContact | Posture::OnAmbush | Posture::BuiltUp => 12,
             Posture::Ammo => 13,
         }
     }
 
     fn needs_platoon(self) -> bool {
-        matches!(self, Posture::Formation | Posture::Technique | Posture::OnContact)
+        matches!(
+            self,
+            Posture::Formation | Posture::Technique | Posture::OnContact | Posture::OnAmbush | Posture::BuiltUp
+        )
     }
 }
 
@@ -137,6 +148,14 @@ impl Game {
                     let Addressee::Platoon(p) = to else { return None };
                     self.picture().platoon(p).map(|v| PostureVal::OnContact(v.contact_reaction))
                 }
+                Posture::OnAmbush => {
+                    let Addressee::Platoon(p) = to else { return None };
+                    self.picture().platoon(p).map(|v| PostureVal::OnAmbush(v.ambush_reaction))
+                }
+                Posture::BuiltUp => {
+                    let Addressee::Platoon(p) = to else { return None };
+                    self.picture().platoon(p).map(|v| PostureVal::BuiltUp(v.built_up))
+                }
                 Posture::Ammo => self.ammo_choice(to).map(|(c, _)| PostureVal::Ammo(c)),
             },
             Scope::Leg(p, id) => {
@@ -152,6 +171,8 @@ impl Game {
                     }),
                     Posture::Weapons => leg.weapons.map(PostureVal::Weapons),
                     Posture::OnContact => leg.on_contact.map(PostureVal::OnContact),
+                    Posture::OnAmbush => leg.on_ambush.map(PostureVal::OnAmbush),
+                    Posture::BuiltUp => leg.built_up.map(PostureVal::BuiltUp),
                     Posture::Ammo => None,
                 }
             }
@@ -165,6 +186,8 @@ impl Game {
             PostureVal::Speed(s) => speed_short(s),
             PostureVal::Weapons(w) => weapons_str(w).into(),
             PostureVal::OnContact(r) => reaction_name(r).into(),
+            PostureVal::OnAmbush(r) => ambush_name(r).into(),
+            PostureVal::BuiltUp(b) => built_up_name(b).into(),
             PostureVal::Ammo(k) => k.map_or("AUTO", |k| k.label()).into(),
             PostureVal::Keep(_) => "KEEP".into(),
         }
@@ -177,6 +200,7 @@ impl Game {
             Some(v) => match (k, v) {
                 (Posture::Technique, PostureVal::Technique(t)) => short_technique(t).into(),
                 (Posture::OnContact, PostureVal::OnContact(r)) => reaction_short(r).into(),
+                (Posture::OnAmbush, PostureVal::OnAmbush(r)) => ambush_short(r).into(),
                 _ => self.posture_label(v),
             },
             None if matches!(scope, Scope::Leg(..)) => "KEEP".into(),
@@ -205,6 +229,8 @@ impl Game {
             .into_iter()
             .map(PostureVal::OnContact)
             .collect(),
+            Posture::OnAmbush => AMBUSH_REACTIONS.into_iter().map(PostureVal::OnAmbush).collect(),
+            Posture::BuiltUp => [BuiltUp::Avoid, BuiltUp::Enter].into_iter().map(PostureVal::BuiltUp).collect(),
             Posture::Ammo => {
                 let kinds = match scope {
                     Scope::Now(to) => self.ammo_choice(to).map(|(_, k)| k).unwrap_or_default(),
@@ -224,7 +250,8 @@ impl Game {
             vals.insert(0, PostureVal::Keep(k));
         }
         let mut digit = 0;
-        vals.into_iter()
+        let mut items: Vec<MenuItem<MenuAct>> = vals
+            .into_iter()
             .map(|v| {
                 let mut it = MenuItem::new(self.posture_label(v), MenuAct::Posture(scope, v));
                 let keep = matches!(v, PostureVal::Keep(_));
@@ -234,7 +261,30 @@ impl Game {
                 }
                 it.checked(if keep { cur.is_none() } else { cur == Some(v) })
             })
-            .collect()
+            .collect();
+        // The other standing operating procedures for meeting the enemy live under ON CONTACT
+        // (the card has no free cell).
+        if k == Posture::OnContact {
+            let value = |k: Posture| match self.posture_current(k, scope) {
+                Some(v) => self.posture_label(v),
+                None => "KEEP".into(),
+            };
+            items.push(
+                MenuItem::submenu("ON AMBUSH", self.posture_items(Posture::OnAmbush, scope))
+                    .key("A")
+                    .value(value(Posture::OnAmbush))
+                    .tip(
+                        "ROCKETS OR MISSILES FROM CLOSE RANGE: REVERSE OUT (DEFAULT), DRIVE THROUGH, OR HALT AND FIGHT",
+                    ),
+            );
+            items.push(
+                MenuItem::submenu("BUILT-UP", self.posture_items(Posture::BuiltUp, scope))
+                    .key("U")
+                    .value(value(Posture::BuiltUp))
+                    .tip("TANK ROUTES AVOID BUILT-UP GROUND WITHOUT DISMOUNTS (DEFAULT) OR ENTER IT"),
+            );
+        }
+        items
     }
 
     /// The posture as a submenu of the platoon context menu.
@@ -278,11 +328,15 @@ impl Game {
                     PostureVal::Speed(s) => PlanEdit::Speed(id, Some(s.map_or(SpeedSetting::Max, SpeedSetting::Limit))),
                     PostureVal::Weapons(w) => PlanEdit::Weapons(id, Some(w)),
                     PostureVal::OnContact(r) => PlanEdit::OnContact(id, Some(r)),
+                    PostureVal::OnAmbush(r) => PlanEdit::OnAmbush(id, Some(r)),
+                    PostureVal::BuiltUp(b) => PlanEdit::BuiltUp(id, Some(b)),
                     PostureVal::Keep(Posture::Formation) => PlanEdit::Formation(id, None),
                     PostureVal::Keep(Posture::Technique) => PlanEdit::Technique(id, None),
                     PostureVal::Keep(Posture::Speed) => PlanEdit::Speed(id, None),
                     PostureVal::Keep(Posture::Weapons) => PlanEdit::Weapons(id, None),
                     PostureVal::Keep(Posture::OnContact) => PlanEdit::OnContact(id, None),
+                    PostureVal::Keep(Posture::OnAmbush) => PlanEdit::OnAmbush(id, None),
+                    PostureVal::Keep(Posture::BuiltUp) => PlanEdit::BuiltUp(id, None),
                     PostureVal::Ammo(_) | PostureVal::Keep(Posture::Ammo) => return,
                 };
                 self.run_plan_edit(e, [0.0, 0.0]);
@@ -332,6 +386,14 @@ impl Game {
             (PostureVal::OnContact(reaction), Addressee::Platoon(platoon)) => {
                 self.order(Command::SetContactReaction { platoon, reaction });
                 self.radio(format!("TO {cs}: ON CONTACT, {}.", reaction_name(reaction)));
+            }
+            (PostureVal::OnAmbush(reaction), Addressee::Platoon(platoon)) => {
+                self.order(Command::SetAmbushReaction { platoon, reaction });
+                self.radio(format!("TO {cs}: ON AMBUSH, {}.", ambush_name(reaction)));
+            }
+            (PostureVal::BuiltUp(built_up), Addressee::Platoon(platoon)) => {
+                self.order(Command::SetBuiltUp { platoon, built_up });
+                self.radio(format!("TO {cs}: BUILT-UP AREAS, {}.", built_up_name(built_up)));
             }
             (PostureVal::Ammo(kind), _) => {
                 self.order(Command::SelectAmmo { to, kind });

@@ -76,5 +76,17 @@
                 notes: "Capped by each missile's own maximum range."),
             prefer_flank: true,
         ),
+        // Vehicles' react to ambush (near) (plan M8F1-INFANTRY-AI §2): ATP 3-21.8 (2016) battle drill
+        // react to ambush (near): leave the kill zone at once and return fire; ATP 3-20.15 App. F
+        // react to contact and break contact (smoke, then move); Grau (FMSO, 1997): Grozny columns
+        // that halted in the street were destroyed.
+        react_ambush: (
+            close_ambush_m: (value: 400.0, source: "estimate (plan M8F1-INFANTRY-AI §2)", confidence: estimate,
+                notes: "Beyond RPG-7 class effective range (about 300 m); inside it a launch is seen and the shooter is close."),
+            reverse_m: (value: 150.0, source: "estimate", confidence: estimate,
+                notes: "Back along the ground just driven, about a village block, before fighting from there."),
+            drive_through_s: (value: 60.0, source: "estimate", confidence: estimate,
+                notes: "Time to clear a kill zone of a few hundred metres at road speed."),
+        ),
     ),
 )

@@ -3527,6 +3527,16 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                     format::distance(((toward[0] - at[0]).powi(2) + (toward[1] - at[1]).powi(2)).sqrt()),
                     refs::relative_to_picture(pic, *toward).map_or(String::new(), |t| format!(" {t}."))
                 ),
+                PlatoonReport::Ambush { at, from, reaction } => format!(
+                    "{cs}: CONTACT, AMBUSH, ANTI-TANK FIRE FROM GRID {}, DIRECTION {}.{}",
+                    format::grid(*from),
+                    format::mils(ai::drive::bearing(*at, *from)),
+                    match reaction {
+                        ai::picture::AmbushReaction::ReverseOut => " BACKING OUT, SMOKE.",
+                        ai::picture::AmbushReaction::DriveThrough => " DRIVING THROUGH, SMOKE.",
+                        ai::picture::AmbushReaction::Halt => " ENGAGING.",
+                    }
+                ),
                 PlatoonReport::BreakingContact { threat } => {
                     format!("{cs}: BREAKING CONTACT, THREAT GRID {}. SMOKE, WITHDRAWING.", format::grid(*threat))
                 }
@@ -3557,6 +3567,7 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                         .and_then(|b| b.when.conditions.first())
                         .map_or("CONTACT", |c| match c {
                             TriggerCondition::UnderFire { .. } => "UNDER FIRE",
+                            TriggerCondition::Ambushed { .. } => "AMBUSHED",
                             TriggerCondition::StrengthAtMost { .. } => "LOSSES",
                             TriggerCondition::EnemyCrosses { .. } | TriggerCondition::EnemyInArea { .. } => "ENEMY",
                             _ => "CONTACT",

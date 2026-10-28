@@ -150,6 +150,10 @@ impl PlanState {
             h.u8(l.technique.map_or(255, |t| t as u8));
             h.u8(l.weapons.map_or(255, |w| w as u8));
             h.u8(l.on_contact.map_or(255, |r| r as u8));
+            if l.on_ambush.is_some() || l.built_up.is_some() {
+                h.u8(l.on_ambush.map_or(255, |r| r as u8));
+                h.u8(l.built_up.map_or(255, |b| b as u8));
+            }
         }
     }
 }
@@ -311,6 +315,12 @@ fn apply_leg(st: &PlanState, p: &mut Platoon, ctx: &mut Ctx, idx: usize) {
     if let Some(r) = leg.on_contact {
         p.contact_reaction = r;
     }
+    if let Some(r) = leg.on_ambush {
+        p.ambush_reaction = r;
+    }
+    if let Some(b) = leg.built_up {
+        p.built_up = b;
+    }
 }
 
 /// Pass-through checkpoints behind the lead section are done: advance the cursor and apply the
@@ -383,6 +393,16 @@ fn branch(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx) -> bool {
         return false;
     }
     ctx.report(p, PlatoonReport::PlanBranch { to: idx as u16 + 1 });
+    // An ambush branch is carried out at once, not after the contact drill has gone quiet, and
+    // the drill does not halt the platoon again while it leaves (as DRIVE THROUGH).
+    if b.when.conditions.iter().any(|c| matches!(c, TriggerCondition::Ambushed { .. })) {
+        if p.order == PlatoonOrder::Contact {
+            p.order = PlatoonOrder::None;
+            p.resume = None;
+        }
+        let s = ctx.doctrines[p.side.0 as usize].infantry.react_ambush.drive_through_s.get();
+        p.drive_through_until = ctx.tick + (s / DT) as u64;
+    }
     st.cursor = idx;
     st.phase = Phase::Start;
     st.branch_ref = None;
@@ -510,6 +530,10 @@ pub fn set_met(pic: &ai::picture::PerceivedWorld, set: &ConditionSet, signs: &[f
         TriggerCondition::Elapsed { s } => (tick.saturating_sub(since)) as f64 * DT >= *s,
         // Sent after the platoon began to wait: a word is a transmission, not a state.
         TriggerCondition::CodeWord { word } => pic.code_words.iter().any(|c| c.word == *word && c.tick >= since),
+        TriggerCondition::Ambushed { platoon } => {
+            let since_s = since as f64 * DT;
+            pic.platoon(*platoon).and_then(|v| v.ambushed_tick).is_some_and(|t| t as f64 * DT >= since_s)
+        }
         TriggerCondition::PlatoonAt { platoon, step } => {
             pic.platoon(*platoon).and_then(|v| v.plan.as_ref()).map_or_else(
                 || pic.platoon(*platoon).is_some_and(|v| v.plan_done.contains(step)),

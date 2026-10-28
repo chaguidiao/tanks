@@ -13,14 +13,14 @@
 //!   the contact has been quiet for a while.
 
 use ai::formation::{along, length, route_slot, slot_position};
-use ai::picture::{Condition, ContactReaction, PerceivedWorld, PlatoonId, SideId};
+use ai::picture::{AmbushReaction, Condition, ContactReaction, PerceivedWorld, PlatoonId, SideId};
 use ai::position::{BpQuery, Candidate, assign, evaluate};
 use sim_data::{DoctrinePack, Technique, VehicleDef};
 use terrain::BakedMap;
 use terrain::ground::Ground;
 use terrain::path::Pathfinder;
 
-use crate::command::{Command, PlatoonReport, PositionKind};
+use crate::command::{Addressee, Command, PlatoonReport, PositionKind, SmokeMode};
 use crate::platoon::{Platoon, PlatoonOrder};
 use crate::world::{Order, World};
 use crate::{DT, Event, Vec2, dist};
@@ -112,6 +112,7 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
         crate::plan::step(p, ctx);
         fire_distribution(p, ctx, &doctrine);
         indirect_fire_drill(p, &alive, ctx);
+        ambush_drill(p, ctx, &doctrine);
         contact_drill(p, ctx, &doctrine);
         match p.order.clone() {
             PlatoonOrder::Move { .. } => move_step(p, ctx, &doctrine),
@@ -167,11 +168,20 @@ pub(crate) fn centroid(world: &World, members: &[usize]) -> Vec2 {
 
 fn fire_distribution(p: &Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
     let pic = &ctx.pictures[p.side.0 as usize];
+    // WEAPONS HOLD: no target is handed out (an ENGAGE order sets TIGHT first).
+    for &k in &p.members {
+        if ctx.world.weapons[k] == ai::picture::WeaponsStatus::Hold
+            && let Some(g) = ctx.world.gun[k].as_mut()
+        {
+            g.assigned = None;
+        }
+    }
     let shooters: Vec<usize> = p
         .members
         .iter()
         .copied()
         .filter(|&k| ctx.world.alive(k) && ctx.world.condition[k] != Condition::FirepowerKill)
+        .filter(|&k| ctx.world.weapons[k] != ai::picture::WeaponsStatus::Hold)
         .collect();
     let c = centroid(ctx.world, &shooters);
     let range = d.engagement_range_m.get();
@@ -208,8 +218,70 @@ fn fire_distribution(p: &Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
     }
 }
 
+/// React to ambush (near) (ATP 3-21.8 (2016) battle drill; ATP 3-20.15 App. F react to contact;
+/// plan M8F1-INFANTRY-AI §2): rockets or missiles fired at the platoon from close range. REVERSE
+/// OUT smokes and backs the vehicles out of the kill zone with their fronts to the shooter, then
+/// fights from there under the contact drill; DRIVE THROUGH smokes and drives on at full speed
+/// without halting; HALT leaves it to the contact drill. A platoon in a battle position, or
+/// breaking contact, fights as it is.
+fn ambush_drill(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
+    let Some((t, from)) = p.ambush else { return };
+    if t <= p.ambush_handled {
+        return;
+    }
+    p.ambush_handled = t;
+    let alive = p.alive_members(ctx.world);
+    if alive.is_empty() {
+        return;
+    }
+    let at = centroid(ctx.world, &alive);
+    let reaction = p.ambush_reaction;
+    ctx.report(p, PlatoonReport::Ambush { at, from, reaction });
+    let on_move = matches!(p.order, PlatoonOrder::Move { .. }) || p.order == PlatoonOrder::Contact;
+    if !on_move || p.withdraw {
+        return;
+    }
+    let r = &d.infantry.react_ambush;
+    let screen = (p.side, Command::Smoke { to: Addressee::Platoon(p.id), mode: SmokeMode::Screen });
+    match reaction {
+        AmbushReaction::Halt => {}
+        AmbushReaction::ReverseOut => {
+            ctx.sim_cmds.push(screen);
+            if let Some((destination, ahead)) = p.order.move_ahead() {
+                p.resume = Some((destination, ahead, p.technique));
+            }
+            p.order = PlatoonOrder::Contact;
+            p.quiet_since = ctx.tick;
+            let back = r.reverse_m.get();
+            let movers: Vec<usize> = alive.iter().copied().filter(|&k| ctx.world.can_move(k)).collect();
+            for k in movers {
+                let tr = ctx.world.transform[k];
+                let to = [tr.pos[0] - libm::sin(tr.heading) * back, tr.pos[1] - libm::cos(tr.heading) * back];
+                if let Some(ai) = ctx.world.ai[k].as_mut() {
+                    ai.order = Order::Reverse { to };
+                    ai.held = None;
+                    ai.set = false;
+                    ai.position_note = None;
+                }
+            }
+        }
+        AmbushReaction::DriveThrough => {
+            ctx.sim_cmds.push(screen);
+            p.speed_limit = None;
+            p.drive_through_until = ctx.tick + (r.drive_through_s.get() / DT) as u64;
+            if p.order == PlatoonOrder::Contact
+                && let Some((dest, via, tech)) = p.resume.take()
+            {
+                p.technique = tech;
+                p.order = PlatoonOrder::new_move(dest, via);
+            }
+        }
+    }
+}
+
 fn contact_drill(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
     if !d.halt_on_contact
+        || ctx.tick < p.drive_through_until
         || p.withdraw
         || p.contact_reaction == ContactReaction::Continue
         || !matches!(p.order, PlatoonOrder::Move { .. })

@@ -368,6 +368,11 @@ impl Sim {
                                 plan: None,
                                 finished: Vec::new(),
                                 contact_reaction: Default::default(),
+                                ambush_reaction: Default::default(),
+                                built_up: Default::default(),
+                                ambush: None,
+                                ambush_handled: 0,
+                                drive_through_until: 0,
                                 queue: Vec::new(),
                                 dismount: is_squad,
                                 carrier_platoon: carrier_pc.as_ref().map(|c| c.0),
@@ -994,6 +999,17 @@ impl Sim {
                 *s = (*s + add).min(1.0);
                 let bearing = ai::drive::bearing(self.world.transform[target].pos, p.from);
                 self.world.smoke[target].last_targeted = Some((tick, bearing));
+                // React to ambush (near): a rocket or missile from a squad close by is seen
+                // launching (plan M8F1-INFANTRY-AI §2).
+                let side = self.world.side[target].0 as usize;
+                let close = self.sides[side].doctrine.infantry.react_ambush.close_ambush_m.get();
+                if self.world.squad[p.shooter].is_some()
+                    && dist(self.world.transform[target].pos, p.from) <= close
+                    && let Some(pid) = self.world.platoon[target]
+                    && let Some(pl) = self.platoons.iter_mut().find(|x| x.id == pid)
+                {
+                    pl.ambush = Some((tick, p.from));
+                }
             }
             let kill = if o.hit && self.world.alive(target) {
                 if o.era_fired {
@@ -1536,6 +1552,22 @@ impl Sim {
                     events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
                 }
             }
+            Command::SetAmbushReaction { platoon, reaction } => {
+                if let Some(p) = self.platoon_mut(c.side, *platoon) {
+                    p.ambush_reaction = *reaction;
+                    let r = *reaction;
+                    p.rewrite_leg(|l| l.on_ambush = Some(r));
+                    events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
+                }
+            }
+            Command::SetBuiltUp { platoon, built_up } => {
+                if let Some(p) = self.platoon_mut(c.side, *platoon) {
+                    p.built_up = *built_up;
+                    let b = *built_up;
+                    p.rewrite_leg(|l| l.built_up = Some(b));
+                    events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
+                }
+            }
             Command::CodeWord { word } => {
                 let s = &mut self.sides[c.side.0 as usize];
                 s.picture.code_words.retain(|w| w.word != *word);
@@ -1837,6 +1869,13 @@ impl Sim {
             if p.contact_reaction != ai::picture::ContactReaction::Drill {
                 h.u32(p.id.0);
                 h.u8(p.contact_reaction as u8);
+            }
+            if p.ambush_reaction != Default::default() || p.built_up != Default::default() || p.ambush.is_some() {
+                h.u32(p.id.0);
+                h.u8(p.ambush_reaction as u8);
+                h.u8(p.built_up as u8);
+                h.u64(p.ambush.map_or(0, |a| a.0));
+                h.u64(p.ambush_handled);
             }
         }
         for b in &self.batteries {

@@ -232,6 +232,10 @@ pub struct PlatoonView {
     /// Step ids reached by the plan that last finished (for `PlatoonAt` synchronisation).
     pub plan_done: Vec<u16>,
     pub contact_reaction: ContactReaction,
+    pub ambush_reaction: AmbushReaction,
+    pub built_up: BuiltUp,
+    /// Tick of the last close ambush the platoon reacted to.
+    pub ambushed_tick: Option<u64>,
     /// Orders waiting in the queue.
     pub queued: u8,
     /// Supply point (id in `supply_points`) of a service-station resupply in progress.
@@ -276,6 +280,9 @@ pub enum TriggerCondition {
     StrengthAtMost { platoon: PlatoonId, remaining: u32 },
     /// A vehicle of the platoon is suppressed, i.e. taking fire.
     UnderFire { platoon: PlatoonId },
+    /// Rockets or missiles were fired at the platoon from close range (plans: since the step
+    /// began; elsewhere: in the last 30 s).
+    Ambushed { platoon: PlatoonId },
     /// Plan only: platoon `platoon` has reached (is at or has passed) its plan step `step`.
     PlatoonAt { platoon: PlatoonId, step: u16 },
 }
@@ -376,6 +383,33 @@ pub struct LegSettings {
     pub weapons: Option<WeaponsStatus>,
     #[serde(default)]
     pub on_contact: Option<ContactReaction>,
+    #[serde(default)]
+    pub on_ambush: Option<AmbushReaction>,
+    #[serde(default)]
+    pub built_up: Option<BuiltUp>,
+}
+
+/// What a platoon does when rockets or missiles are fired at it from close range (plan
+/// M8F1-INFANTRY-AI §2; ATP 3-21.8 (2016) battle drill react to ambush (near)).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AmbushReaction {
+    /// Smoke, reverse out of the kill zone with the front to the shooter, then fight.
+    #[default]
+    ReverseOut,
+    /// Smoke and drive on out of the kill zone at full speed, returning fire.
+    DriveThrough,
+    /// The contact drill: halt, face the threat, engage.
+    Halt,
+}
+
+/// Whether tank routes go through built-up ground (plan M8F1-INFANTRY-AI §3; FM 3-06.11: tanks
+/// do not enter built-up areas without dismounted infantry).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BuiltUp {
+    /// Routes go around built-up ground where they can.
+    #[default]
+    Avoid,
+    Enter,
 }
 
 /// What a platoon does when it meets the enemy (battle drills, ATP 3-20.15 App. F).

@@ -160,6 +160,16 @@ pub enum Command {
         platoon: PlatoonId,
         reaction: ai::picture::ContactReaction,
     },
+    /// Set what the platoon does when ambushed at close range (plan M8F1-INFANTRY-AI §2).
+    SetAmbushReaction {
+        platoon: PlatoonId,
+        reaction: ai::picture::AmbushReaction,
+    },
+    /// Set whether the platoon's routes go through built-up ground (plan M8F1-INFANTRY-AI §3).
+    SetBuiltUp {
+        platoon: PlatoonId,
+        built_up: ai::picture::BuiltUp,
+    },
     /// Send a pre-arranged code word to every platoon of the side at once (FM 6-0 execution
     /// matrix; no radio delay, never missed in v1).
     CodeWord {
@@ -441,6 +451,13 @@ pub enum PlatoonReport {
         toward: Vec2,
     },
     ContinuingMission,
+    /// React to ambush (near): rockets or missiles fired at the platoon from `from`; `reaction`
+    /// is what it does about it.
+    Ambush {
+        at: Vec2,
+        from: Vec2,
+        reaction: ai::picture::AmbushReaction,
+    },
     /// Break-contact drill: screening and withdrawing away from `threat`.
     BreakingContact {
         threat: Vec2,

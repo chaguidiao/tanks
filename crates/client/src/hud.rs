@@ -324,6 +324,10 @@ impl<A> MenuItem<A> {
         self.checked = c;
         self
     }
+    pub fn tip(mut self, t: impl Into<String>) -> Self {
+        self.tip = t.into();
+        self
+    }
     /// Greyed, with the reason as its tooltip.
     pub fn disabled(mut self, why: impl Into<String>) -> Self {
         self.enabled = false;

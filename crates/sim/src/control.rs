@@ -54,6 +54,8 @@ pub fn line_points(graphics: &[Graphic], id: u32) -> Option<&[Vec2]> {
 const TRP_AREA_M: f64 = 150.0;
 /// Crew suppression at which a platoon counts as under fire.
 const UNDER_FIRE_SUPPRESSION: f64 = 0.15;
+/// An AMBUSHED condition outside a plan holds this long after the ambush (s).
+const AMBUSHED_RECENT_S: f64 = 30.0;
 /// Contacts reported this recently (s) count as current.
 const FRESH_S: f64 = 30.0;
 
@@ -124,6 +126,10 @@ pub fn condition_met(pic: &PerceivedWorld, c: &TriggerCondition, sign: f64) -> b
         TriggerCondition::UnderFire { platoon } => {
             pic.own.iter().any(|u| u.platoon == Some(*platoon) && u.suppression >= UNDER_FIRE_SUPPRESSION)
         }
+        TriggerCondition::Ambushed { platoon } => pic
+            .platoon(*platoon)
+            .and_then(|v| v.ambushed_tick)
+            .is_some_and(|t| pic.time_s - t as f64 * crate::DT <= AMBUSHED_RECENT_S),
         TriggerCondition::EnemyCrosses { line } => {
             let Some(l) = line_points(&pic.graphics, *line) else { return false };
             pic.live_contacts().filter(|c| pic.time_s - c.last_report_s < 30.0).any(|c| {
