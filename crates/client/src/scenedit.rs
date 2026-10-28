@@ -1,5 +1,6 @@
-//! Scenario editor (DESIGN.md §10.4, §11): place and orient units, group them into platoons, set
-//! objectives, supply points (M8c), date and start time, weather, then save to `data/scenarios/<id>.ron` and play.
+//! Scenario editor (DESIGN.md §10.4, §11): place and orient units, group them into platoons, put
+//! squads on the ground or into carriers (TODO G9), set objectives, supply points (M8c), date and
+//! start time, weather, then save to `data/scenarios/<id>.ron` and play.
 //!
 //! The left panel has one page per area (UNITS, TIME / WEATHER). Each page is a list of value
 //! rows: a click or `+` steps a value forward, `-` back; PGUP / PGDN move the keyboard focus over
@@ -19,6 +20,8 @@ use crate::view::Camera;
 const PICK_PX: f32 = 14.0;
 /// Tanks per platoon (ATP 3-20.15 ch. 1: four-tank platoon).
 const PLATOON_SIZE: usize = 4;
+/// Squads per dismounted platoon (ATP 3-21.8 (2016) ch. 1: three rifle squads).
+const SQUAD_PLATOON_SIZE: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Sel {
@@ -72,7 +75,7 @@ impl Page {
 
     fn tip(self) -> &'static str {
         match self {
-            Page::Units => "SIDES, DOCTRINE, VEHICLES AND PLATOONS",
+            Page::Units => "SIDES, DOCTRINE, VEHICLES, SQUADS AND PLATOONS",
             Page::Weather => "DATE, START TIME, WEATHER PRESET, WIND, LATITUDE AND MOON",
             Page::Fires => "FIRE SUPPORT: BATTERIES PER SIDE (B PLACES ONE AT THE CURSOR)",
             Page::Victory => "VICTORY CONDITIONS: TIME LIMIT, OBJECTIVE, ATTACKER, LOSS LIMIT",
@@ -82,7 +85,7 @@ impl Page {
     fn fields(self) -> &'static [Field] {
         use Field as F;
         match self {
-            Page::Units => &[F::Side, F::Doctrine, F::TechYear, F::Vehicle, F::Platoon],
+            Page::Units => &[F::Side, F::Doctrine, F::TechYear, F::Vehicle, F::Squad, F::Platoon],
             Page::Fires => &[F::Side, F::Battery, F::BatteryType, F::BatteryHe, F::BatterySmoke],
             Page::Victory => &[F::VicOn, F::VicTime, F::VicObjective, F::VicAttacker, F::VicLoss],
             Page::Weather => {
@@ -99,6 +102,7 @@ pub enum Field {
     Doctrine,
     TechYear,
     Vehicle,
+    Squad,
     Platoon,
     Year,
     Month,
@@ -173,8 +177,12 @@ pub struct ScenarioEditor {
     side: usize,
     /// Vehicle id placed by P.
     vehicle: String,
+    /// Squad type placed by I.
+    squad: String,
     /// Platoon callsign placed into, per side.
     platoon: Vec<Option<String>>,
+    /// Platoon callsign squads on the ground are placed into, per side.
+    squad_platoon: Vec<Option<String>>,
     sel: Option<Sel>,
     dragging: bool,
     page: Page,
@@ -205,12 +213,28 @@ impl ScenarioEditor {
             def.sides[0].units.first().map(|u| u.vehicle.clone()).unwrap_or_else(|| {
                 ds.vehicles_in_service(def.date.0).next().map_or_else(String::new, |v| v.id.clone())
             });
-        let platoon = def.sides.iter().map(|s| s.units.last().and_then(|u| u.platoon.clone())).collect();
+        let last = |s: &SideDef, squads: bool| {
+            s.units
+                .iter()
+                .rev()
+                .find(|u| u.squad.is_some() == squads && u.platoon.is_some())
+                .and_then(|u| u.platoon.clone())
+        };
+        let platoon = def.sides.iter().map(|s| last(s, false)).collect();
+        let squad_platoon = def.sides.iter().map(|s| last(s, true)).collect();
+        // The first squad type the scenario uses, else a rifle squad in service.
+        let squad = def.sides[0].units.iter().find_map(|u| u.squad.clone()).unwrap_or_else(|| {
+            // Rifle squads are the large ones; anti-tank teams have three men.
+            let in_service = ds.squads.iter().filter(|q| q.in_service.contains(def.date.0));
+            in_service.max_by_key(|q| q.men).or(ds.squads.first()).map_or_else(String::new, |q| q.id.clone())
+        });
         Self {
             def,
             side: 0,
             vehicle,
+            squad,
             platoon,
+            squad_platoon,
             sel: None,
             dragging: false,
             page: Page::Units,
@@ -232,7 +256,8 @@ impl ScenarioEditor {
         };
         let mut best: Option<(f32, Sel)> = None;
         for (si, side) in self.def.sides.iter().enumerate() {
-            for (ui, u) in side.units.iter().enumerate() {
+            // A mounted squad has no position of its own: it is picked with its carrier.
+            for (ui, u) in side.units.iter().enumerate().filter(|(_, u)| u.mounted_in.is_none()) {
                 let dist = d(u.position);
                 if dist < PICK_PX && best.is_none_or(|(b, _)| dist < b) {
                     best = Some((dist, Sel::Unit(si, ui)));
@@ -277,13 +302,20 @@ impl ScenarioEditor {
         (max + 1).to_string()
     }
 
+    /// Members of platoon `p` of `side`, and whether they are squads (a platoon is all vehicles
+    /// or all squads).
+    fn platoon_members(&self, side: usize, p: &str) -> (usize, bool) {
+        let m: Vec<&UnitDef> = self.def.sides[side].units.iter().filter(|u| u.platoon.as_deref() == Some(p)).collect();
+        (m.len(), m.iter().any(|u| u.squad.is_some()))
+    }
+
     fn place(&mut self, at: [f64; 2]) {
         let side = self.side;
-        let members = |p: &str| self.def.sides[side].units.iter().filter(|u| u.platoon.as_deref() == Some(p)).count();
         let platoon = match self.platoon[side].clone() {
-            Some(p) if members(&p) < PLATOON_SIZE => p,
+            Some(p) if matches!(self.platoon_members(side, &p), (n, false) if n < PLATOON_SIZE) => p,
             _ => self.new_platoon(),
         };
+        let members = |p: &str| self.platoon_members(side, p).0;
         let n = members(&platoon) + 1;
         let mut callsign = format!("{platoon}-{n}");
         while self.def.sides.iter().flat_map(|s| &s.units).any(|u| u.callsign == callsign) {
@@ -302,6 +334,89 @@ impl ScenarioEditor {
         self.platoon[side] = Some(platoon);
         self.sel = Some(Sel::Unit(side, self.def.sides[side].units.len() - 1));
         self.status = format!("PLACED {callsign}");
+        self.unsaved = true;
+    }
+
+    /// Seats of a carrier and the men already in it: (seats, aboard).
+    fn seats(&self, side: usize, carrier: &UnitDef, ds: &DataSet) -> Option<(u32, u32)> {
+        let cap = ds.vehicle(&carrier.vehicle)?.troops.as_ref()?.capacity_men as u32;
+        let aboard = self.def.sides[side]
+            .units
+            .iter()
+            .filter(|u| u.mounted_in.as_deref() == Some(carrier.callsign.as_str()))
+            .filter_map(|u| ds.squad(u.squad.as_deref()?))
+            .map(|q| q.men as u32)
+            .sum();
+        Some((cap, aboard))
+    }
+
+    /// Place a squad of the chosen type (TODO G9): on one of the side's carriers under the
+    /// cursor it rides in it (and joins the carrier platoon's dismount platoon); elsewhere it
+    /// stands on the ground in the side's squad platoon.
+    fn place_squad(&mut self, at: [f64; 2], over: Option<Sel>, ds: &DataSet) {
+        let side = self.side;
+        let Some(def) = ds.squad(&self.squad) else {
+            self.status = "NO SQUAD TYPES IN DATA".into();
+            return;
+        };
+        let taken = |c: &str| self.def.sides.iter().flat_map(|s| &s.units).any(|u| u.callsign == c);
+        let carrier = match over {
+            Some(Sel::Unit(s, u)) if s == side && self.def.sides[s].units[u].squad.is_none() => {
+                Some(self.def.sides[s].units[u].clone())
+            }
+            _ => None,
+        };
+        let unit = if let Some(c) = carrier {
+            let Some((cap, aboard)) = self.seats(side, &c, ds) else {
+                self.status = format!("{} CARRIES NO TROOPS", c.callsign);
+                return;
+            };
+            if aboard + def.men as u32 > cap {
+                self.status = format!("NO ROOM IN {} ({aboard} OF {cap} SEATS TAKEN)", c.callsign);
+                return;
+            }
+            let callsign = (b'A'..=b'Z')
+                .map(|l| format!("{}{}", c.callsign, l as char))
+                .find(|cs| !taken(cs))
+                .expect("a free callsign");
+            UnitDef {
+                callsign,
+                vehicle: String::new(),
+                position: [0.0, 0.0],
+                heading_deg: 0.0,
+                platoon: None,
+                squad: Some(def.id.clone()),
+                mounted_in: Some(c.callsign.clone()),
+            }
+        } else {
+            let platoon = match self.squad_platoon[side].clone() {
+                Some(p) if matches!(self.platoon_members(side, &p), (n, true) if n < SQUAD_PLATOON_SIZE) => p,
+                _ => self.new_platoon(),
+            };
+            let mut callsign = format!("{platoon}-{}", self.platoon_members(side, &platoon).0 + 1);
+            while taken(&callsign) {
+                callsign.push('A');
+            }
+            self.squad_platoon[side] = Some(platoon.clone());
+            UnitDef {
+                callsign,
+                vehicle: String::new(),
+                position: at,
+                heading_deg: if side == 0 { 0.0 } else { 180.0 },
+                platoon: Some(platoon),
+                squad: Some(def.id.clone()),
+                mounted_in: None,
+            }
+        };
+        self.status = match &unit.mounted_in {
+            Some(c) => format!("PLACED {} IN {c}", unit.callsign),
+            None => format!("PLACED {}", unit.callsign),
+        };
+        let mounted = unit.mounted_in.is_some();
+        self.def.sides[side].units.push(unit);
+        if !mounted {
+            self.sel = Some(Sel::Unit(side, self.def.sides[side].units.len() - 1));
+        }
         self.unsaved = true;
     }
 
@@ -417,6 +532,10 @@ impl ScenarioEditor {
         if inp.hit(Key::Char('p')) && !over_ui {
             self.place(m);
         }
+        if inp.hit(Key::Char('i')) && !over_ui {
+            let over = self.pick(cam, inp.mouse);
+            self.place_squad(m, over, ds);
+        }
         if inp.hit(Key::Char('b')) && !over_ui {
             self.place_battery(m, ds);
         }
@@ -489,7 +608,14 @@ impl ScenarioEditor {
         match self.sel.take() {
             Some(Sel::Unit(s, u)) => {
                 let gone = self.def.sides[s].units.remove(u);
-                self.status = format!("REMOVED {}", gone.callsign);
+                // Its squads go with a carrier.
+                let units = &mut self.def.sides[s].units;
+                let before = units.len();
+                units.retain(|q| q.mounted_in.as_deref() != Some(gone.callsign.as_str()));
+                self.status = match before - units.len() {
+                    0 => format!("REMOVED {}", gone.callsign),
+                    n => format!("REMOVED {} AND {n} SQUAD{}", gone.callsign, if n > 1 { "S" } else { "" }),
+                };
             }
             Some(Sel::Objective(k)) => {
                 let gone = self.def.objectives.remove(k);
@@ -547,7 +673,26 @@ impl ScenarioEditor {
                 }
                 self.vehicle = list[cycle(&list, &self.vehicle.as_str(), dir)].to_owned();
                 let Some(Sel::Unit(s, u)) = self.sel else { return };
-                self.def.sides[s].units[u].vehicle = self.vehicle.clone();
+                let unit = &mut self.def.sides[s].units[u];
+                if unit.squad.is_some() {
+                    return;
+                }
+                unit.vehicle = self.vehicle.clone();
+            }
+            Field::Squad => {
+                let year = self.year();
+                let list: Vec<&str> =
+                    ds.squads.iter().filter(|q| q.in_service.contains(year)).map(|q| q.id.as_str()).collect();
+                if list.is_empty() {
+                    return;
+                }
+                self.squad = list[cycle(&list, &self.squad.as_str(), dir)].to_owned();
+                let Some(Sel::Unit(s, u)) = self.sel else { return };
+                let unit = &mut self.def.sides[s].units[u];
+                if unit.squad.is_none() {
+                    return;
+                }
+                unit.squad = Some(self.squad.clone());
             }
             Field::Platoon => {
                 self.platoon[s] = Some(self.new_platoon());
@@ -635,6 +780,7 @@ impl ScenarioEditor {
             Field::Doctrine => "DOCTRINE",
             Field::TechYear => "TECH YEAR",
             Field::Vehicle => "VEHICLE",
+            Field::Squad => "SQUAD",
             Field::Platoon => "PLATOON",
             Field::Year => "YEAR",
             Field::Month => "MONTH",
@@ -663,7 +809,10 @@ impl ScenarioEditor {
             Field::Doctrine => "DOCTRINE PACK OF THE SIDE (DATA/DOCTRINE)",
             Field::TechYear => "PRETEND THE SIDE LIVES IN THIS YEAR (OLDER OR NEWER EQUIPMENT)",
             Field::Vehicle => "VEHICLE TYPE P PLACES (IN SERVICE AT THE SIDE'S YEAR); ALSO SETS THE SELECTED UNIT",
-            Field::Platoon => "START A NEW PLATOON FOR THE NEXT PLACED UNIT",
+            Field::Squad => {
+                "SQUAD TYPE I PLACES (ON A CARRIER UNDER THE CURSOR IT RIDES IN IT); ALSO SETS THE SELECTED SQUAD"
+            }
+            Field::Platoon => "START A NEW PLATOON FOR THE NEXT PLACED VEHICLE",
             Field::Year => "SCENARIO YEAR: DECIDES WHICH VEHICLES EXIST",
             Field::Month => "SCENARIO MONTH: SUN AND DAY LENGTH",
             Field::Day => "SCENARIO DAY OF THE MONTH",
@@ -697,6 +846,7 @@ impl ScenarioEditor {
             Field::Doctrine => side.doctrine.to_uppercase(),
             Field::TechYear => side.tech_year.map_or("AS DATE".into(), |y| y.to_string()),
             Field::Vehicle => ds.vehicle(&self.vehicle).map_or("-".to_owned(), |v| v.name.to_uppercase()),
+            Field::Squad => ds.squad(&self.squad).map_or("-".to_owned(), |q| q.name.to_uppercase()),
             Field::Platoon => self.platoon[self.side].as_deref().unwrap_or("-").to_owned(),
             Field::Year => self.def.date.0.to_string(),
             Field::Month => format!("{:02}", self.def.date.1),
@@ -761,14 +911,17 @@ impl ScenarioEditor {
         let mut lines = Vec::new();
         match self.page {
             Page::Units => {
+                let units = self.def.sides.iter().flat_map(|s| &s.units);
+                let squads = units.clone().filter(|u| u.squad.is_some()).count();
                 lines.push((
                     format!(
-                        "UNITS {}   OBJECTIVES {}",
-                        self.def.sides.iter().map(|s| s.units.len()).sum::<usize>(),
+                        "VEHICLES {}   SQUADS {squads}   OBJECTIVES {}",
+                        units.count() - squads,
                         self.def.objectives.len()
                     ),
                     style::TEXT_DIM,
                 ));
+                lines.extend(self.carrier_line(ds));
             }
             Page::Weather => lines.extend(self.weather_lines(ds)),
             Page::Fires => lines.extend(self.fires_lines(ds)),
@@ -780,6 +933,21 @@ impl ScenarioEditor {
             lines.push((p, style::HOSTILE));
         }
         lines
+    }
+
+    /// The selected carrier's squads and seats.
+    fn carrier_line(&self, ds: &DataSet) -> Option<(String, Rgba)> {
+        let Some(Sel::Unit(s, u)) = self.sel else { return None };
+        let c = &self.def.sides[s].units[u];
+        let (cap, aboard) = self.seats(s, c, ds)?;
+        let names: Vec<&str> = self.def.sides[s]
+            .units
+            .iter()
+            .filter(|q| q.mounted_in.as_deref() == Some(c.callsign.as_str()))
+            .map(|q| q.callsign.as_str())
+            .collect();
+        let who = if names.is_empty() { "EMPTY".to_owned() } else { names.join(" ") };
+        Some((format!("{} CARRIES {who}   {aboard} OF {cap} SEATS", c.callsign), style::TEXT))
     }
 
     /// The selected supply point's stock (M8c), on every page.
@@ -849,13 +1017,33 @@ impl ScenarioEditor {
             if s.units.is_empty() {
                 out.push(format!("{}: NO UNITS", s.name));
             }
-            for u in &s.units {
-                match ds.vehicle(&u.vehicle) {
-                    Some(v) if !v.in_service.contains(year) => {
-                        out.push(format!("{} {} NOT IN SERVICE {year}", u.callsign, v.name.to_uppercase()))
+            for (k, u) in s.units.iter().enumerate() {
+                let Some(q) = &u.squad else {
+                    match ds.vehicle(&u.vehicle) {
+                        Some(v) if !v.in_service.contains(year) => {
+                            out.push(format!("{} {} NOT IN SERVICE {year}", u.callsign, v.name.to_uppercase()))
+                        }
+                        None => out.push(format!("{}: UNKNOWN VEHICLE", u.callsign)),
+                        _ => {}
                     }
-                    None => out.push(format!("{}: UNKNOWN VEHICLE", u.callsign)),
+                    continue;
+                };
+                match ds.squad(q) {
+                    Some(d) if !d.in_service.contains(year) => {
+                        out.push(format!("{} {} NOT IN SERVICE {year}", u.callsign, d.name.to_uppercase()))
+                    }
+                    None => out.push(format!("{}: UNKNOWN SQUAD", u.callsign)),
                     _ => {}
+                }
+                // As the sim checks: the carrier is listed first and has the seats.
+                let Some(cs) = &u.mounted_in else { continue };
+                match s.units[..k].iter().find(|c| &c.callsign == cs) {
+                    None => out.push(format!("{}: CARRIER {cs} MISSING", u.callsign)),
+                    Some(c) => match self.seats_up_to(s, c, k, ds) {
+                        None => out.push(format!("{}: {cs} CARRIES NO TROOPS", u.callsign)),
+                        Some((cap, aboard)) if aboard > cap => out.push(format!("{}: NO ROOM IN {cs}", u.callsign)),
+                        _ => {}
+                    },
                 }
             }
             for b in &s.fire_support {
@@ -881,6 +1069,18 @@ impl ScenarioEditor {
         out
     }
 
+    /// Seats of carrier `c` and the men of the squads listed up to and including unit `k`.
+    fn seats_up_to(&self, s: &SideDef, c: &UnitDef, k: usize, ds: &DataSet) -> Option<(u32, u32)> {
+        let cap = ds.vehicle(&c.vehicle)?.troops.as_ref()?.capacity_men as u32;
+        let aboard = s.units[..=k]
+            .iter()
+            .filter(|q| q.mounted_in.as_deref() == Some(c.callsign.as_str()))
+            .filter_map(|q| ds.squad(q.squad.as_deref()?))
+            .map(|q| q.men as u32)
+            .sum();
+        Some((cap, aboard))
+    }
+
     pub fn draw_world(&self, f: &mut Frame, cam: &Camera, ds: &DataSet) {
         self.draw_batteries(f, cam, ds);
         for (k, o) in self.def.objectives.iter().enumerate() {
@@ -901,15 +1101,28 @@ impl ScenarioEditor {
         }
         for (si, side) in self.def.sides.iter().enumerate() {
             let c = if si == 0 { style::FRIENDLY } else { style::HOSTILE };
-            for (ui, u) in side.units.iter().enumerate() {
+            for (ui, u) in side.units.iter().enumerate().filter(|(_, u)| u.mounted_in.is_none()) {
                 let p = cam.to_screen(u.position);
-                if si == 0 {
-                    symbols::friendly_armour(f, p, c);
-                } else {
-                    symbols::hostile_armour(f, p, c);
+                match (si == 0, u.squad.is_some()) {
+                    (true, false) => symbols::friendly_armour(f, p, c),
+                    (false, false) => symbols::hostile_armour(f, p, c),
+                    (true, true) => symbols::friendly_infantry(f, p, c, symbols::SQUAD_SCALE),
+                    (false, true) => symbols::hostile_infantry(f, p, c, symbols::SQUAD_SCALE),
+                }
+                if u.squad.is_some() {
+                    symbols::echelon_squad(f, p, 6.0, c);
                 }
                 symbols::heading_staff(f, p, u.heading_deg.to_radians(), 14.0, c);
-                f.text(&u.callsign, p[0] + 18.0, p[1] - 6.0, style::FONT_L - 10, c);
+                // Men aboard a carrier, as on the game map ("1-1 +6").
+                let men: u32 = side
+                    .units
+                    .iter()
+                    .filter(|q| q.mounted_in.as_deref() == Some(u.callsign.as_str()))
+                    .filter_map(|q| ds.squad(q.squad.as_deref()?))
+                    .map(|q| q.men as u32)
+                    .sum();
+                let label = if men > 0 { format!("{} +{men}", u.callsign) } else { u.callsign.clone() };
+                f.text(&label, p[0] + 18.0, p[1] - 6.0, style::FONT_L - 10, c);
                 if self.sel == Some(Sel::Unit(si, ui)) {
                     symbols::selection(f, p);
                 }
@@ -932,7 +1145,9 @@ impl ScenarioEditor {
             f.text(l, r.x + 10.0, y0 + k as f32 * LINE_H, style::FONT_S, *c);
         }
         let help = match self.page {
-            Page::Units => "P PLACE  LMB SELECT/DRAG  R ROTATE  DEL REMOVE  O OBJECTIVE ([ ] RADIUS)  S SUPPLY POINT",
+            Page::Units => {
+                "P PLACE  I SQUAD (ON A CARRIER: MOUNTED)  LMB SELECT/DRAG  R ROTATE  DEL REMOVE  O OBJECTIVE ([ ] RADIUS)  S SUPPLY POINT"
+            }
             Page::Weather => "CLICK OR + NEXT VALUE  - PREVIOUS  PGUP/PGDN FOCUS, - / = STEP",
             Page::Fires => "B PLACE BATTERY AT CURSOR  LMB SELECT/DRAG  DEL REMOVE",
             Page::Victory => "O OBJECTIVE AT CURSOR ([ ] RADIUS)  CLICK OR + NEXT VALUE  - PREVIOUS",
@@ -1228,6 +1443,56 @@ mod tests {
         assert_eq!(ed.def.sides[0].tech_year, Some(ed.def.date.0 + 1));
         ed.act(EdAction::Step(Field::TechYear, -1), &ds);
         assert_eq!(ed.def.sides[0].tech_year, None, "back at the scenario date means no override");
+    }
+
+    #[test]
+    fn squads_go_into_carriers_or_on_the_ground() {
+        let ds = DataSet::load(&data_dir()).unwrap();
+        let def = DataSet::load_scenario(&data_dir(), "m1-move").unwrap();
+        let mut ed = ScenarioEditor::new(def, &ds);
+        ed.def.date.0 = 1990;
+        ed.def.sides[0].units.clear();
+        ed.vehicle = "ward_m2".into();
+        ed.place([1000.0, 1000.0]);
+        let carrier = ed.sel;
+        ed.squad = "rifle_squad_b".into();
+        ed.place_squad([1000.0, 1000.0], carrier, &ds);
+        let units = &ed.def.sides[0].units;
+        assert_eq!(units.len(), 2);
+        assert_eq!(units[1].mounted_in.as_deref(), Some(units[0].callsign.as_str()));
+        assert_eq!(units[1].platoon, None, "it joins the carrier platoon's dismount platoon");
+        // Six seats, six men: a second squad does not fit.
+        ed.place_squad([1000.0, 1000.0], carrier, &ds);
+        assert_eq!(ed.def.sides[0].units.len(), 2, "{}", ed.status);
+        // Off the carrier: on the ground, in a squad platoon of its own.
+        for k in 0..4 {
+            ed.place_squad([1500.0 + 40.0 * k as f64, 1000.0], None, &ds);
+        }
+        let ground: Vec<&UnitDef> =
+            ed.def.sides[0].units.iter().filter(|u| u.squad.is_some() && u.mounted_in.is_none()).collect();
+        assert_eq!(ground.len(), 4);
+        assert_eq!(ground[0].platoon, ground[2].platoon, "three squads to a platoon");
+        assert_ne!(ground[0].platoon, ground[3].platoon);
+        assert_ne!(ground[0].platoon, ed.def.sides[0].units[0].platoon, "never mixed with vehicles");
+        assert!(
+            ed.problems(&ds).iter().all(|p| !p.starts_with(&ed.def.sides[0].units[1].callsign)),
+            "{:?}",
+            ed.problems(&ds)
+        );
+        // The carrier takes its squad with it.
+        ed.sel = carrier;
+        ed.delete_selected();
+        assert_eq!(ed.def.sides[0].units.iter().filter(|u| u.mounted_in.is_some()).count(), 0);
+        assert!(ed.status.contains("1 SQUAD"), "{}", ed.status);
+    }
+
+    #[test]
+    fn shipped_infantry_scenarios_have_no_problems() {
+        let ds = DataSet::load(&data_dir()).unwrap();
+        for id in ["m8b-dismounts", "m8b-ambush"] {
+            let ed = ScenarioEditor::new(DataSet::load_scenario(&data_dir(), id).unwrap(), &ds);
+            assert!(ed.problems(&ds).is_empty(), "{id}: {:?}", ed.problems(&ds));
+        }
     }
 
     /// A scenario edited and saved by the editor loads back identically, and every shipped

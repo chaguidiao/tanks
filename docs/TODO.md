@@ -158,7 +158,7 @@ M8f1 (right after infantry, kept small so infantry is playable): F11, F5, plus B
 ## M8g1 / M8g2 — Plans and control UX
 M8g1 (with M8f1): G8 and G9. M8g2: G1–G7 after M8f2.
 - [x] G8 Plan actions MOUNT/DISMOUNT and infantry orders in the command card, with hotkeys and tooltips (builds on B14). **Done 2026-10-28**: plans run for dismount platoons (legs on foot, on line); CP actions DISMOUNT (U) and MOUNT (K) for carrier platoons and OCCUPY BUILDING (O) for dismount platoons, the plan holding until the drill is over (timeout 300 s); vehicle-only actions are not offered to squads; a move or plan given to a dismount platoon while its squads ride starts once they are out (DISMOUNT no longer clears it; MOUNT, from the card or a plan, ends it); card cell B is OCCUPY BLDG (click a building) when squads are selected; `SIM_VERSION` 4; tests `m8g.rs`
-- [ ] G9 Scenario editor placement of infantry and teams (part of J5)
+- [x] G9 Scenario editor placement of infantry and teams (part of J5). **Done 2026-10-28**: SQUAD row on the UNITS page (types in service at the side's year); I places one: on a carrier of the side under the cursor it rides in it (seats checked), elsewhere on the ground in a squad platoon of three; squads drawn with infantry symbols, carriers with the men aboard (`1-1 +6`), a selected carrier lists its squads and seats; deleting a carrier removes its squads; the problem list checks squad types, carriers and seats as the sim does (the shipped M8b scenarios no longer show UNKNOWN VEHICLE)
 - [ ] G1 Phase-line-driven plans on top of the plan model — §13.2
 - [ ] G2 Plans for several platoons at once — §13.1 UX pass, Plans
 - [ ] G3 Single-vehicle plans — §13.1 Plans
