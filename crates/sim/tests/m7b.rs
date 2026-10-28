@@ -32,6 +32,7 @@ fn frontal(range: f64) -> ShotGeometry {
         target_heading: 0.0,
         crossing_speed: 0.0,
         shooter_moving: false,
+        plunge: 0.0,
     }
 }
 
@@ -95,7 +96,8 @@ fn crews_pick_the_round_by_target_class() {
     let g = GunState::new(0.0, bulwark.armament.load.iter().map(|l| l.count).collect());
     let geo = frontal(1500.0);
     let pick = |target: &str, g: &GunState| {
-        let i = gunnery::select_round(g, &lo, &ds.ammo, &ds.penetration, ds.vehicle(target).unwrap(), 0, &geo).unwrap();
+        let i = gunnery::select_round(g, &lo, &ds.ammo, &ds.penetration, ds.vehicle(target).unwrap(), 0, &geo, 0.35)
+            .unwrap();
         ds.ammo[lo[i]].kind
     };
     assert_eq!(pick("kurgan_b", &g), AmmoKind::Apfsds, "sabot against a tank");
@@ -130,7 +132,8 @@ fn smoke_is_never_selected_against_a_target() {
     g.selected = Some(AmmoKind::Smoke);
     let geo = frontal(1000.0);
     assert!(
-        gunnery::select_round(&g, &lo, &ds.ammo, &ds.penetration, ds.vehicle("kurgan_b").unwrap(), 0, &geo).is_none()
+        gunnery::select_round(&g, &lo, &ds.ammo, &ds.penetration, ds.vehicle("kurgan_b").unwrap(), 0, &geo, 0.35)
+            .is_none()
     );
 }
 

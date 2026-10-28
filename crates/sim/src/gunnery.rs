@@ -171,6 +171,8 @@ pub enum Face {
     Front,
     Side,
     Rear,
+    /// Turret roof or engine deck: plunging fire or a top-attack missile (plan M8B-AT-TEAMS §3).
+    Top,
 }
 
 #[derive(Debug, Clone)]
@@ -198,6 +200,15 @@ pub struct ShotGeometry {
     /// Target speed perpendicular to the line of fire (m/s).
     pub crossing_speed: f64,
     pub shooter_moving: bool,
+    /// Angle of the line of fire below the horizontal at the target (rad; negative when the
+    /// shooter is lower).
+    pub plunge: f64,
+}
+
+/// Vertical angle of the line of fire at the target: from a firing height `from_z` (m above the
+/// datum) to the middle of a target whose ground is at `to_z`, `half_h` up, `range` away.
+pub fn plunge_angle(from_z: f64, to_z: f64, half_h: f64, range: f64) -> f64 {
+    libm::atan2(from_z - (to_z + half_h), range.max(1.0))
 }
 
 /// Total 1σ random error (mrad) for one round, excluding per-engagement bias. Public for the
@@ -253,6 +264,17 @@ pub(crate) fn roll(o: &Outcomes, exposed_factor: f64, behind: f64, u: f64) -> Op
     None
 }
 
+/// Face and obliquity a round meets: the top for a top-attack missile or a shot plunging more
+/// steeply than `top_above` (obliquity from the roof's normal), else by aspect.
+fn hit_face(g: &ShotGeometry, ammo: &AmmoDef, top_above: f64) -> (Face, f64) {
+    let dive = ammo.top_attack_deg.as_ref().map(|d| d.get().to_radians());
+    let plunge = dive.unwrap_or(g.plunge);
+    if dive.is_some() || plunge > top_above {
+        return (Face::Top, std::f64::consts::FRAC_PI_2 - plunge);
+    }
+    face_of(g.bearing_to_shooter, g.target_heading)
+}
+
 fn face_of(bearing_to_shooter: f64, target_heading: f64) -> (Face, f64) {
     let a = crate::wrap(bearing_to_shooter - target_heading).abs();
     if a < std::f64::consts::FRAC_PI_4 {
@@ -272,6 +294,11 @@ fn line_of_sight_armour(target: &VehicleDef, face: Face, obliq: f64, chemical: b
         Face::Front => (ar.turret_front.get(), ar.hull_front.get()),
         Face::Side => (ar.turret_side.get(), ar.hull_side.get()),
         Face::Rear => (ar.turret_rear.get(), ar.hull_rear.get()),
+        // Plain steel: no composite advantage against shaped charges.
+        Face::Top => {
+            let top = ar.top.get();
+            return top / libm::cos(obliq.min(70f64.to_radians()));
+        }
     };
     let base = match turret {
         Some(true) => t,
@@ -308,7 +335,7 @@ pub fn resolve(
     let hit = eh.abs() <= width / 2.0 && ev.abs() <= vis_h / 2.0;
     let impact_h = top - vis_h / 2.0 + ev;
     let turret = impact_h > d.hull_height_m.get();
-    let (face, obliq) = face_of(g.bearing_to_shooter, g.target_heading);
+    let (face, obliq) = hit_face(g, ammo, dmg.top_hit_above_deg.get().to_radians());
     let chemical = ammo.kind.is_chemical();
     let mut armour = line_of_sight_armour(target, face, obliq, chemical, Some(turret));
     let mut p = penetration_mm(pen, ammo, velocity_at(ammo, g.range));
@@ -318,7 +345,7 @@ pub fn resolve(
     let mut era_fired = false;
     if hit
         && era_left > 0
-        && face != Face::Rear
+        && matches!(face, Face::Front | Face::Side)
         && let Some(era) = &target.armour.era
         && u_era < era.coverage.get()
     {
@@ -350,6 +377,7 @@ pub fn resolve(
         (false, _, _) => &dmg.non_penetration,
         (true, true, _) => &dmg.turret_penetration,
         (true, false, Face::Front) => &dmg.hull_front_penetration,
+        // Hull side, rear and engine deck.
         (true, false, _) => &dmg.hull_side_rear_penetration,
     };
     let (exposed, behind) = if penetrated { (exposed, ammo.behind_armour_factor()) } else { (1.0, 1.0) };
@@ -370,20 +398,21 @@ pub fn select_round(
     target: &VehicleDef,
     era_left: u32,
     geo: &ShotGeometry,
+    top_above: f64,
 ) -> Option<usize> {
-    let (face, obliq) = face_of(geo.bearing_to_shooter, geo.target_heading);
     let usable = |li: usize| {
         let a = &ammo[loadout[li]];
         g.stock[li] > 0 && a.kind != AmmoKind::Smoke && a.max_range_m.as_ref().is_none_or(|m| geo.range <= m.get())
     };
     let margin = |li: usize| {
         let a = &ammo[loadout[li]];
+        let (face, obliq) = hit_face(geo, a, top_above);
         let chem = a.kind.is_chemical();
         let mut p = penetration_mm(pen, a, velocity_at(a, geo.range));
         if chem
             && !a.tandem
             && era_left > 0
-            && face != Face::Rear
+            && matches!(face, Face::Front | Face::Side)
             && let Some(era) = &target.armour.era
         {
             p *= 1.0 - era.coverage.get() * era.ce_defeat.get();
@@ -664,6 +693,7 @@ pub fn step(
         let tt = world.transform[t];
         let tspeed = world.mobility[t].as_ref().map_or(0.0, |m| m.speed);
         let rel = tt.heading - br;
+        let from_z = world.transform[k].z + def.dimensions.sight_height_m.get();
         let geo = ShotGeometry {
             range: r,
             visible,
@@ -671,10 +701,12 @@ pub fn step(
             target_heading: tt.heading,
             crossing_speed: (tspeed * libm::sin(rel)).abs(),
             shooter_moving: speed > 1.0,
+            plunge: plunge_angle(from_z, tt.z, 0.5 * tdef.dimensions.height_m.get(), r),
         };
         let era_left = world.era[t];
         let g = world.gun[k].as_mut().expect("checked");
-        let Some(li) = select_round(g, &loadouts[vi], ammo, pen, tdef, era_left, &geo) else { continue };
+        let top_above = dmg.top_hit_above_deg.get().to_radians();
+        let Some(li) = select_round(g, &loadouts[vi], ammo, pen, tdef, era_left, &geo, top_above) else { continue };
         let a = &ammo[loadouts[vi][li]];
         if g.rounds_at_target == 0 {
             let bs = bias_sigma_mrad(&def.fire_control, a, r);
@@ -736,6 +768,7 @@ fn fire_he_at_infantry(
         target_heading: 0.0,
         crossing_speed: 0.0,
         shooter_moving: speed > 1.0,
+        plunge: 0.0,
     };
     if g.rounds_at_target == 0 {
         let bs = bias_sigma_mrad(&def.fire_control, a, r);
@@ -924,6 +957,7 @@ mod tests {
             target_heading: 0.0,
             crossing_speed: 10.0,
             shooter_moving: false,
+            plunge: 0.0,
         };
         let (v, h) = random_sigma_mrad(&ifv.fire_control, atgm, &g);
         assert_eq!(v, h, "no lead error for a guided round");
@@ -987,6 +1021,7 @@ mod tests {
                 target_heading: 0.0,
                 crossing_speed: 0.0,
                 shooter_moving: false,
+                plunge: 0.0,
             };
             let n = 4000;
             let hits = (0..n)
@@ -1013,6 +1048,7 @@ mod tests {
             target_heading: 0.0,
             crossing_speed: 0.0,
             shooter_moving: false,
+            plunge: 0.0,
         }
     }
 
@@ -1092,5 +1128,55 @@ mod tests {
         full.behind_armour = None;
         let one = mean_hits(&full, &mut rng);
         assert!(one < 1.8, "a full-effect penetration kills at once most of the time: {one:.2}");
+    }
+
+    #[test]
+    fn an_upper_floor_rocket_penetrates_an_mbt_roof_and_not_its_front() {
+        // Target A5 and §10.4 (plan M8B-AT-TEAMS): a PG-7V from an upper floor (plunge over 20 deg)
+        // meets the roof and penetrates it; the same rocket fired level at the T-72's front
+        // does not (target A4: front not penetrated, side penetrated).
+        use rand_chacha::rand_core::SeedableRng;
+        let ds = ds();
+        let t72 = ds.vehicle("kurgan_a").unwrap();
+        let a = ds.ammo("rkt_pg7v").unwrap();
+        let fc = perfect_sight();
+        let shot = |bearing: f64, plunge: f64, seed: u64| {
+            let mut g = side_shot();
+            g.bearing_to_shooter = bearing;
+            g.range = 40.0;
+            g.plunge = plunge;
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            resolve(&fc, t72, 0, a, &ds.penetration, &ds.damage, &g, (0.0, 0.0), &mut rng)
+        };
+        // 12 m up at 25 m: 25 deg.
+        let plunge = plunge_angle(100.0 + 12.0, 100.0, 1.1, 25.0);
+        assert!(plunge.to_degrees() > 20.0, "{:.1} deg", plunge.to_degrees());
+        for seed in 0..20 {
+            let roof = shot(0.0, plunge, seed);
+            assert!(roof.hit && roof.face == Face::Top && roof.penetrated, "{roof:?}");
+            let front = shot(0.0, 0.0, seed);
+            assert!(front.face == Face::Front && !front.penetrated, "{front:?}");
+            let side = shot(std::f64::consts::FRAC_PI_2, 0.0, seed);
+            assert!(side.face == Face::Side && side.penetrated, "{side:?}");
+        }
+        // A ridge 50 m above a tank 1 km away is not a plunging shot.
+        assert!(plunge_angle(150.0, 100.0, 1.1, 1000.0) < ds.damage.top_hit_above_deg.get().to_radians());
+    }
+
+    #[test]
+    fn a_top_attack_missile_meets_the_roof_whatever_the_aspect() {
+        // Javelin class (plan M8B-AT-TEAMS §3): the roof, not the T-90's front with its ERA.
+        use rand_chacha::rand_core::SeedableRng;
+        let ds = ds();
+        let t90 = ds.vehicle("kurgan_c").unwrap();
+        let jv = ds.ammo("atgm_javelin").unwrap();
+        let fc = perfect_sight();
+        let mut g = side_shot();
+        g.bearing_to_shooter = 0.0;
+        g.range = 1500.0;
+        let mut rng = ChaCha8Rng::seed_from_u64(5);
+        let o = resolve(&fc, t90, 10, jv, &ds.penetration, &ds.damage, &g, (0.0, 0.0), &mut rng);
+        assert_eq!(o.face, Face::Top);
+        assert!(o.penetrated && !o.era_fired, "{o:?}");
     }
 }

@@ -97,6 +97,9 @@ pub struct DamageTables {
     pub exposed_stowage_factor: Stat<f64>,
     /// Probability of a non-penetrating hit disabling sights.
     pub non_penetration_sights: Stat<f64>,
+    /// A shot plunging more steeply than this onto the target meets its top armour (deg; plan
+    /// M8B-AT-TEAMS §3).
+    pub top_hit_above_deg: Stat<f64>,
 }
 
 /// Long-rod penetration model (Lanz–Odermatt functional form), `data/combat/penetration.ron`:
