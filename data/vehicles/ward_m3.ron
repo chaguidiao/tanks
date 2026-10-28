@@ -70,7 +70,7 @@
     ),
     armament: (
         gun: "25 MM AUTOCANNON + TOW",
-        load: [(ammo: "atgm_tow2", count: 12), (ammo: "he_25", count: 200), (ammo: "apds_25", count: 100)], // 1,500 rounds in bursts of about five; TOW-2 from 1983, as the vehicle
+        load: [(ammo: "atgm_tow2", count: 12, prefer_beyond_m: (value: 2000.0, source: "estimate (plan M8B-AT-TEAMS §5)", confidence: estimate, notes: "Beyond about 2 km the 25 mm gun is ineffective against armour; inside it the gun is used and missiles are kept for tanks.")), (ammo: "he_25", count: 200), (ammo: "apds_25", count: 100)], // 1,500 rounds in bursts of about five; TOW-2 from 1983, as the vehicle
         autoloader: true,
         reload_s: (value: 1.8, source: "estimate", confidence: estimate, notes: "One burst of about four rounds at the cyclic rate, plus laying."),
         turret_traverse_rad_s: (value: 0.6, source: "estimate", confidence: estimate),

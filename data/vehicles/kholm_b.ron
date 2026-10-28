@@ -79,7 +79,7 @@
     ),
     armament: (
         gun: "125 MM SMOOTHBORE + ATGM",
-        load: [(ammo: "apfsds_125b", count: 10), (ammo: "apfsds_125a", count: 10), (ammo: "atgm_kobra", count: 6), (ammo: "hefrag_125", count: 10), (ammo: "heat_125", count: 6)],
+        load: [(ammo: "apfsds_125b", count: 10), (ammo: "apfsds_125a", count: 10), (ammo: "atgm_kobra", count: 6, prefer_beyond_m: (value: 2500.0, source: "estimate (plan M8B-AT-TEAMS §5)", confidence: estimate, notes: "Gun-launched missiles are meant for targets beyond the effective range of the sabot, about 2.5 km.")), (ammo: "hefrag_125", count: 10), (ammo: "heat_125", count: 6)],
         autoloader: true,
         reload_s: (value: 7.1, source: "open-source summaries (Wikipedia, T-80, 2026): carousel loader 7.1 s for the nearest round", confidence: low,
             notes: "Same carousel family as the T-80; a far round takes longer, a sequence of one type less."),

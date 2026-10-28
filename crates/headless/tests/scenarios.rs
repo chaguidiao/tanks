@@ -31,3 +31,19 @@ fn the_v1_scenarios_load_play_and_replay_to_the_same_state() {
         assert_eq!(a, b, "{id} is not deterministic");
     }
 }
+
+#[test]
+fn the_ambush_demo_plays_and_replays_to_the_same_state() {
+    // M8b-b tech demo (docs/plans/M8B-AT-TEAMS.md §10.8): one tank driven down the street past the
+    // squads in the houses; deterministic like the v1 set.
+    let play = || {
+        let out = Command::new(env!("CARGO_BIN_EXE_tanks-headless"))
+            .args(["run", "--scenario", "m8b-ambush", "--move", "4300,4290", "--seconds", "300"])
+            .output()
+            .expect("run tanks-headless");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        text.lines().find(|l| l.starts_with("state hash")).expect("hash").to_owned()
+    };
+    assert_eq!(play(), play());
+}

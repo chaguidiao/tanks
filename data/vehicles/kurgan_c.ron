@@ -66,7 +66,7 @@
     ),
     armament: (
         gun: "125 MM SMOOTHBORE",
-        load: [(ammo: "apfsds_125c", count: 20), (ammo: "atgm_refleks", count: 4), (ammo: "hefrag_125", count: 10), (ammo: "heat_125", count: 6)],
+        load: [(ammo: "apfsds_125c", count: 20), (ammo: "atgm_refleks", count: 4, prefer_beyond_m: (value: 2500.0, source: "estimate (plan M8B-AT-TEAMS §5)", confidence: estimate, notes: "Gun-launched missiles are meant for targets beyond the effective range of the sabot, about 2.5 km.")), (ammo: "hefrag_125", count: 10), (ammo: "heat_125", count: 6)],
         autoloader: true,
         reload_s: (value: 7.1, source: "Zaloga, T-72 (Osprey, 1993): autoloader cycle", confidence: medium),
         turret_traverse_rad_s: (value: 0.42, source: "estimate", confidence: estimate),

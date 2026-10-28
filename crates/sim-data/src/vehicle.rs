@@ -125,6 +125,10 @@ pub struct FireControlDef {
 pub struct AmmoLoad {
     pub ammo: String,
     pub count: u32,
+    /// Stand-off round (plan M8B-AT-TEAMS §5, B6): beyond this range the crew fires it first at a
+    /// target it defeats; inside it, only when no other round does (m).
+    #[serde(default)]
+    pub prefer_beyond_m: Option<Stat<f64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

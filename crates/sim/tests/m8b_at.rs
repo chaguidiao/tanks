@@ -163,3 +163,137 @@ fn a_destroyed_tank_is_no_target_and_rounds_are_counted() {
         assert_eq!(shots_by(&after, team), 0, "no missiles at a burning tank");
     }
 }
+
+/// A Red MR squad (1980) dug in in a masonry house at (600, 600); a Blue M1 drives east past it
+/// on y = 600 + `offset`. The crew is unaware (holds fire): with its weapons free today it finds
+/// the squad at 350-450 m and clears the house with HE first, which is the open detection step
+/// (TODO B24 D2: search time with narrow-field sights).
+fn house_ambush(offset: f64, seed: u64) -> Sim {
+    let ds = data();
+    let m = map_with(&ds, 300, 400, "grassland", |p| {
+        p.features.buildings.push(building(1, 594.0, 594.0, 606.0, 606.0, sim_data::BuildingClass::Masonry));
+    });
+    let blue = vec![unit("1-1", "bulwark_a0", [150.0, 600.0 + offset], 90.0, None)];
+    let red = vec![squad("A", "mr_squad", [600.0, 586.0], Some("2-D"), None)];
+    let mut sc = scenario(10 * 3600, blue, red);
+    sc.date = (1980, 6, 1);
+    sc.seed = seed;
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    sim.set_ai_enabled(RED, false);
+    let tank = sim.truth().id[0];
+    hold(&mut sim, BLUE, tank);
+    // A prepared ambush: the squad is already in the house, dug in, before the tank comes.
+    let w = sim.truth_mut();
+    w.transform[1].pos = [600.0, 600.0];
+    let s = w.squad[1].as_mut().unwrap();
+    s.in_building = Some(1);
+    s.halted_s = 1.0e6;
+    sim.submit_immediate(
+        BLUE,
+        Command::Move { unit: tank, destination: [1100.0, 600.0 + offset], via: vec![], speed_limit_mps: Some(6.0) },
+    );
+    sim
+}
+
+#[test]
+fn an_rpg_team_in_a_house_kills_a_tank_passing_its_flank() {
+    // Target A10 and the M8b-b exit (plan §11): a tank passing 100-150 m from an RPG in a house
+    // is killed or disabled in more than half of 16 seeds; the rocket waits for the flank and the
+    // kill zone (FM 100-2-1 ambush; Grau 1997).
+    let mut out = 0;
+    let mut early = 0;
+    for seed in 1..=16 {
+        let offset = 100.0 + (seed % 3) as f64 * 25.0;
+        let mut sim = house_ambush(offset, seed);
+        let squad = sim.truth().id[1];
+        for _ in 0..(180 * sim::TICK_HZ) {
+            for e in sim.step() {
+                // The tank shows its front while the house is within 45 deg of its heading (east).
+                let t = sim.truth().transform[0];
+                let off = (600.0 - t.pos[1]).atan2(600.0 - t.pos[0]).abs();
+                if matches!(e, Event::Fired { unit, .. } if unit == squad) && off < std::f64::consts::FRAC_PI_4 {
+                    early += 1;
+                }
+            }
+        }
+        if sim.truth().condition[0] != Condition::Operational {
+            out += 1;
+        }
+    }
+    println!("A10: tank killed or disabled in {out}/16");
+    assert!(out > 8, "tank killed or disabled in {out}/16");
+    assert_eq!(early, 0, "no rocket while the tank still shows its front");
+}
+
+/// Four Blue M1s (1985) halted 1,500 m from a dug-in Red Fagot team on open ground.
+fn platoon_vs_post(seed: u64) -> Sim {
+    let ds = data();
+    let m = map(&ds, 400, 600, "grassland", |_, _| 0.0);
+    let blue = (0..4)
+        .map(|i| unit(&format!("1-{}", i + 1), "bulwark_a0", [700.0 + i as f64 * 60.0, 400.0], 90.0, Some("1")))
+        .collect();
+    let red = vec![squad("AT", "at_team_r", [790.0, 1900.0], Some("2-D"), None)];
+    let mut sc = scenario(10 * 3600, blue, red);
+    sc.date = (1985, 6, 1);
+    sc.seed = seed;
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    sim.set_ai_enabled(RED, false);
+    sim.truth_mut().squad[4].as_mut().unwrap().halted_s = 1.0e6;
+    sim
+}
+
+#[test]
+fn a_tank_platoon_puts_out_a_missile_post_once_it_fires() {
+    // Plan §5 and §10.8: a missile team fires at a halted tank platoon showing its flank 1,500 m
+    // away. The launch gives it away; the tanks make it their first target and engage it with
+    // main-gun HE beyond coax reach (ATP 3-20.15 App. F, react to an ATGM). The first missile,
+    // fired before anyone knew of the post, often hits; once the tanks fire back the gunner is
+    // pinned and later missiles are lost (the 1973 Sagger record, plan §2.2).
+    let (mut cleared, mut first_hits, mut later, mut later_hits) = (0, 0, 0, 0);
+    for seed in 1..=8 {
+        let mut sim = platoon_vs_post(seed);
+        let team = sim.truth().id[4];
+        let mut results = 0;
+        for _ in 0..(300 * sim::TICK_HZ) {
+            for e in sim.step() {
+                if let Event::ShotResult { unit, hit, .. } = e
+                    && unit == team
+                {
+                    results += 1;
+                    match results {
+                        1 => first_hits += hit as u32,
+                        _ => {
+                            later += 1;
+                            later_hits += hit as u32;
+                        }
+                    }
+                }
+            }
+            if !sim.truth().fighting(4) {
+                break;
+            }
+        }
+        cleared += !sim.truth().fighting(4) as u32;
+    }
+    println!("missile post: out in {cleared}/8, first missile hit {first_hits}/8, later {later_hits}/{later}");
+    assert!(cleared >= 6, "the post is put out within 5 minutes in {cleared}/8 runs");
+    assert!(first_hits >= 2, "the first missile hits at times ({first_hits}/8)");
+    assert!(later > 0 && (later_hits as f64) < 0.25 * later as f64, "later missiles mostly lost: {later_hits}/{later}");
+}
+
+#[test]
+fn a_squad_placed_in_a_house_occupies_it_at_the_start() {
+    // Prepared positions (plan §10.8): no walk-in needed, as the ambush demo relies on.
+    let ds = data();
+    let m = map_with(&ds, 200, 200, "grassland", |p| {
+        p.features.buildings.push(building(1, 394.0, 394.0, 406.0, 406.0, sim_data::BuildingClass::Masonry));
+    });
+    let red = vec![
+        squad("A", "mr_squad", [400.0, 400.0], Some("2-D"), None),
+        squad("B", "mr_squad", [300.0, 300.0], Some("2-D"), None),
+    ];
+    let sim = Sim::new(&scenario(10 * 3600, vec![], red), ds, m).unwrap();
+    let w = sim.truth();
+    assert_eq!(w.squad[0].as_ref().unwrap().in_building, Some(1));
+    assert_eq!(w.squad[1].as_ref().unwrap().in_building, None);
+}

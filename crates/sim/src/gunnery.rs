@@ -416,12 +416,15 @@ pub fn face_for(geo: &ShotGeometry, a: &AmmoDef, top_above: f64) -> Face {
 }
 
 /// Which round of the loadout the crew fires at a target: the commander's choice if stocked and
-/// in range, else the first round meant for the target's class that defeats its armour, else the
-/// one with the best margin (FM 3-20.12 ammunition selection by target type).
+/// in range, else a stand-off round beyond its `prefer_beyond` range (per loadout entry; missiles
+/// beyond the gun's effective range, plan M8B-AT-TEAMS §5) that defeats the target, else the first
+/// round meant for the target's class that defeats its armour (stand-off rounds only beyond their
+/// range), else the one with the best margin (FM 3-20.12 ammunition selection by target type).
 #[allow(clippy::too_many_arguments)]
 pub fn select_round(
     g: &GunState,
     loadout: &[usize],
+    beyond: &[Option<f64>],
     ammo: &[AmmoDef],
     pen: &PenetrationModel,
     target: &VehicleDef,
@@ -440,9 +443,15 @@ pub fn select_round(
     {
         return Some(li);
     }
-    if let Some(&li) =
-        all.iter().find(|&&li| ammo[loadout[li]].preferred_vs.contains(&target.class.into()) && margin(li) >= 1.0)
-    {
+    let stand_off = |li: usize| beyond.get(li).copied().flatten();
+    if let Some(&li) = all.iter().find(|&&li| stand_off(li).is_some_and(|b| geo.range > b) && margin(li) >= 1.0) {
+        return Some(li);
+    }
+    if let Some(&li) = all.iter().find(|&&li| {
+        stand_off(li).is_none_or(|b| geo.range > b)
+            && ammo[loadout[li]].preferred_vs.contains(&target.class.into())
+            && margin(li) >= 1.0
+    }) {
         return Some(li);
     }
     let mut best: Option<(usize, f64)> = None;
@@ -524,11 +533,22 @@ pub fn apply_damage(world: &mut World, t: usize, kill: Option<KillKind>, sights:
     if new == Condition::Destroyed { Some(KillKind::Catastrophic) } else { kill }
 }
 
+/// A squad seen launching a rocket or missile stays the first threat this long (ticks, 60 s).
+const LAUNCH_THREAT: u64 = 60 * crate::TICK_HZ as u64;
+
 /// Pick a target from the crew's own tracks: assigned target if engageable, else keep the
-/// current one, else by threat (ATP 3-20.15 ch. 4, engagement priorities): infantry inside
-/// `close_infantry` (anti-tank weapons at close range) first, then the nearest vehicle, then
-/// the nearest infantry.
-fn choose_target(world: &World, k: usize, max_range: f64, close_infantry: f64, tick: u64) -> Option<usize> {
+/// current one, else by threat (ATP 3-20.15 ch. 4, engagement priorities; App. F, react to an
+/// ATGM: engage the launch point): a squad seen launching a rocket or missile, or identified as
+/// an anti-tank missile team (plan M8B-AT-TEAMS §5), then infantry inside `close_infantry`
+/// (anti-tank weapons at close range), then the nearest vehicle, then the nearest infantry.
+fn choose_target(
+    world: &World,
+    squads: &[sim_data::SquadDef],
+    k: usize,
+    max_range: f64,
+    close_infantry: f64,
+    tick: u64,
+) -> Option<usize> {
     let s = world.sensors[k].as_ref()?;
     let g = world.gun[k].as_ref()?;
     let min_level = match world.weapons[k] {
@@ -550,8 +570,19 @@ fn choose_target(world: &World, k: usize, max_range: f64, close_infantry: f64, t
     {
         return Some(a);
     }
+    let squad = |tr: &crate::world::LocalTrack| world.squad[tr.target].is_some();
+    let anti_tank = |tr: &crate::world::LocalTrack| {
+        let launched = world.launch[tr.target].is_some_and(|(lt, _)| tick.saturating_sub(lt) <= LAUNCH_THREAT);
+        let missile_team = tr.level >= ContactLevel::Identified
+            && world.squad[tr.target].as_ref().is_some_and(|q| {
+                squads[q.def].anti_armour.iter().any(|w| w.class == sim_data::AntiArmourClass::Missile)
+            });
+        squad(tr) && (launched || missile_team)
+    };
+    // Keep the current target unless an anti-tank threat has appeared since.
     if let Some(cur) = g.target
         && ok(cur)
+        && (s.track(cur).is_some_and(anti_tank) || !s.tracks.iter().any(|tr| ok(tr.target) && anti_tank(tr)))
     {
         return Some(cur);
     }
@@ -562,8 +593,8 @@ fn choose_target(world: &World, k: usize, max_range: f64, close_infantry: f64, t
             .min_by(|a, b| a.range_m.total_cmp(&b.range_m).then(a.target.cmp(&b.target)))
             .map(|tr| tr.target)
     };
-    let squad = |tr: &crate::world::LocalTrack| world.squad[tr.target].is_some();
-    nearest(&|tr| squad(tr) && tr.range_m <= close_infantry)
+    nearest(&anti_tank)
+        .or_else(|| nearest(&|tr| squad(tr) && tr.range_m <= close_infantry))
         .or_else(|| nearest(&|tr| !squad(tr)))
         .or_else(|| nearest(&squad))
 }
@@ -588,6 +619,8 @@ pub fn select_infantry_round(g: &GunState, loadout: &[usize], ammo: &[AmmoDef], 
 pub struct InfantryGunnery<'a> {
     /// Per side: infantry inside this range comes before vehicles (doctrine).
     pub close_infantry: &'a [f64],
+    /// Squad types (anti-tank missile teams are a first threat).
+    pub squads: &'a [sim_data::SquadDef],
     pub map: &'a terrain::BakedMap,
     pub td: &'a sim_data::TerrainData,
 }
@@ -631,7 +664,7 @@ pub fn step(
         let target = if tick.is_multiple_of(crate::VEHICLE_AI_EVERY)
             || world.gun[k].as_ref().is_some_and(|g| g.target.is_none())
         {
-            choose_target(world, k, max_range, inf.close_infantry[side], tick)
+            choose_target(world, inf.squads, k, max_range, inf.close_infantry[side], tick)
         } else {
             world.gun[k].as_ref().and_then(|g| g.target).filter(|&t| world.alive(t) && !world.mounted(t))
         };
@@ -726,7 +759,11 @@ pub fn step(
         let era_left = world.era[t];
         let g = world.gun[k].as_mut().expect("checked");
         let top_above = dmg.top_hit_above_deg.get().to_radians();
-        let Some(li) = select_round(g, &loadouts[vi], ammo, pen, tdef, era_left, &geo, top_above) else { continue };
+        let beyond: Vec<Option<f64>> =
+            def.armament.load.iter().map(|l| l.prefer_beyond_m.as_ref().map(|b| b.get())).collect();
+        let Some(li) = select_round(g, &loadouts[vi], &beyond, ammo, pen, tdef, era_left, &geo, top_above) else {
+            continue;
+        };
         let a = &ammo[loadouts[vi][li]];
         if g.rounds_at_target == 0 {
             let bs = bias_sigma_mrad(&def.fire_control, a, r);
@@ -1204,5 +1241,29 @@ mod tests {
         let o = resolve(&fc, t90, 10, jv, &ds.penetration, &ds.damage, &g, (0.0, 0.0), &mut rng);
         assert_eq!(o.face, Face::Top);
         assert!(o.penetrated && !o.era_fired, "{o:?}");
+    }
+
+    #[test]
+    fn missile_carriers_keep_their_missiles_for_stand_off() {
+        // Plan M8B-AT-TEAMS §5 (B6): the M2 fires TOW at a BMP-2 beyond 2 km and its 25 mm inside
+        // it; at a tank it uses the missile at any range (the gun cannot defeat it).
+        let ds = ds();
+        let m2 = ds.vehicle("ward_m2").unwrap();
+        let ammo: Vec<AmmoDef> = m2.armament.load.iter().map(|l| ds.ammo(&l.ammo).unwrap().clone()).collect();
+        let loadout: Vec<usize> = (0..ammo.len()).collect();
+        let beyond: Vec<Option<f64>> =
+            m2.armament.load.iter().map(|l| l.prefer_beyond_m.as_ref().map(|b| b.get())).collect();
+        let g = GunState::new(0.0, m2.armament.load.iter().map(|l| l.count).collect());
+        let pick = |target: &str, r: f64| {
+            let mut geo = side_shot();
+            geo.bearing_to_shooter = 0.0;
+            geo.range = r;
+            let t = ds.vehicle(target).unwrap();
+            let li = select_round(&g, &loadout, &beyond, &ammo, &ds.penetration, t, 0, &geo, 0.35).unwrap();
+            ammo[li].guided
+        };
+        assert!(pick("skif_m1", 2500.0), "TOW beyond the gun's range");
+        assert!(!pick("skif_m1", 1000.0), "25 mm inside it");
+        assert!(pick("kurgan_a", 1000.0), "TOW at a tank");
     }
 }

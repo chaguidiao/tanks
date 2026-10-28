@@ -385,6 +385,13 @@ impl Sim {
             }
             sides.push(picture::SideState::new(SideId(si as u8), doctrine));
         }
+        // A squad placed inside a building at the start occupies it (a prepared position, e.g. an
+        // ambush; plan M8B-AT-TEAMS §10.8).
+        for k in 0..world.len() {
+            if world.squad[k].as_ref().is_some_and(|s| s.mounted_in.is_none()) {
+                infantry::occupy_here(&mut world, &map, &data.terrain, k);
+            }
+        }
         let n_sides = scenario.sides.len();
         let commanders: Vec<Option<ai::commander::Commander>> = scenario
             .sides
@@ -846,7 +853,12 @@ impl Sim {
         // 6. Gunnery.
         let engage: Vec<f64> = self.sides.iter().map(|s| s.doctrine.engagement_range_m.get()).collect();
         let close: Vec<f64> = self.sides.iter().map(|s| s.doctrine.infantry.close_infantry_m.get()).collect();
-        let inf = gunnery::InfantryGunnery { close_infantry: &close, map: &self.map, td: &self.data.terrain };
+        let inf = gunnery::InfantryGunnery {
+            close_infantry: &close,
+            squads: &self.squads,
+            map: &self.map,
+            td: &self.data.terrain,
+        };
         let fired = gunnery::step(
             &mut self.world,
             &self.vehicles,
