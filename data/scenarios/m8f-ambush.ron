@@ -1,0 +1,47 @@
+// M8f1 exit scenario (TODO B13; docs/plans/M8F1-INFANTRY-AI.md §6): the village of `m8b-ambush`,
+// held by Red infantry with RPGs in the houses and a missile team on the east edge, now with a
+// Blue mechanised platoon beside the tanks. Play as Blue: dismount the M2s short of the village
+// (plan action DISMOUNT), send the squads in first (OCCUPY BUILDINGS FACING west), and bring the
+// tanks forward behind them. Tank-only platoons route round the village unless a leg says
+// BUILT-UP ENTER; squads on the ground within 300 m lift that. Red has no commander AI: its squads
+// hold their houses and move house after firing twice.
+(
+    id: "m8f-ambush",
+    name: "CLEARING THE VILLAGE",
+    date: (1987, 6, 15),
+    start_time_s: 36000, // 10:00
+    map: (id: "demo", recipe: "rolling-farmland", seed: 42, size_m: 8000.0),
+    seed: 12,
+    briefing: "SITUATION: RED INFANTRY WITH ANTI-TANK WEAPONS HOLDS THE VILLAGE 2 KM WEST. A MISSILE TEAM IS REPORTED ON THE EAST EDGE.\n\nMISSION: 1ST TANK PLATOON AND 3RD MECHANISED PLATOON CLEAR THE VILLAGE WITHIN 40 MINUTES.\n\nNOTES: DISMOUNT SHORT OF THE VILLAGE AND LET THE SQUADS LEAD. TANKS OVERWATCH FROM STAND-OFF AND FOLLOW THE SQUADS IN. RPG TEAMS IN HOUSES WAIT FOR A FLANK SHOT INSIDE 200 M.",
+    objectives: [(name: "VILLAGE", centre: (4560.0, 4310.0), radius_m: 300.0)],
+    victory: (time_limit_s: 2400.0, objective: "VILLAGE", attacker: 0, destroyed_fraction: 0.75),
+    sides: [
+        (
+            name: "BLUE",
+            doctrine: "western-combined",
+            units: [
+                (callsign: "1-1", vehicle: "bulwark_a1", position: (6400.0, 4300.0), heading_deg: 270.0, platoon: "1"),
+                (callsign: "1-2", vehicle: "bulwark_a1", position: (6440.0, 4360.0), heading_deg: 270.0, platoon: "1"),
+                (callsign: "1-3", vehicle: "bulwark_a1", position: (6440.0, 4240.0), heading_deg: 270.0, platoon: "1"),
+                (callsign: "1-4", vehicle: "bulwark_a1", position: (6480.0, 4300.0), heading_deg: 270.0, platoon: "1"),
+                (callsign: "3-1", vehicle: "ward_m2", position: (6600.0, 4300.0), heading_deg: 270.0, platoon: "3"),
+                (callsign: "3-2", vehicle: "ward_m2", position: (6640.0, 4360.0), heading_deg: 270.0, platoon: "3"),
+                (callsign: "3-3", vehicle: "ward_m2", position: (6640.0, 4240.0), heading_deg: 270.0, platoon: "3"),
+                (callsign: "3-1A", squad: "rifle_squad_b", mounted_in: "3-1", position: (0.0, 0.0), heading_deg: 0.0),
+                (callsign: "3-2A", squad: "rifle_squad_b", mounted_in: "3-2", position: (0.0, 0.0), heading_deg: 0.0),
+                (callsign: "3-3A", squad: "rifle_squad_b", mounted_in: "3-3", position: (0.0, 0.0), heading_deg: 0.0),
+            ],
+        ),
+        (
+            name: "RED",
+            doctrine: "generic-opfor",
+            units: [
+                // Squads placed inside houses occupy them at the start.
+                (callsign: "2-1A", squad: "mr_squad", position: (4638.5, 4305.0), heading_deg: 90.0, platoon: "2-D"),
+                (callsign: "2-1B", squad: "mr_squad", position: (4675.2, 4272.5), heading_deg: 90.0, platoon: "2-D"),
+                (callsign: "2-1C", squad: "mr_squad", position: (4517.3, 4350.8), heading_deg: 90.0, platoon: "2-D"),
+                (callsign: "AT-1", squad: "at_team_r", position: (4775.2, 4268.5), heading_deg: 90.0, platoon: "2-AT"),
+            ],
+        ),
+    ],
+)

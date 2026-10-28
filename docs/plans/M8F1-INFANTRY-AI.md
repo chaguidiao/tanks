@@ -157,6 +157,31 @@ the batch. Golden hash unchanged (no squads in it).
 | 5 | B33 concealment of squads in buildings (§6) | factor 0.5 on optical and night channels / another value / none | **0.5, as dug-in**, cited to FM 3-06.11; then re-check A10 with an alert crew. Without it B13 (a) shows no threat |
 | 6 | Scope of the attack case (§5) | (a) squads take the near edge, vehicles overwatch; (b) also clear the village block by block | **(a)**. Block-by-block clearing needs towns (H3) and real urban AI; that is M8h1b and later |
 
+## 7a. Results and deviations (2026-10-29)
+
+Done in the §8 order; DESIGN.md §13.1 M8f1 has the full summary.
+
+- **B33** as decided (0.5). It did not by itself change the alert-crew house ambush (1/16):
+  the cause was the squad firing its rifles at the tank from 450 m. Ambush squads now hold
+  small arms at vehicles until sprung: 3/16. The tank still sees a lone house first (commander's
+  eye at 200-450 m; thermal is not the cause: ×0.25 on thermal changes nothing). TODO B26.
+- **Found on the way**: WEAPONS HOLD did not hold a platoon (fire distribution assigned targets);
+  fixed.
+- **§2**: the drill reverses along the hull's heading; when the contact drill has already turned
+  the hulls towards the shooter, the platoon backs straight away from it, front to the threat.
+  An AMBUSHED branch also suspends the contact halt (else the platoon halted again at once).
+- **§3**: superseded by decision #2 (always, AI and player). Single-vehicle moves are not
+  changed. Balance: Blue wins 89/96 (87), each scenario within two runs; no retune.
+- **§4**: the dismount order is a carrier plan to the dismount point (a plain DISMOUNT over the
+  radio overshot by about 200 m). The squads count as the attack's lead, so the IFVs
+  consolidate once the squads hold the objective.
+- **§6 B13**: alone 21 tanks lost over 16 seeds (13/16 runs), ambushed 15/16; with the squads
+  leading 6 (6/16), 0/16. The "team found before it fires" measure was dropped: the missile team
+  fires at the approach from 2 km before anyone is close; the test asserts the close ambush
+  instead. The test is `#[ignore]`d (43 s); run it with `--run-ignored only`.
+- Open: TODO B35 (client ETA ignores the avoidance), B36 (other branches during a drill), B37
+  (attack beyond the near edge).
+
 ## 8. Order of work (each about one commit)
 
 1. B33 camouflage in buildings (data + one factor), `detect` re-run, A10 with an alert crew.

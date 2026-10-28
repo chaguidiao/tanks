@@ -88,7 +88,7 @@ Notes, sources and proposed values: `docs/plans/M8B-CALIBRATION-NOTES.md`. §4 q
 - [x] B22 Body armour per squad, by date: chance a bullet hit takes a man out (Blue 0.6 → 0.52 from 2004) and HE exposure for fragment vests. Small model change (notes §3). Decided 2026-10-24: B21–B23 go in one step (shared per-squad dated fields); values entered as `low`/`estimate` with "verify against the PDF" notes, not blocked on the primary PDFs
 - [x] B23 Night aiming: small-arms aiming error grows at night without an aiming aid (×1.6) and less with goggles and an infrared laser (×1.1). Small model change (notes §3). Decided 2026-10-24: B21–B23 go in one step (shared per-squad dated fields); values entered as `low`/`estimate` with "verify against the PDF" notes, not blocked on the primary PDFs. Done 2026-10-24 with B21 and B22: `SquadDef.body_armour`/`aiming_aids`, `night_aiming_factor`; V5 1.43× by day, 3.0× at night. Open: AN/PAQ-4-class aiming lights before 2002 (issue dates not in the sources)
 - [x] B24 Infantry detection timing: camouflage factor for halted and dug-in squads (D1, golden hash unaffected); sector search factor for narrow-field sights (D2, model-wide: re-run the detection calibration and balance batches, golden hash changes) (notes §2). Decided 2026-10-24: D1 may go in early; D2 is its own model-wide step before M8f1, tuned against the Phase 0 detection targets rather than a raw 9×. D1 done 2026-10-24: `camouflage` (halted ×0.8, dug in ×0.5, optical and night channel); dug-in squads found 2–4× more slowly by optics, thermal unchanged (notes §2.4).. D2 done 2026-10-28: `field_of_view_deg` per sight, `search_sector_deg` 60; first detection at fov / sector of the in-view rate, the crew's best sight counting; tanks in the open unchanged at 1-2 km, squads found 2-8× more slowly (notes §2.5); golden hash unchanged, `SIM_VERSION` 3, batch: Blue wins 86/96 (90)
-- [ ] B25 Validation harness for infantry: targets V1–V5 (formula test against Hitchman, rounds per casualty, MG/rifle ratio, share of losses from small arms with artillery, 2005 against 1990 exchange ratio) (notes §1.3). Must run before the M8b-b anti-tank teams are tuned, and the lethality call (calibration Q1) is made from its results. 2026-10-24: `tanks-headless firefight` and men lost by cause in `run`; V1–V3 pass (notes §1.4); V4 waits on F11 (no AI dismounts yet); V5 passes at 1.43× by day (notes §1.4)
+- [ ] B25 Validation harness for infantry: targets V1–V5 (formula test against Hitchman, rounds per casualty, MG/rifle ratio, share of losses from small arms with artillery, 2005 against 1990 exchange ratio) (notes §1.3). Must run before the M8b-b anti-tank teams are tuned, and the lethality call (calibration Q1) is made from its results. 2026-10-24: `tanks-headless firefight` and men lost by cause in `run`; V1–V3 pass (notes §1.4); V4 waits on a scenario with fires (2026-10-29: AI dismounts exist now; `m8b-dismounts` has no artillery, so all losses are small arms); V5 passes at 1.43× by day (notes §1.4)
 
 ## M8b-b — Anti-tank teams
 Plan: `docs/plans/M8B-AT-TEAMS.md`. Agreed 2026-10-24, with all 12 recommendations in §9 accepted, and calibrated against public data (§12: RPG-7 hit tables, Grozny and Iraq damage, Sagger and Javelin combat hit rates). Work follows §10; validation targets A1–A10 are in §11. Before the data commit, check the open items at the end of §12.
@@ -99,7 +99,7 @@ Plan: `docs/plans/M8B-AT-TEAMS.md`. Agreed 2026-10-24, with all 12 recommendatio
 - [x] B19 Anti-tank team data (RPG, ATGM per era, sourced) and ambush doctrine in `generic-opfor`. **Done 2026-10-28**: 13 rounds, dated launchers on both rifle squads, `ambush` blocks in both doctrine packs
 - Exit (met 2026-10-28): A10 RPG team in a house kills or disables a passing tank from the flank in 13/16 seeds (crew unaware, see below); per-pairing unit tests; balance batch (DESIGN.md §13.1 M8b-b). Tech demo `m8b-ambush`.
 - Deferred by the plan (§9 #7, #10, #12):
-  - AT teams moving after firing (F11);
+  - ~~AT teams moving after firing (F11)~~ done 2026-10-29 (shoot and move, M8f1);
   - per-shot crosswind on rockets (ENG);
   - active protection (Drozd/Arena/Trophy class) and loitering munitions, for scenarios after 2005.
 - Deferred or open after M8b-b (2026-10-28):
@@ -111,6 +111,9 @@ Plan: `docs/plans/M8B-AT-TEAMS.md`. Agreed 2026-10-24, with all 12 recommendatio
   - [ ] B31 A sprung team also fires at a front it cannot defeat (best margin): real gunners do not know the margin, but a "no shot below margin x" rule could save rounds
   - [ ] B32 Minimum arming distance of rockets (2-5 m) not modelled (no fight is that close)
   - [x] B33 **Done 2026-10-28** (`InfantryModel.camouflage_in_building` 0.5, optical and night channels). Re-checking A10 with an alert crew found the bigger cause: an ambush squad fired its rifles at the tank from 450 m and gave itself away; squads with anti-armour rounds left now hold small arms at vehicles until sprung (infantry targets unchanged). A10 alert crew: 1/16 → 3/16, unaware crew 13/16 unchanged; the tank still sees the lone house first (commander's eye at 200-450 m; thermal not decisive: ×0.25 on thermal changes nothing). Original text: Concealment of squads in buildings: men fire from back in the room (FM 3-06.11), but a squad in a building has camouflage 1.0, so the commander's unaided view resolves its window at 450 m in about 6 s (notes §2.5). A camouflage factor for `in_building` on optical and night channels, as D1 for dug-in squads; then re-check A10 with an alert crew (B26)
+  - [ ] B35 (2026-10-29) Client ETA and the draft route line do not use the built-up avoidance rasters, so a tank platoon's ETA through a village is shorter than the route it will drive; expose `sim::builtup` to the client planner
+  - [ ] B36 (2026-10-29) An AMBUSHED branch is carried out at once; other branch conditions met during a contact drill still wait until the drill goes quiet (existing semantics). Decide whether every branch should interrupt the drill
+  - [ ] B37 (2026-10-29) Commander attack: squads take the objective's near edge only (decision #6); no remount after consolidation, no clearing beyond the edge
   - [ ] B34 Target hand-off: a contact already in the side's picture could be searched for without the D2 penalty by other crews (TC 3-20.31 fire commands, platoon fire distribution); today each crew searches on its own
 
 ## M8c — Logistics
@@ -141,18 +144,18 @@ Plan: `docs/plans/M8B-AT-TEAMS.md`. Agreed 2026-10-24, with all 12 recommendatio
 
 ## M8f1 / M8f2 — Commander AI and fire-support AI
 M8f1 (right after infantry, kept small so infantry is playable): F11, F5, plus B13 as the exit scenario. Plan: `docs/plans/M8F1-INFANTRY-AI.md`, decisions agreed 2026-10-28 (§7: ON AMBUSH and BUILT-UP leg settings and an AMBUSHED branch condition; tank-only platoons always avoid built-up ground unless a leg says ENTER; B33 factor 0.5). M8f2 (after M8c–e): F1, F2, F3, F4, F6, F7, F8, F10. F9 is tracked as Z4.
-- [ ] F11 Reaction to infantry contacts: tanks use HE/coax and reverse out of close ambush, platoon avoids buildings without dismounted support, IFVs dismount at the right time — new
+- [x] F11 Reaction to infantry contacts: tanks use HE/coax and reverse out of close ambush, platoon avoids buildings without dismounted support, IFVs dismount at the right time — new. **Done 2026-10-29**: ON AMBUSH SOP (REVERSE OUT default, DRIVE THROUGH, HALT) and AMBUSHED branch condition; tank-only platoons always route round built-up ground unless BUILT-UP ENTER or squads are near; commander IFVs dismount at doctrine distances (attack: overwatch, then consolidate; defend: squads into covering houses, mount before displacing); DESIGN.md §13.1 M8f1, §14 #34
 - [ ] F1 Re-planning and COA choice (HTN/utility), HTN method library — §13.1 M5, M4, Phase 2
 - [ ] F2 OPFOR use of plans — §13.1 Plans, Phase 2
 - [ ] F3 Blue auto-commander option in the UI — §13.1 M5, Phase 2, content
 - [ ] F4 Cross and depth fire patterns — §13.1 M4, Phase 2
-- [ ] F5 AI use of buildings — §13.1 M4, M6, Phase 2
+- [x] F5 AI use of buildings — §13.1 M4, M6, Phase 2. **Done 2026-10-29** (M8f1 scope: defend and the near edge in attack): `infantry::choose_buildings`, plan action OCCUPY BUILDINGS (player: OCCUPY BUILDINGS FACING...), AT teams shoot and move. Block-by-block clearing stays with H3 / M8f2
 - [ ] F6 Route choice around smoke clouds — §13.1 M7a
 - [ ] F7 AI adjusting fires, counter-battery, danger-close checks — §13.1 M7d
 - [ ] F8 Hide positions, skyline/military-crest scoring — §13.1 M4
 - [ ] F10 Fire-on-the-move doctrine differences — §13.1 M3
-- [ ] B13 Ambush test scenario: dismounted ATGM/RPG teams in a village vs a tank platoon with and without dismounted support; first infantry scenario (feeds I2). Needs F11, G8 and G9; exit of M8f1/M8g1
-- Exit (M8f1): B13 plays with assertions; scripted AI scenario tests with explicit assertions; balance batches across seeds; no hidden-information leaks. Exit (M8f2): same for the remaining items.
+- [x] B13 Ambush test scenario: dismounted ATGM/RPG teams in a village vs a tank platoon with and without dismounted support; first infantry scenario (feeds I2). Needs F11, G8 and G9; exit of M8f1/M8g1. **Done 2026-10-29**: tech demo `m8f-ambush`; `crates/headless/tests/b13.rs` (16 seeds, ignored by default): alone 21 tanks lost (13/16 runs), ambushed 15/16; supported 6 (6/16), 0/16
+- Exit (M8f1) (met 2026-10-29, see DESIGN.md §13.1 M8f1): B13 plays with assertions; scripted AI scenario tests with explicit assertions; balance batches across seeds; no hidden-information leaks. Exit (M8f2): same for the remaining items.
 
 ## M8g1 / M8g2 — Plans and control UX
 M8g1 (with M8f1): G8 and G9. M8g2: G1–G7 after M8f2.
