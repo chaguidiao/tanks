@@ -1,5 +1,7 @@
 // Fictional Blue MBT mirroring the US M1 Abrams (1980): 105 mm gun, first-generation composite armour.
 // Values transcribed from public sources; verify against the cited edition before tuning.
+// Sabot: only the M735-class round before 1983, then a mixed load with the M833 class (dated
+// stowage entries; 55 rounds either way, Hunnicutt, Abrams (1990)).
 (
     id: "bulwark_a0",
     name: "BULWARK A0",
@@ -67,7 +69,7 @@
     ),
     armament: (
         gun: "105 MM RIFLED",
-        load: [(ammo: "apfsds_105b", count: 18), (ammo: "apfsds_105a", count: 12), (ammo: "heat_105", count: 21), (ammo: "smoke_105", count: 4)],
+        load: [(ammo: "apfsds_105b", count: 18, in_service: (from: 1983)), (ammo: "apfsds_105a", count: 12, in_service: (from: 1983)), (ammo: "apfsds_105a", count: 30, in_service: (from: 1980, to: 1982)), (ammo: "heat_105", count: 21), (ammo: "smoke_105", count: 4)],
         autoloader: false,
         reload_s: (value: 5.5, source: "estimate", confidence: estimate, notes: "Trained human loader, lighter 105 mm round from the ready rack."),
         turret_traverse_rad_s: (value: 0.7, source: "Hunnicutt, Abrams (1990): 360 deg in ~9 s", confidence: medium),

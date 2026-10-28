@@ -3,9 +3,10 @@
 // computer, no thermal sight. Withdrawn from the Red side's active units by 1995 (the Russian
 // army put its T-64s in storage in the early 1990s), so it appears in Cold War years only.
 // Values from public sources; most are open-source summaries (confidence low) or estimates.
-// Sabot: the 3BM22-class round before 1986 and the 3BM42-class round after. Both are in the load;
-// from 1986 both are stocked (as the 1985-89 sabot overlap of bulwark_a1), so a late-1980s tank
-// carries a few more sabot and fewer HE-FRAG than the real racks would hold.
+// Sabot: the 3BM22-class round before 1986 and the 3BM42-class round after (dated stowage
+// entries, one sabot type at a time). Load 36 rounds (open-source summaries, War Thunder wiki and
+// GlobalSecurity, T-64B/BM, 2026: 36, 28 in the carousel; confidence low); the split between
+// round types is an estimate.
 (
     id: "kholm_b",
     name: "KHOLM-B",
@@ -79,7 +80,7 @@
     ),
     armament: (
         gun: "125 MM SMOOTHBORE + ATGM",
-        load: [(ammo: "apfsds_125b", count: 10), (ammo: "apfsds_125a", count: 10), (ammo: "atgm_kobra", count: 6, prefer_beyond_m: (value: 2500.0, source: "estimate (plan M8B-AT-TEAMS §5)", confidence: estimate, notes: "Gun-launched missiles are meant for targets beyond the effective range of the sabot, about 2.5 km.")), (ammo: "hefrag_125", count: 10), (ammo: "heat_125", count: 6)],
+        load: [(ammo: "apfsds_125b", count: 14, in_service: (from: 1986)), (ammo: "apfsds_125a", count: 14, in_service: (from: 1976, to: 1985)), (ammo: "atgm_kobra", count: 6, prefer_beyond_m: (value: 2500.0, source: "estimate (plan M8B-AT-TEAMS §5)", confidence: estimate, notes: "Gun-launched missiles are meant for targets beyond the effective range of the sabot, about 2.5 km.")), (ammo: "hefrag_125", count: 10), (ammo: "heat_125", count: 6)],
         autoloader: true,
         reload_s: (value: 7.1, source: "open-source summaries (Wikipedia, T-80, 2026): carousel loader 7.1 s for the nearest round", confidence: low,
             notes: "Same carousel family as the T-80; a far round takes longer, a sequence of one type less."),

@@ -309,15 +309,14 @@ impl Sim {
                             vehicles.len() - 1
                         }
                     };
-                    // Rounds not yet in service at the side's date are not carried (unless none are).
-                    let in_service = |id: &str| data.ammo(id).is_some_and(|a| a.in_service.contains(year));
-                    let any = def.armament.load.iter().any(|l| in_service(&l.ammo));
-                    let stock: Vec<u32> = def
-                        .armament
-                        .load
-                        .iter()
-                        .map(|l| if !any || in_service(&l.ammo) { l.count } else { 0 })
-                        .collect();
+                    // Rounds not in service at the side's date, and stowage entries for other years,
+                    // are not carried (unless none are).
+                    let carried = |l: &sim_data::AmmoLoad| {
+                        l.stowed_in(year) && data.ammo(&l.ammo).is_some_and(|a| a.in_service.contains(year))
+                    };
+                    let any = def.armament.load.iter().any(carried);
+                    let stock: Vec<u32> =
+                        def.armament.load.iter().map(|l| if !any || carried(l) { l.count } else { 0 }).collect();
                     let z = g.height(u.position[0], u.position[1]);
                     world.spawn_vehicle(
                         SideId(si as u8),

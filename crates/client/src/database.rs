@@ -313,7 +313,8 @@ fn vehicle_sheet(ds: &DataSet, v: &VehicleDef) -> Sheet {
     ];
     for ld in &a.load {
         let name = ds.ammo(&ld.ammo).map_or(ld.ammo.clone(), |x| x.name.clone());
-        l.push(fact("LOAD", format!("{} × {name}", ld.count)));
+        let when = ld.in_service.as_ref().map_or(String::new(), |d| format!(" ({})", years(d)));
+        l.push(fact("LOAD", format!("{} × {name}{when}", ld.count)));
     }
     l.extend([
         fact("LOADING", if a.autoloader { "AUTOLOADER" } else { "HUMAN LOADER" }),
@@ -689,8 +690,10 @@ fn ammo_sheet(ds: &DataSet, a: &AmmoDef) -> Sheet {
     }
     l.push(section("CARRIED BY"));
     for v in ds.vehicles.iter().filter(|v| v.armament.load.iter().any(|x| x.ammo == a.id)) {
-        let n: u32 = v.armament.load.iter().filter(|x| x.ammo == a.id).map(|x| x.count).sum();
-        l.push(fact(&v.name, format!("{n} ROUNDS · {}", v.armament.gun)));
+        for x in v.armament.load.iter().filter(|x| x.ammo == a.id) {
+            let when = x.in_service.as_ref().map_or(String::new(), |d| format!(" ({})", years(d)));
+            l.push(fact(&v.name, format!("{} ROUNDS · {}{when}", x.count, v.armament.gun)));
+        }
     }
     for s in &ds.squads {
         for w in s.anti_armour.iter().filter(|w| w.load.iter().any(|x| x.ammo == a.id)) {

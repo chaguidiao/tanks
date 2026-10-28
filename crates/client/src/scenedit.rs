@@ -357,7 +357,7 @@ impl ScenarioEditor {
             fuel = fuel.max(v.mobility.fuel_capacity_l.get() * PLATOON_SIZE as f64);
             smoke = smoke.max(v.smoke_launcher.as_ref().map_or(0, |l| l.salvos) * PLATOON_SIZE as u32);
             for l in &v.armament.load {
-                if !ds.ammo(&l.ammo).is_some_and(|a| a.in_service.contains(year)) {
+                if !l.stowed_in(year) || !ds.ammo(&l.ammo).is_some_and(|a| a.in_service.contains(year)) {
                     continue;
                 }
                 let n = l.count * PLATOON_SIZE as u32;

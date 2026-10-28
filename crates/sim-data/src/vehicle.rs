@@ -129,6 +129,18 @@ pub struct AmmoLoad {
     /// target it defeats; inside it, only when no other round does (m).
     #[serde(default)]
     pub prefer_beyond_m: Option<Stat<f64>>,
+    /// Years this stowage entry applies (N11): a vehicle whose round changes mid-service lists one
+    /// entry per period, so the overlap years do not carry both. None = whenever the round is in
+    /// service.
+    #[serde(default)]
+    pub in_service: Option<ServiceDates>,
+}
+
+impl AmmoLoad {
+    /// This entry is stowed in `year` (its own dates only; the round's dates are checked apart).
+    pub fn stowed_in(&self, year: i32) -> bool {
+        self.in_service.is_none_or(|d| d.contains(year))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

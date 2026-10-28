@@ -1,5 +1,6 @@
 // Fictional Blue MBT mirroring the US M1A1 Abrams (mid-1980s).
 // Values transcribed from public sources; verify against the cited edition before tuning.
+// Sabot: the early 120 mm round to 1987 and the M829-class round from 1988 (dated stowage entries).
 (
     id: "bulwark_a1",
     name: "BULWARK A1",
@@ -67,7 +68,7 @@
     ),
     armament: (
         gun: "120 MM SMOOTHBORE",
-        load: [(ammo: "apfsds_120_early", count: 24), (ammo: "apfsds_120a", count: 24), (ammo: "heat_120a", count: 12), (ammo: "smoke_120", count: 4)],
+        load: [(ammo: "apfsds_120_early", count: 24, in_service: (from: 1985, to: 1987)), (ammo: "apfsds_120a", count: 24, in_service: (from: 1988)), (ammo: "heat_120a", count: 12), (ammo: "smoke_120", count: 4)],
         autoloader: false,
         reload_s: (value: 6.0, source: "estimate", confidence: estimate, notes: "Trained human loader from the ready rack."),
         turret_traverse_rad_s: (value: 0.7, source: "Hunnicutt, Abrams (1990): 360 deg in ~9 s", confidence: medium),

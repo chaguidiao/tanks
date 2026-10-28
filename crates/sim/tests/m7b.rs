@@ -218,3 +218,30 @@ fn the_older_scenario_date_drops_era_from_the_kurgan() {
     let sim = Sim::new(&sc, ds, m).unwrap();
     assert_eq!(sim.truth().era[0], 0);
 }
+
+#[test]
+fn stowage_entries_carry_one_sabot_type_per_period() {
+    // N11: a tank whose sabot changes mid-service carries only the round of the period, in the
+    // full number, never both in the overlap years.
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    let sabot = |v: &str, year: i32| -> Vec<(String, u32)> {
+        let mut sc = scenario(DAY, vec![unit("B1", "bulwark_a1", [1200.0, 400.0], 0.0, None)], vec![]);
+        sc.date.0 = year;
+        sc.sides[0].units[0].vehicle = v.into();
+        let sim = Sim::new(&sc, ds.clone(), m.clone()).unwrap();
+        let g = sim.truth().gun[0].as_ref().unwrap();
+        let load = &ds.vehicle(v).unwrap().armament.load;
+        load.iter()
+            .zip(&g.stock)
+            .filter(|(l, n)| **n > 0 && ds.ammo(&l.ammo).unwrap().kind == AmmoKind::Apfsds)
+            .map(|(l, &n)| (l.ammo.clone(), n))
+            .collect()
+    };
+    assert_eq!(sabot("kholm_b", 1985), vec![("apfsds_125a".into(), 14)]);
+    assert_eq!(sabot("kholm_b", 1987), vec![("apfsds_125b".into(), 14)]);
+    assert_eq!(sabot("bulwark_a1", 1987), vec![("apfsds_120_early".into(), 24)]);
+    assert_eq!(sabot("bulwark_a1", 1989), vec![("apfsds_120a".into(), 24)]);
+    assert_eq!(sabot("bulwark_a0", 1981), vec![("apfsds_105a".into(), 30)]);
+    assert_eq!(sabot("bulwark_a0", 1986), vec![("apfsds_105b".into(), 18), ("apfsds_105a".into(), 12)]);
+}
