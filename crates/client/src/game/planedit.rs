@@ -149,6 +149,9 @@ pub enum ActKind {
     SmokeScreen,
     EngineSmoke(bool),
     Report,
+    Dismount,
+    Mount,
+    OccupyBuilding,
 }
 
 /// An edit from the context menu (applied to the draft, made from the running plan if needed).
@@ -723,21 +726,37 @@ impl Game {
         ]
     }
 
-    fn action_items(&self, id: u16, release: bool, acts: &[StepAction]) -> Vec<MenuItem<MenuAct>> {
+    fn action_items(&self, id: u16, at: [f64; 2], release: bool, acts: &[StepAction]) -> Vec<MenuItem<MenuAct>> {
         let act = |k: ActKind| Self::pa(PlanEdit::Act(id, release, k));
-        let smoke = self.smoke_rounds(self.plan_platoon().map(Addressee::Platoon)) > 0;
-        let fire = !self.picture().fire_support.is_empty();
-        let fs = MenuItem::new("FIRE SMOKE AT...", act(ActKind::Pick(Pick::FireSmoke))).key("N");
-        let cff = MenuItem::submenu(
-            "CALL FOR FIRE AT",
-            vec![
-                MenuItem::new("HE...", act(ActKind::Pick(Pick::CallFire(FireKind::He)))),
-                MenuItem::new("SMOKE...", act(ActKind::Pick(Pick::CallFire(FireKind::Smoke)))),
-            ],
-        )
-        .key("Y");
+        let (squads, carries) = self.plan_platoon().map_or((false, false), |p| self.troop_roles(p));
         let clear = MenuItem::new("CLEAR", Self::pa(PlanEdit::ClearActs(id, release))).value(format!("{}", acts.len()));
-        vec![
+        let clear = if acts.is_empty() { clear.disabled("NO ACTIONS") } else { clear };
+        let fire = !self.picture().fire_support.is_empty();
+        let cff = |key: &'static str| {
+            let m = MenuItem::submenu(
+                "CALL FOR FIRE AT",
+                vec![
+                    MenuItem::new("HE...", act(ActKind::Pick(Pick::CallFire(FireKind::He)))),
+                    MenuItem::new("SMOKE...", act(ActKind::Pick(Pick::CallFire(FireKind::Smoke)))),
+                ],
+            )
+            .key(key);
+            if fire { m } else { m.disabled("NO BATTERY") }
+        };
+        if squads {
+            // A dismount platoon (TODO G8): no turret, smoke grenades or hull-down positions.
+            let near = self.sim.map().enterable_building_near(at, sim::plan::OCCUPY_BUILDING_RADIUS_M).is_some();
+            let occ = MenuItem::new("OCCUPY BUILDING", act(ActKind::OccupyBuilding)).key("O");
+            return vec![
+                if near { occ } else { occ.disabled("NO BUILDING AT THE CP") },
+                cff("Y"),
+                MenuItem::new("REPORT", act(ActKind::Report)).key("R"),
+                clear,
+            ];
+        }
+        let smoke = self.smoke_rounds(self.plan_platoon().map(Addressee::Platoon)) > 0;
+        let fs = MenuItem::new("FIRE SMOKE AT...", act(ActKind::Pick(Pick::FireSmoke))).key("N");
+        let mut v = vec![
             MenuItem::new("FACE...", act(ActKind::Pick(Pick::Face))).key("F"),
             MenuItem::submenu(
                 "OCCUPY BP",
@@ -752,10 +771,16 @@ impl Game {
             MenuItem::new("ENGINE SMOKE ON", act(ActKind::EngineSmoke(true))).key("E"),
             MenuItem::new("ENGINE SMOKE OFF", act(ActKind::EngineSmoke(false))),
             if smoke { fs } else { fs.disabled("NO SMOKE ROUNDS") },
-            if fire { cff } else { cff.disabled("NO BATTERY") },
+            cff("Y"),
             MenuItem::new("REPORT", act(ActKind::Report)).key("R"),
-            if acts.is_empty() { clear.disabled("NO ACTIONS") } else { clear },
-        ]
+        ];
+        if carries {
+            // ATP 3-21.71 ch. 3: dismount and pick-up points; the plan holds for the drill.
+            v.push(MenuItem::new("DISMOUNT", act(ActKind::Dismount)).key("U"));
+            v.push(MenuItem::new("MOUNT", act(ActKind::Mount)).key("K"));
+        }
+        v.push(clear);
+        v
     }
 
     fn wait_items(&self, id: u16, p: PlatoonId, cur: &Option<ConditionSet>) -> Vec<MenuItem<MenuAct>> {
@@ -873,12 +898,12 @@ impl Game {
         let Some(i) = plan.index_of(id) else { return (String::new(), Vec::new()) };
         let st = &plan.steps[i];
         let start = self.plan.as_ref().and_then(|d| d.start_id());
-        let release = MenuItem::submenu("ON RELEASE", self.action_items(id, true, &st.on_release))
+        let release = MenuItem::submenu("ON RELEASE", self.action_items(id, st.at, true, &st.on_release))
             .key("O")
             .value(self.actions_text(&st.on_release));
         let v = vec![
             MenuItem::submenu("LEG TO CP", self.leg_items(id, &st.leg)).key("L").value(leg_text(&st.leg)),
-            MenuItem::submenu("AT CP", self.action_items(id, false, &st.actions))
+            MenuItem::submenu("AT CP", self.action_items(id, st.at, false, &st.actions))
                 .key("A")
                 .value(self.actions_text(&st.actions)),
             MenuItem::submenu("WAIT", self.wait_items(id, p, &st.wait))
@@ -991,6 +1016,9 @@ impl Game {
                             ActKind::SmokeScreen => StepAction::SmokeScreen,
                             ActKind::EngineSmoke(on) => StepAction::EngineSmoke(on),
                             ActKind::Report => StepAction::Report,
+                            ActKind::Dismount => StepAction::Dismount,
+                            ActKind::Mount => StepAction::Mount,
+                            ActKind::OccupyBuilding => StepAction::OccupyBuilding,
                             ActKind::Pick(_) => return,
                         };
                         if release { s.on_release.push(a) } else { s.actions.push(a) }
@@ -1075,6 +1103,9 @@ impl Game {
                     format!("FIRE {}", if *kind == FireKind::He { "HE" } else { "SMK" })
                 }
                 StepAction::Report => "REPORT".into(),
+                StepAction::Dismount => "DISMOUNT".into(),
+                StepAction::Mount => "MOUNT".into(),
+                StepAction::OccupyBuilding => "OCC BLDG".into(),
             })
             .collect();
         v.join(", ")
@@ -1452,7 +1483,6 @@ mod tests {
     use std::path::PathBuf;
 
     use sim_data::{MapRef, SideDef, UnitDef};
-    use terrain::mobility::MobilityClass;
     use terrain::{AuthoringPackage, MapManifest, bake};
 
     use super::posture::Posture;
@@ -1472,6 +1502,11 @@ mod tests {
 
     /// Two own platoons on a flat synthetic map, the planning phase over.
     fn game() -> Game {
+        game_with(vec![unit("1-1", 700.0, "1"), unit("2-1", 900.0, "2")], |_| {})
+    }
+
+    /// Blue `units` on a flat synthetic map edited by `edit`, the planning phase over.
+    fn game_with(blue: Vec<UnitDef>, edit: impl FnOnce(&mut AuthoringPackage)) -> Game {
         let ds = Arc::new(DataSet::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data")).unwrap());
         let manifest = MapManifest {
             id: "synthetic".into(),
@@ -1484,7 +1519,8 @@ mod tests {
         };
         let mut pkg = AuthoringPackage::new_flat(manifest, 100.0);
         pkg.landcover.data.fill(ds.terrain.landcover_id("cropland").unwrap());
-        let classes: Vec<MobilityClass> = ds.vehicles.iter().map(MobilityClass::from).collect();
+        edit(&mut pkg);
+        let classes = terrain::mobility::all_classes(&ds);
         let map = Arc::new(bake(&pkg, &ds.terrain, &classes));
         let side = |name: &str, doctrine: &str, units: Vec<UnitDef>| SideDef {
             name: name.into(),
@@ -1503,7 +1539,7 @@ mod tests {
             map: MapRef { id: "synthetic".into(), recipe: "mixed-test".into(), seed: 1, size_m: 0.0 },
             seed: 7,
             sides: vec![
-                side("BLUE", "western-combined", vec![unit("1-1", 700.0, "1"), unit("2-1", 900.0, "2")]),
+                side("BLUE", "western-combined", blue),
                 side("RED", "generic-opfor", vec![UnitDef { position: [800.0, 1500.0], ..unit("211", 0.0, "21") }]),
             ],
             objectives: vec![],
@@ -1525,6 +1561,44 @@ mod tests {
     fn select(g: &mut Game, p: Option<PlatoonId>) {
         g.sel_platoon = p;
         g.sync_drafts();
+    }
+
+    #[test]
+    fn troop_actions_in_the_cp_menu_follow_the_platoon() {
+        // An M2 carrying a squad (platoons "1" and "1-D") and a house at (700, 1000).
+        let carrier = UnitDef { vehicle: "ward_m2".into(), ..unit("1-1", 700.0, "1") };
+        let squad = UnitDef {
+            vehicle: String::new(),
+            squad: Some("rifle_squad_b".into()),
+            mounted_in: Some("1-1".into()),
+            platoon: None,
+            ..unit("1-1A", 0.0, "")
+        };
+        let mut g = game_with(vec![carrier, squad], |p| {
+            p.features.buildings.push(terrain::features::Building {
+                id: 1,
+                ring: vec![[690.0, 990.0], [710.0, 990.0], [710.0, 1005.0], [690.0, 1005.0]],
+                props: terrain::features::BuildingProps { height_m: 6.0, class: sim_data::BuildingClass::Masonry },
+            });
+        });
+        let id = |g: &Game, cs: &str| g.picture().platoons.iter().find(|p| p.callsign == cs).unwrap().id;
+        let at_cp = |g: &mut Game, p: PlatoonId, cp: [f64; 2]| -> Vec<(String, bool)> {
+            select(g, Some(p));
+            g.plan_add_cp(cp);
+            g.sync_drafts();
+            let sid = g.plan.as_ref().unwrap().plan.steps.last().unwrap().id;
+            let (_, items) = g.plan_cp_menu(sid);
+            let acts = items.into_iter().find(|i| i.label == "AT CP").unwrap().sub;
+            acts.into_iter().map(|i| (i.label, i.enabled)).collect()
+        };
+        let (p1, p1d) = (id(&g, "1"), id(&g, "1-D"));
+        let carriers = at_cp(&mut g, p1, [700.0, 800.0]);
+        assert!(carriers.contains(&("DISMOUNT".into(), true)) && carriers.contains(&("MOUNT".into(), true)));
+        let squads = at_cp(&mut g, p1d, [700.0, 997.0]);
+        assert!(squads.contains(&("OCCUPY BUILDING".into(), true)), "{squads:?}");
+        assert!(!squads.iter().any(|(l, _)| l == "FACE..." || l == "SMOKE SCREEN" || l == "DISMOUNT"), "{squads:?}");
+        let open = at_cp(&mut g, p1d, [700.0, 1300.0]);
+        assert!(open.contains(&("OCCUPY BUILDING".into(), false)), "no house near the CP: {open:?}");
     }
 
     #[test]

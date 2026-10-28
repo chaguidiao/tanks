@@ -89,6 +89,16 @@ impl BakedMap {
         (id as usize).checked_sub(1).and_then(|k| self.buildings.get(k))
     }
 
+    /// A building squads can enter at `at`, else the one whose centroid is nearest within
+    /// `radius` m (a plan checkpoint placed beside a house).
+    pub fn enterable_building_near(&self, at: Vec2, radius: f64) -> Option<&BakedBuilding> {
+        if let Some(b) = self.building_at(at[0], at[1]).filter(|b| !b.entrances.is_empty()) {
+            return Some(b);
+        }
+        let d = |b: &BakedBuilding| libm::hypot(b.centroid[0] as f64 - at[0], b.centroid[1] as f64 - at[1]);
+        self.buildings.iter().filter(|b| !b.entrances.is_empty() && d(b) <= radius).min_by(|a, b| d(a).total_cmp(&d(b)))
+    }
+
     /// Where a foot route into a building should end: the centre of the building's cell that is
     /// open on the foot raster (interior or entrance) nearest its centroid. `None` if the map has
     /// no foot raster or the building cannot be entered.

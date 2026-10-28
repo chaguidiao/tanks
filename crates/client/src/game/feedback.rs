@@ -73,6 +73,7 @@ impl Game {
             Tool::AdjustFire => Some("LMB ADJUST FIRE TO HERE · RMB / ESC CANCEL".to_owned()),
             Tool::BattlePosition { centre: None } => Some("LMB PLACE BP CENTRE · RMB CANCEL · [ ] RADIUS".to_owned()),
             Tool::BattlePosition { .. } => Some("LMB SET THREAT DIRECTION · RMB CANCEL · [ ] RADIUS".to_owned()),
+            Tool::OccupyBuilding => Some("LMB BUILDING TO OCCUPY · RMB / ESC CANCEL".to_owned()),
             Tool::Viewshed => Some("LMB VIEWSHED FROM HERE · V / ESC CLOSE".to_owned()),
             Tool::Los { .. } => Some("LMB PLACE LOS POINT · ESC CLOSE".to_owned()),
             Tool::Graphic { kind: DrawKind::PhaseLine, .. } => {

@@ -65,6 +65,8 @@ pub enum Tool {
     BattlePosition {
         centre: Option<[f64; 2]>,
     },
+    /// Squads: the next left click picks the building to occupy.
+    OccupyBuilding,
     Viewshed,
     Los {
         a: Option<[f64; 2]>,
@@ -444,6 +446,25 @@ impl Game {
         Some([ps.iter().map(|p| p[0]).sum::<f64>() / n, ps.iter().map(|p| p[1]).sum::<f64>() / n])
     }
 
+    /// Every member of the selection is a squad (infantry orders on the card, TODO G8).
+    pub(crate) fn squads_selected(&self) -> bool {
+        let Some(to) = self.addressee() else { return false };
+        let units: Vec<&OwnUnit> = self.members_of(to).iter().filter_map(|m| self.picture().unit(*m)).collect();
+        !units.is_empty() && units.iter().all(|u| u.squad.is_some())
+    }
+
+    /// Order the selected squads into the building at `at` (or the nearest one a few metres
+    /// off). False if there is none they can enter.
+    fn occupy_building_at(&mut self, at: [f64; 2]) -> bool {
+        let Some(to) = self.addressee() else { return false };
+        let Some(b) = self.sim.map().enterable_building_near(at, 15.0) else { return false };
+        let (id, c) = (b.id, [b.centroid[0] as f64, b.centroid[1] as f64]);
+        let cs = self.addressee_cs(to);
+        self.radio(format!("TO {cs}: OCCUPY BUILDING AT GRID {}.", format::grid(c)));
+        self.order(Command::OccupyBuilding { to, building: id });
+        true
+    }
+
     /// Move the selection to `dest` through checkpoints `via` (route with checkpoints).
     pub fn issue_move(&mut self, via: Vec<[f64; 2]>, dest: [f64; 2]) {
         self.issue_move_at(via, dest, self.current_speed());
@@ -453,14 +474,10 @@ impl Game {
     pub fn issue_move_at(&mut self, via: Vec<[f64; 2]>, dest: [f64; 2], speed_limit_mps: Option<f64>) {
         // Squads sent onto a building occupy it (TODO B7).
         if via.is_empty()
-            && let Some(to) = self.addressee()
-            && self.members_of(to).iter().filter_map(|m| self.picture().unit(*m)).all(|u| u.squad.is_some())
-            && let Some(b) = self.sim.map().building_at(dest[0], dest[1]).filter(|b| !b.entrances.is_empty())
+            && self.squads_selected()
+            && self.sim.map().building_at(dest[0], dest[1]).is_some_and(|b| !b.entrances.is_empty())
+            && self.occupy_building_at(dest)
         {
-            let id = b.id;
-            let cs = self.addressee_cs(to);
-            self.radio(format!("TO {cs}: OCCUPY BUILDING AT GRID {}.", format::grid(dest)));
-            self.order(Command::OccupyBuilding { to, building: id });
             return;
         }
         let start = self.selection_centre();
@@ -935,6 +952,11 @@ impl Game {
                     self.adjust_fire(world);
                     self.tool = Tool::None;
                 }
+                Tool::OccupyBuilding => {
+                    if self.occupy_building_at(world) {
+                        self.tool = Tool::None;
+                    }
+                }
                 Tool::BattlePosition { centre: None } => self.tool = Tool::BattlePosition { centre: Some(world) },
                 Tool::BattlePosition { centre: Some(c) } => {
                     let facing = ai::drive::bearing(c, world);
@@ -994,6 +1016,7 @@ impl Game {
                 | Tool::CallFire
                 | Tool::AdjustFire
                 | Tool::BattlePosition { .. }
+                | Tool::OccupyBuilding
                 | Tool::Graphic { .. }
                 | Tool::MoveGraphic { .. }
                 | Tool::PlanCp
@@ -1149,6 +1172,7 @@ impl Game {
             Cmd::Ammo => self.request_posture(Posture::Ammo),
             Cmd::OnContact => self.request_posture(Posture::OnContact),
             Cmd::Graphics => self.graphics_request = true,
+            Cmd::BattlePosition if self.squads_selected() => self.toggle_tool(Tool::OccupyBuilding),
             Cmd::BattlePosition if self.sel_platoon.is_some() => {
                 self.toggle_tool(Tool::BattlePosition { centre: None });
                 self.append_tool = self.shift_held && matches!(self.tool, Tool::BattlePosition { .. });
@@ -1514,8 +1538,18 @@ impl Game {
         ));
     }
 
-    /// The supply point a RESUPPLY order sends platoon `p` to: the one it is already going to,
-    /// else the nearest to the platoon.
+    /// Platoon `p` as troops: (a dismount platoon: every member a squad, its carriers carry
+    /// squads).
+    pub(crate) fn troop_roles(&self, p: PlatoonId) -> (bool, bool) {
+        let pic = self.picture();
+        let Some(pv) = pic.platoon(p) else { return (false, false) };
+        let units: Vec<&OwnUnit> = pv.members.iter().filter_map(|m| pic.unit(*m)).collect();
+        let squads = !units.is_empty() && units.iter().all(|u| u.squad.is_some());
+        let carries =
+            pic.own.iter().any(|u| u.squad.as_ref().and_then(|s| s.carrier).is_some_and(|c| pv.members.contains(&c)));
+        (squads, carries)
+    }
+
     /// DISMOUNT / MOUNT for the selected platoon (plan M8B-INFANTRY §6, TODO B14): (platoon,
     /// mount?, squads concerned). A carrier platoon with squads aboard dismounts them; a dismount
     /// platoon, or a carrier platoon whose squads are all out, mounts.
@@ -1543,6 +1577,8 @@ impl Game {
         (out > 0).then_some((p, true, out))
     }
 
+    /// The supply point a RESUPPLY order sends platoon `p` to: the one it is already going to,
+    /// else the nearest to the platoon.
     fn resupply_point(&self, p: PlatoonId) -> Option<&sim::view::SupplyPointView> {
         let pic = self.picture();
         if let Some(id) = pic.platoon(p).and_then(|v| v.resupply_at) {
@@ -2253,6 +2289,7 @@ impl Game {
             Tool::SmokeRound => "SMOKE ROUND: CLICK THE AIM POINT   (RIGHT CLICK / ESC CANCEL)".into(),
             Tool::BattlePosition { centre: None } => "BATTLE POSITION: CLICK CENTRE   [ ] RADIUS".into(),
             Tool::BattlePosition { .. } => "BATTLE POSITION: CLICK THREAT DIRECTION".into(),
+            Tool::OccupyBuilding => "OCCUPY BUILDING: CLICK A BUILDING   (RIGHT CLICK / ESC CANCEL)".into(),
             Tool::Viewshed => "VIEWSHED: CLICK OBSERVER POINT   (V / ESC CLOSE)".into(),
             Tool::Los { .. } => "LINE OF SIGHT: CLICK TWO POINTS".into(),
             Tool::Graphic { kind: DrawKind::PhaseLine, .. } => {
@@ -2471,15 +2508,20 @@ impl Game {
                         .tip("HALT IN PLACE (KEEPS THE ROUTE: PRESS AGAIN TO RESUME)")
                 }
             }),
-            (
-                2,
+            (2, if self.squads_selected() {
+                b("OCCUPY BLDG", Cmd::BattlePosition)
+                    .key("B")
+                    .value("CLICK")
+                    .active(self.tool == Tool::OccupyBuilding)
+                    .tip("SQUADS OCCUPY A BUILDING: CLICK IT (OR RIGHT CLICK IT); THEY ENTER BY ITS DOORS, AS MANY AS ITS FLOOR AREA HOLDS")
+            } else {
                 b("BATTLE POS", Cmd::BattlePosition)
                     .key("B")
                     .value(format!("{:.0} M", self.bp_radius))
                     .enabled(plt)
                     .active(is(&Tool::BattlePosition { centre: None }))
-                    .tip("OCCUPY A BATTLE POSITION HULL-DOWN: CLICK CENTRE, THEN THREAT DIRECTION (SHIFT ADDS IT TO THE ORDERS)"),
-            ),
+                    .tip("OCCUPY A BATTLE POSITION HULL-DOWN: CLICK CENTRE, THEN THREAT DIRECTION (SHIFT ADDS IT TO THE ORDERS)")
+            }),
             (
                 3,
                 b("ENGAGE", Cmd::Engage)

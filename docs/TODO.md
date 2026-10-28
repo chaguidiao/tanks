@@ -80,7 +80,7 @@ Scope: abstracted per `docs/plans/M8B-INFANTRY.md` §0. Tank combat is the theme
 - [x] B18 Replay/save versioning for the grown entity model (old replays load or are rejected cleanly, as decided in Z6). (Done 2026-10-24: `sim::SIM_VERSION`, `Replay.sim_version`; `Replay::from_ron` rejects another version with "replay from sim version N; this build is M")
 - Exit (met 2026-10-24; golden hash unchanged, no behaviour change without squads): IFV platoon dismounts and remounts by player command; tank vs infantry and infantry vs infantry unit tests; infantry detection CSV; golden hash updated deliberately.
 
-- Deferred from M8b-a (2026-10-24), small: squads ignore plans (`SetPlan` on a dismount platoon does nothing; G8), a `PlatoonMove` to a dismount platoon whose squads are all mounted is dropped, no small-arms resupply, ineffective squads do not withdraw on their own, squads do not use the radio delay for their own position (they report like vehicles), no fire-team split.
+- Deferred from M8b-a (2026-10-24), small: ~~squads ignore plans~~ and ~~a `PlatoonMove` to a mounted dismount platoon~~ (both done with G8), no small-arms resupply, ineffective squads do not withdraw on their own, squads do not use the radio delay for their own position (they report like vehicles), no fire-team split.
 
 ## M8b-cal — Infantry calibration and era data (research 2026-10-24)
 Notes, sources and proposed values: `docs/plans/M8B-CALIBRATION-NOTES.md`. §4 questions decided 2026-10-24.
@@ -157,7 +157,7 @@ M8f1 (right after infantry, kept small so infantry is playable): F11, F5, plus B
 
 ## M8g1 / M8g2 — Plans and control UX
 M8g1 (with M8f1): G8 and G9. M8g2: G1–G7 after M8f2.
-- [ ] G8 Plan actions MOUNT/DISMOUNT and infantry orders in the command card, with hotkeys and tooltips (builds on B14)
+- [x] G8 Plan actions MOUNT/DISMOUNT and infantry orders in the command card, with hotkeys and tooltips (builds on B14). **Done 2026-10-28**: plans run for dismount platoons (legs on foot, on line); CP actions DISMOUNT (U) and MOUNT (K) for carrier platoons and OCCUPY BUILDING (O) for dismount platoons, the plan holding until the drill is over (timeout 300 s); vehicle-only actions are not offered to squads; a move or plan given to a dismount platoon while its squads ride starts once they are out (DISMOUNT no longer clears it; MOUNT, from the card or a plan, ends it); card cell B is OCCUPY BLDG (click a building) when squads are selected; `SIM_VERSION` 4; tests `m8g.rs`
 - [ ] G9 Scenario editor placement of infantry and teams (part of J5)
 - [ ] G1 Phase-line-driven plans on top of the plan model — §13.2
 - [ ] G2 Plans for several platoons at once — §13.1 UX pass, Plans

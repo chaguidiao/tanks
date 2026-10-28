@@ -758,6 +758,7 @@ impl Sim {
                 loadouts: &self.loadouts,
                 ammo: &self.ammo,
                 logistics: &self.data.logistics,
+                recalled: Vec::new(),
             };
             platoon_ai::step(&mut self.platoons, &mut ctx);
             for (side, cmd) in sim_cmds {
@@ -1680,7 +1681,11 @@ impl Sim {
                 if !acted {
                     return;
                 }
-                for pid in carrier_pid.into_iter().chain(dismount_pids) {
+                // A dismount keeps the dismount platoon's own plan (it starts once the squads are
+                // out); a mount ends it.
+                let mount = matches!(c.cmd, Command::Mount { .. });
+                let ended: Vec<PlatoonId> = if mount { dismount_pids } else { Vec::new() };
+                for pid in carrier_pid.into_iter().chain(ended) {
                     if let Some(x) = self.platoon_mut(c.side, pid) {
                         x.halt();
                         x.plan = None;
@@ -1867,7 +1872,7 @@ impl Sim {
 /// Behaviour version of the simulation. A replay records it and is only played back by a build
 /// with the same version: bump it whenever a change makes an old command log play out
 /// differently (plan M8B-INFANTRY §8, DESIGN.md §14 #29). Replays from before versioning read as 0.
-pub const SIM_VERSION: u32 = 3;
+pub const SIM_VERSION: u32 = 4;
 
 /// A recorded game: scenario id plus the external command log. Re-simulating it reproduces the
 /// game exactly (determinism), which is what the after-action review and replays rely on.

@@ -394,13 +394,34 @@ pub enum ContactReaction {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum StepAction {
-    Face { bearing: f64 },
-    OccupyBp { radius_m: f64, facing: f64, kind: PositionKind },
+    Face {
+        bearing: f64,
+    },
+    OccupyBp {
+        radius_m: f64,
+        facing: f64,
+        kind: PositionKind,
+    },
     SmokeScreen,
     EngineSmoke(bool),
-    FireSmoke { at: Vec2, rounds: u32 },
-    CallForFire { battery: u32, at: Vec2, kind: FireKind, volleys: u32 },
+    FireSmoke {
+        at: Vec2,
+        rounds: u32,
+    },
+    CallForFire {
+        battery: u32,
+        at: Vec2,
+        kind: FireKind,
+        volleys: u32,
+    },
     Report,
+    /// Carrier platoon: its squads leave by the ramp; the plan holds until the drill is over.
+    Dismount,
+    /// Carrier platoon: its squads walk back and board; the plan holds until they are aboard.
+    Mount,
+    /// Dismount platoon: occupy the building at (or nearest to) the checkpoint; the plan holds
+    /// until the squads are inside or stopped.
+    OccupyBuilding,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -20,6 +20,11 @@ use crate::{DT, dist};
 const ARRIVE_TOLERANCE_M: f64 = 60.0;
 /// Already at the first checkpoint of a leg (m): no move is issued.
 const AT_CHECKPOINT_M: f64 = 25.0;
+/// A plan holding for a troop drill (dismount, mount, occupy a building) goes on after this
+/// long even if the drill has not ended, e.g. a squad that cannot reach its carrier (s).
+const DRILL_TIMEOUT_S: f64 = 300.0;
+/// A checkpoint's OCCUPY BUILDING takes a building whose centre is this close (m).
+pub const OCCUPY_BUILDING_RADIUS_M: f64 = 60.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Phase {
@@ -32,6 +37,9 @@ pub enum Phase {
     Setting { since: u64 },
     /// Holding at the cursor step. `signs` = reference sides for line-crossing conditions.
     Waiting { since: u64, signs: Vec<f64> },
+    /// A troop drill its actions started (dismount, mount, occupy a building) is under way;
+    /// `released` = started by the release actions (then the step is done when it ends).
+    Drill { since: u64, released: bool },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,7 +90,7 @@ impl PlanState {
                 let last = steps.len() - 1;
                 (self.cursor..=last).find(|&i| i == last || steps[i].is_stop()).unwrap_or(last)
             }
-            Phase::Setting { .. } | Phase::Waiting { .. } => return,
+            Phase::Setting { .. } | Phase::Waiting { .. } | Phase::Drill { .. } => return,
         };
         for s in &mut self.plan.steps[self.cursor..=stop.max(self.cursor)] {
             set(&mut s.leg);
@@ -119,6 +127,11 @@ impl PlanState {
             Phase::Setting { since } => {
                 h.u8(3);
                 h.u64(*since);
+            }
+            Phase::Drill { since, released } => {
+                h.u8(4);
+                h.u64(*since);
+                h.u8(*released as u8);
             }
         }
         h.u64(self.passed.len() as u64);
@@ -169,6 +182,16 @@ fn run(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx) -> bool {
                 PlatoonOrder::Occupy { .. } => return true,
                 _ => return false,
             },
+            Phase::Drill { since, released } => {
+                let timed_out = (ctx.tick - since) as f64 * DT >= DRILL_TIMEOUT_S;
+                if since == ctx.tick || (troops_busy(p, ctx) && !timed_out) {
+                    return true;
+                }
+                let done = if released { advance(st, p, ctx) } else { finish_arrival(st, p, ctx, since) };
+                if !done {
+                    return false;
+                }
+            }
             Phase::Start => {
                 if !issue_leg(st, p, ctx) {
                     return true;
@@ -201,7 +224,10 @@ fn run(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx) -> bool {
                 }
                 let (actions, at) = (step.on_release.clone(), step.at);
                 let n = st.cursor as u16 + 1;
-                run_actions(&actions, n, at, p, ctx);
+                if run_actions(&actions, n, at, p, ctx) {
+                    st.phase = Phase::Drill { since: ctx.tick, released: true };
+                    return true;
+                }
                 if !advance(st, p, ctx) {
                     return false;
                 }
@@ -216,6 +242,13 @@ fn run(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx) -> bool {
 /// the nearest survivor can be a slot or two away from it.
 fn arrived(p: &Platoon, ctx: &Ctx, at: crate::Vec2) -> bool {
     let d = &ctx.doctrines[p.side.0 as usize];
+    if p.dismount {
+        // Squads end on line across the move, `squad_spacing_m` apart (crate::infantry).
+        let on_foot: Vec<usize> =
+            p.members.iter().copied().filter(|&k| ctx.world.can_move(k) && !ctx.world.mounted(k)).collect();
+        let half = on_foot.len().saturating_sub(1) as f64 / 2.0 * d.infantry.squad_spacing_m.get();
+        return on_foot.iter().any(|&k| dist(ctx.world.transform[k].pos, at) <= ARRIVE_TOLERANCE_M + half);
+    }
     let spacing = d.spacing_m.get();
     let slots = &d.formation(p.formation).slots;
     p.members.iter().enumerate().filter(|&(_, &k)| ctx.world.can_move(k)).any(|(i, &k)| {
@@ -308,7 +341,10 @@ fn arrive(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx, stop: usize) -> bo
     if step.wait.is_some() {
         ctx.report(p, PlatoonReport::AtCheckpoint { n, waiting: true });
     }
-    run_actions(&step.actions, n, step.at, p, ctx);
+    if run_actions(&step.actions, n, step.at, p, ctx) {
+        st.phase = Phase::Drill { since: ctx.tick, released: false };
+        return true;
+    }
     if matches!(p.order, PlatoonOrder::Occupy { reported: false, .. }) {
         st.phase = Phase::Setting { since: ctx.tick };
         return true;
@@ -367,9 +403,23 @@ fn advance(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx) -> bool {
     true
 }
 
-fn run_actions(actions: &[StepAction], n: u16, at: crate::Vec2, p: &mut Platoon, ctx: &mut Ctx) {
+/// Carry out a step's actions. True = a troop drill started and the plan holds for it.
+fn run_actions(actions: &[StepAction], n: u16, at: crate::Vec2, p: &mut Platoon, ctx: &mut Ctx) -> bool {
     let to = Addressee::Platoon(p.id);
+    let mut drill = false;
     for a in actions {
+        // Squads have no turret, smoke grenades or hull-down positions.
+        let vehicle_only = matches!(
+            a,
+            StepAction::Face { .. }
+                | StepAction::OccupyBp { .. }
+                | StepAction::SmokeScreen
+                | StepAction::EngineSmoke(_)
+                | StepAction::FireSmoke { .. }
+        );
+        if p.dismount && vehicle_only {
+            continue;
+        }
         match a {
             StepAction::Face { bearing } => {
                 for k in p.alive_members(ctx.world) {
@@ -406,8 +456,52 @@ fn run_actions(actions: &[StepAction], n: u16, at: crate::Vec2, p: &mut Platoon,
                     Command::CallForFire { battery: *battery, at: *at, kind: *kind, volleys: *volleys },
                 ));
             }
+            // ATP 3-21.71 (2010) ch. 3: dismount at the dismount point, establish local security.
+            StepAction::Dismount if !p.dismount => {
+                let carriers = p.alive_members(ctx.world);
+                drill |= crate::infantry::order_dismount(ctx.world, ctx.vehicles, &carriers);
+            }
+            // ATP 3-21.71 ch. 3: mount at the pick-up point; the squads' own orders end.
+            StepAction::Mount if !p.dismount => {
+                let squads: Vec<usize> = (0..ctx.world.len())
+                    .filter(|&q| {
+                        ctx.world.squad[q].as_ref().and_then(|s| s.carrier).is_some_and(|c| p.members.contains(&c))
+                    })
+                    .collect();
+                if !crate::infantry::order_mount(ctx.world, ctx.vehicles, &squads).is_empty() {
+                    ctx.recalled.push(p.id);
+                    drill = true;
+                }
+            }
+            StepAction::OccupyBuilding if p.dismount => {
+                if let Some(b) = ctx.map.enterable_building_near(at, OCCUPY_BUILDING_RADIUS_M) {
+                    ctx.sim_cmds.push((p.side, Command::OccupyBuilding { to, building: b.id }));
+                    drill = true;
+                }
+            }
+            StepAction::Dismount | StepAction::Mount | StepAction::OccupyBuilding => {}
         }
     }
+    drill
+}
+
+/// A troop drill of the platoon is under way: a carrier still in its ramp drill, a squad of its
+/// carriers walking back to board, or (dismount platoon) a squad still on its way.
+fn troops_busy(p: &Platoon, ctx: &Ctx) -> bool {
+    let w = &ctx.world;
+    let ramp =
+        p.members.iter().any(|&c| w.alive(c) && w.carrier[c].as_ref().is_some_and(|cs| cs.dismounting.is_some()));
+    let boarding = (0..w.len()).any(|q| {
+        w.alive(q)
+            && w.squad[q]
+                .as_ref()
+                .is_some_and(|s| s.boarding.is_some() && s.carrier.is_some_and(|c| p.members.contains(&c)))
+    });
+    let walking = p.dismount
+        && p.members
+            .iter()
+            .any(|&k| w.can_move(k) && !w.mounted(k) && w.ai[k].as_ref().is_some_and(|a| a.order != Order::Idle));
+    ramp || boarding || walking
 }
 
 /// Is the wait / branch condition set met in the side's picture (fog of war: picture only)?

@@ -13,7 +13,7 @@
 //!   the contact has been quiet for a while.
 
 use ai::formation::{along, length, route_slot, slot_position};
-use ai::picture::{Condition, ContactReaction, PerceivedWorld, SideId};
+use ai::picture::{Condition, ContactReaction, PerceivedWorld, PlatoonId, SideId};
 use ai::position::{BpQuery, Candidate, assign, evaluate};
 use sim_data::{DoctrinePack, Technique, VehicleDef};
 use terrain::BakedMap;
@@ -64,6 +64,9 @@ pub struct Ctx<'a> {
     pub loadouts: &'a [Vec<usize>],
     pub ammo: &'a [sim_data::AmmoDef],
     pub logistics: &'a sim_data::LogisticsModel,
+    /// Carrier platoons whose plans called their squads back aboard this tick: the orders and
+    /// plans of their dismount platoons end.
+    pub recalled: Vec<PlatoonId>,
 }
 
 impl Ctx<'_> {
@@ -98,7 +101,9 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
         }
         p.last_strength = strength;
         if p.dismount {
-            continue; // dismount platoons: crate::infantry
+            // Orders of dismount platoons: crate::infantry; plans run here like any platoon's.
+            crate::plan::step(p, ctx);
+            continue;
         }
         let doctrine = ctx.doctrines[p.side.0 as usize].clone();
         if !matches!(p.order, PlatoonOrder::Move { .. }) {
@@ -114,6 +119,13 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
             PlatoonOrder::Contact => contact_step(p, ctx),
             PlatoonOrder::Resupply { .. } => resupply_step(p, ctx),
             PlatoonOrder::None => {}
+        }
+    }
+    for pid in std::mem::take(&mut ctx.recalled) {
+        for d in platoons.iter_mut().filter(|d| d.dismount && d.carrier_platoon == Some(pid)) {
+            d.order = PlatoonOrder::None;
+            d.plan = None;
+            d.held = None;
         }
     }
 }
