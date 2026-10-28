@@ -48,6 +48,15 @@ pub fn hostile_infantry(f: &mut Frame, p: P2, c: Rgba, scale: f32) {
     f.line([p[0] - d, p[1] + d], [p[0] + d, p[1] - d], 1.5, c);
 }
 
+/// Anti-armour modifier (APP-6D: an inverted V inside the infantry frame) for anti-tank missile
+/// teams and squads seen launching, at `scale`; `friendly` picks the rectangle's or the diamond's
+/// proportions.
+pub fn anti_armour(f: &mut Frame, p: P2, c: Rgba, scale: f32, friendly: bool) {
+    let (dx, dy) = if friendly { (W * scale / 2.0, H * scale / 2.0) } else { (H * 0.45 * scale, H * 0.45 * scale) };
+    f.line([p[0] - dx, p[1] + dy], [p[0], p[1] - dy], 1.5, c);
+    f.line([p[0], p[1] - dy], [p[0] + dx, p[1] + dy], 1.5, c);
+}
+
 /// Squad echelon amplifier: one dot above a frame of half-height `h2`.
 pub fn echelon_squad(f: &mut Frame, p: P2, h2: f32, c: Rgba) {
     f.circle([p[0], p[1] - h2 - 4.0], 1.6, c);

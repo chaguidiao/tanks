@@ -139,6 +139,17 @@ pub struct SquadView {
     pub ineffective: bool,
     /// Bursts left, all weapons.
     pub bursts: u32,
+    /// Rockets and missiles (plan M8B-AT-TEAMS §7).
+    pub anti_armour: Vec<LauncherView>,
+}
+
+/// One anti-armour weapon type of a squad and its rounds left.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LauncherView {
+    pub name: String,
+    pub rounds: u32,
+    /// Guided missile (an anti-tank missile team) rather than a rocket.
+    pub missile: bool,
 }
 
 /// Where a vehicle is in a service-station resupply (M8c; FM 17-15 (1996) service-station method).
@@ -186,6 +197,8 @@ pub struct Contact {
     pub reported_by: EntityId,
     /// Reported destroyed by an own unit.
     pub destroyed: bool,
+    /// An anti-tank weapon: identified as a missile team, or seen launching (plan M8B-AT-TEAMS §4).
+    pub anti_armour: bool,
 }
 
 /// A shot this side knows about: its own, or one from a known contact.

@@ -39,7 +39,11 @@ pub struct PendingReport {
     pub kind: Option<ContactKind>,
     pub type_name: Option<String>,
     pub range_m: f64,
+    pub anti_armour: bool,
 }
+
+/// A squad seen launching this recently is reported as an anti-tank weapon (ticks, 60 s).
+const LAUNCH_REPORT: u64 = 60 * crate::TICK_HZ as u64;
 
 pub struct SideState {
     pub picture: PerceivedWorld,
@@ -107,6 +111,11 @@ impl SideState {
             .flatten();
         let kind = (level >= ContactLevel::Recognised)
             .then(|| if world.squad[target].is_some() { ContactKind::Infantry } else { ContactKind::Vehicle });
+        let launched = world.launch[target].is_some_and(|(lt, _)| tick.saturating_sub(lt) <= LAUNCH_REPORT);
+        let missile_team = level == ContactLevel::Identified
+            && world.squad[target].as_ref().is_some_and(|s| {
+                squads[s.def].anti_armour.iter().any(|w| w.class == sim_data::AntiArmourClass::Missile)
+            });
         self.pending.push(PendingReport {
             deliver_tick: tick + (delay / DT) as u64,
             observer,
@@ -116,6 +125,7 @@ impl SideState {
             kind,
             type_name,
             range_m: r,
+            anti_armour: launched || missile_team,
         });
     }
 
@@ -161,6 +171,7 @@ impl SideState {
                     if r.kind.is_some() {
                         c.kind = r.kind;
                     }
+                    c.anti_armour |= r.anti_armour;
                     (cid, upgraded)
                 }
                 None => {
@@ -176,6 +187,7 @@ impl SideState {
                         last_report_s: now,
                         reported_by: reporter,
                         destroyed: false,
+                        anti_armour: r.anti_armour,
                     });
                     (cid, true)
                 }
@@ -381,6 +393,18 @@ impl SideState {
                         building: s.in_building,
                         ineffective: s.ineffective,
                         bursts: s.weapons.iter().map(|x| x.bursts).sum(),
+                        anti_armour: s
+                            .anti_armour
+                            .iter()
+                            .map(|a| {
+                                let w = &d.anti_armour[a.def];
+                                ai::picture::LauncherView {
+                                    name: w.name.clone(),
+                                    rounds: a.rounds(),
+                                    missile: w.class == sim_data::AntiArmourClass::Missile,
+                                }
+                            })
+                            .collect(),
                     }
                 }),
             });

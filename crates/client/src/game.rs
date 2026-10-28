@@ -2008,6 +2008,9 @@ impl Game {
                 _ if infantry => symbols::hostile_infantry(f, p, hostile, symbols::SQUAD_SCALE),
                 _ => symbols::hostile_armour(f, p, hostile),
             }
+            if c.anti_armour && c.level > ContactLevel::Detected {
+                symbols::anti_armour(f, p, hostile, symbols::SQUAD_SCALE, false);
+            }
             if c.destroyed {
                 symbols::destroyed(f, p, Rgba(220, 200, 180, fade));
             }
@@ -2073,6 +2076,9 @@ impl Game {
                     );
                 }
                 symbols::friendly_infantry(f, p, style::FRIENDLY, symbols::SQUAD_SCALE);
+                if s.anti_armour.iter().any(|w| w.missile) {
+                    symbols::anti_armour(f, p, style::FRIENDLY, symbols::SQUAD_SCALE, true);
+                }
                 symbols::echelon_squad(f, p, 6.5, style::FRIENDLY);
                 if s.ineffective {
                     symbols::damaged(f, p, style::AMBER);
@@ -2889,6 +2895,12 @@ impl Game {
         out.push((row("GRID", format!("{}   HDG {}", format::grid8(u.pos), format::mils(u.heading))), style::TEXT));
         out.push((row("SPEED", format!("{} KM/H", format::kmh(u.speed))), style::TEXT));
         out.push((row("AMMO", format!("{} BURSTS   WEAPONS {}", s.bursts, weapons_str(u.weapons))), style::TEXT));
+        // Rockets and missiles left (plan M8B-AT-TEAMS §7).
+        if !s.anti_armour.is_empty() {
+            let at: Vec<String> = s.anti_armour.iter().map(|w| format!("{} {}", w.name, w.rounds)).collect();
+            let empty = s.anti_armour.iter().all(|w| w.rounds == 0);
+            out.push((row("AT", at.join("   ")), if empty { style::AMBER } else { style::TEXT }));
+        }
         let sup = if u.suppression > 0.6 {
             "PINNED"
         } else if u.suppression > 0.3 {
