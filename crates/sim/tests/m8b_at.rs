@@ -165,10 +165,9 @@ fn a_destroyed_tank_is_no_target_and_rounds_are_counted() {
 }
 
 /// A Red MR squad (1980) dug in in a masonry house at (600, 600); a Blue M1 drives east past it
-/// on y = 600 + `offset`. The crew is unaware (holds fire): with its weapons free today it finds
-/// the squad at 350-450 m and clears the house with HE first, which is the open detection step
-/// (TODO B24 D2: search time with narrow-field sights).
-fn house_ambush(offset: f64, seed: u64) -> Sim {
+/// on y = 600 + `offset`. An unaware crew holds fire; an `alert` one has its weapons free and
+/// searches for the house (TODO B26, B33).
+fn house_ambush(offset: f64, seed: u64, alert: bool) -> Sim {
     let ds = data();
     let m = map_with(&ds, 300, 400, "grassland", |p| {
         p.features.buildings.push(building(1, 594.0, 594.0, 606.0, 606.0, sim_data::BuildingClass::Masonry));
@@ -181,7 +180,9 @@ fn house_ambush(offset: f64, seed: u64) -> Sim {
     let mut sim = Sim::new(&sc, ds, m).unwrap();
     sim.set_ai_enabled(RED, false);
     let tank = sim.truth().id[0];
-    hold(&mut sim, BLUE, tank);
+    if !alert {
+        hold(&mut sim, BLUE, tank);
+    }
     // A prepared ambush: the squad is already in the house, dug in, before the tank comes.
     let w = sim.truth_mut();
     w.transform[1].pos = [600.0, 600.0];
@@ -204,7 +205,7 @@ fn an_rpg_team_in_a_house_kills_a_tank_passing_its_flank() {
     let mut early = 0;
     for seed in 1..=16 {
         let offset = 100.0 + (seed % 3) as f64 * 25.0;
-        let mut sim = house_ambush(offset, seed);
+        let mut sim = house_ambush(offset, seed, false);
         let squad = sim.truth().id[1];
         for _ in 0..(180 * sim::TICK_HZ) {
             for e in sim.step() {
@@ -223,6 +224,38 @@ fn an_rpg_team_in_a_house_kills_a_tank_passing_its_flank() {
     println!("A10: tank killed or disabled in {out}/16");
     assert!(out > 8, "tank killed or disabled in {out}/16");
     assert_eq!(early, 0, "no rocket while the tank still shows its front");
+}
+
+#[test]
+fn an_alert_crew_still_meets_the_house_ambush_often() {
+    // TODO B26 after B33 (2026-10-28): the squad is concealed in the room (camouflage 0.5) and
+    // holds its rifles at the tank, so its rockets open the ambush. An alert crew (weapons free)
+    // still finds the lone house first, at 200-450 m by the commander's eye, and the ambush
+    // succeeds in about 3/16; this guards against a regression (it was 1/16).
+    let (mut out, mut found_first) = (0, 0);
+    for seed in 1..=16 {
+        let offset = 100.0 + (seed % 3) as f64 * 25.0;
+        let mut sim = house_ambush(offset, seed, true);
+        let squad = sim.truth().id[1];
+        let mut fired_first = None;
+        for _ in 0..(180 * sim::TICK_HZ) {
+            for e in sim.step() {
+                if let Event::Fired { unit, .. } = e
+                    && fired_first.is_none()
+                {
+                    fired_first = Some(unit != squad);
+                }
+            }
+        }
+        if fired_first == Some(true) {
+            found_first += 1;
+        }
+        if sim.truth().condition[0] != Condition::Operational {
+            out += 1;
+        }
+    }
+    println!("A10 alert: tank killed or disabled in {out}/16, tank fired first in {found_first}/16");
+    assert!(out >= 2, "tank killed or disabled in {out}/16");
 }
 
 /// Four Blue M1s (1985) halted 1,500 m from a dug-in Red Fagot team on open ground.

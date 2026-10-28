@@ -8,8 +8,6 @@ Rules for every item (CLAUDE.md): data in `data/**/*.ron` with source and confid
 
 ## Waiting on the user (decisions; check here first)
 Added 2026-10-21. Remove a line when it is decided, and record the decision on the item it belongs to.
-- B33 (2026-10-28): add a concealment factor for squads in buildings so the house ambush can be re-checked with an alert crew (B26)? A tuning call; proposed after B24 D2 left B26 unchanged; folded into the M8f1 plan as decision 5
-- M8f1 plan (2026-10-28): `docs/plans/M8F1-INFANTRY-AI.md` §7 has six decisions with recommendations (close-ambush reaction, built-up avoidance, IFV dismount timing, AT teams moving after firing, B33, attack scope); F11, F5 and B13 start once they are agreed
 
 ## Phase map (v1.x = M8, v1.5 = M9, then v2+)
 
@@ -105,14 +103,14 @@ Plan: `docs/plans/M8B-AT-TEAMS.md`. Agreed 2026-10-24, with all 12 recommendatio
   - per-shot crosswind on rockets (ENG);
   - active protection (Drozd/Arena/Trophy class) and loitering munitions, for scenarios after 2005.
 - Deferred or open after M8b-b (2026-10-28):
-  - [ ] B26 With its weapons free, a tank finds a squad hidden in a house at 350-450 m within about 15 s and clears it with HE before the ambush is sprung (A10 then 1/16). Re-check A10 with the crew alert once B24 D2 (search time with narrow-field sights) is in; the test scripts an unaware crew until then. 2026-10-28, after D2: unchanged (alert crew 1/32): the commander's unaided view finds the window at 450 m in about 6 s; see B33
+  - [ ] B26 (2026-10-28, after B33 and the rifle-hold fix: alert crew 3/16; test `an_alert_crew_still_meets_the_house_ambush_often`. Next levers: clutter of many houses in a village, B34 hand-off) With its weapons free, a tank finds a squad hidden in a house at 350-450 m within about 15 s and clears it with HE before the ambush is sprung (A10 then 1/16). Re-check A10 with the crew alert once B24 D2 (search time with narrow-field sights) is in; the test scripts an unaware crew until then. 2026-10-28, after D2: unchanged (alert crew 1/32): the commander's unaided view finds the window at 450 m in about 6 s; see B33
   - [ ] B27 Check against primary copies: Isby's RPG-7 table (only a forum transcription seen), the 9M111M service date (1991 is an estimate), the AN/TAS-5 Dragon night tracker date (1981 estimate)
   - [ ] B28 Metis class (9K115) team not modelled (Fagot covers the Red medium missile); RPG-29 class not modelled
   - [ ] B29 Reactive armour on turret roofs (Kontakt-1 roof bricks, Kontakt-5) not modelled: top hits never meet ERA
   - [ ] B30 Operator in the loop applies to squad missiles only; a suppressed vehicle missile gunner is not checked
   - [ ] B31 A sprung team also fires at a front it cannot defeat (best margin): real gunners do not know the margin, but a "no shot below margin x" rule could save rounds
   - [ ] B32 Minimum arming distance of rockets (2-5 m) not modelled (no fight is that close)
-  - [ ] B33 Concealment of squads in buildings: men fire from back in the room (FM 3-06.11), but a squad in a building has camouflage 1.0, so the commander's unaided view resolves its window at 450 m in about 6 s (notes §2.5). A camouflage factor for `in_building` on optical and night channels, as D1 for dug-in squads; then re-check A10 with an alert crew (B26)
+  - [x] B33 **Done 2026-10-28** (`InfantryModel.camouflage_in_building` 0.5, optical and night channels). Re-checking A10 with an alert crew found the bigger cause: an ambush squad fired its rifles at the tank from 450 m and gave itself away; squads with anti-armour rounds left now hold small arms at vehicles until sprung (infantry targets unchanged). A10 alert crew: 1/16 → 3/16, unaware crew 13/16 unchanged; the tank still sees the lone house first (commander's eye at 200-450 m; thermal not decisive: ×0.25 on thermal changes nothing). Original text: Concealment of squads in buildings: men fire from back in the room (FM 3-06.11), but a squad in a building has camouflage 1.0, so the commander's unaided view resolves its window at 450 m in about 6 s (notes §2.5). A camouflage factor for `in_building` on optical and night channels, as D1 for dug-in squads; then re-check A10 with an alert crew (B26)
   - [ ] B34 Target hand-off: a contact already in the side's picture could be searched for without the D2 penalty by other crews (TC 3-20.31 fire commands, platoon fire distribution); today each crew searches on its own
 
 ## M8c — Logistics
@@ -142,7 +140,7 @@ Plan: `docs/plans/M8B-AT-TEAMS.md`. Agreed 2026-10-24, with all 12 recommendatio
 - Exit: UAS and degraded-comms scenarios; tests that UAS contacts arrive only via the picture.
 
 ## M8f1 / M8f2 — Commander AI and fire-support AI
-M8f1 (right after infantry, kept small so infantry is playable): F11, F5, plus B13 as the exit scenario. Plan: `docs/plans/M8F1-INFANTRY-AI.md` (draft 2026-10-28, decisions open). M8f2 (after M8c–e): F1, F2, F3, F4, F6, F7, F8, F10. F9 is tracked as Z4.
+M8f1 (right after infantry, kept small so infantry is playable): F11, F5, plus B13 as the exit scenario. Plan: `docs/plans/M8F1-INFANTRY-AI.md`, decisions agreed 2026-10-28 (§7: ON AMBUSH and BUILT-UP leg settings and an AMBUSHED branch condition; tank-only platoons always avoid built-up ground unless a leg says ENTER; B33 factor 0.5). M8f2 (after M8c–e): F1, F2, F3, F4, F6, F7, F8, F10. F9 is tracked as Z4.
 - [ ] F11 Reaction to infantry contacts: tanks use HE/coax and reverse out of close ambush, platoon avoids buildings without dismounted support, IFVs dismount at the right time — new
 - [ ] F1 Re-planning and COA choice (HTN/utility), HTN method library — §13.1 M5, M4, Phase 2
 - [ ] F2 OPFOR use of plans — §13.1 Plans, Phase 2

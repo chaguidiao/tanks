@@ -246,8 +246,11 @@ pub struct InfantryModel {
     pub optical_contrast: Stat<f64>,
     /// Further multiplier on optical and night-channel cycles per posture: halted men use cover
     /// and dug-in men camouflage their positions (calibration notes §2.3 D1). Thermal sights are
-    /// not affected; nor are squads in buildings (the window row already applies).
+    /// not affected. Squads in buildings take `in_building` instead.
     pub camouflage: PostureFactors,
+    /// The same multiplier for a squad in a building: men fire from back in the room, in its
+    /// shadow, so the window shows little (TODO B33).
+    pub camouflage_in_building: Stat<f64>,
     pub tall_crops: TallCrops,
     pub mounted_loss: MountedLoss,
     /// Small-arms aiming error multiplier in full darkness without an aiming aid; scaled by

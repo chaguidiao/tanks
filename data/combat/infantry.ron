@@ -34,6 +34,8 @@
         dug_in: (value: 0.5, source: "estimate (calibration notes §2.3 D1); Army camouflage Phase IV test plan (2010): 50 % detection distances of camouflaged soldiers within 35-500 m", confidence: estimate,
             notes: "Hasty positions are camouflaged with spoil hidden and vegetation; most should be found when they fire (firing cue in detection.ron)."),
     ),
+    camouflage_in_building: (value: 0.5, source: "estimate (TODO B33; decided 2026-10-28); FM 3-06.11 (2002): fire from back in the room, not from the window sill", confidence: estimate,
+        notes: "Same factor as dug in: the shooter sits in the room's shadow behind the opening; on top of the facade window row. Thermal sights are not affected."),
     tall_crops: (
         months: [6, 7, 8, 9],
         visible_fraction: (value: 0.3, source: "TERRAIN.md §5.3; estimate", confidence: estimate,

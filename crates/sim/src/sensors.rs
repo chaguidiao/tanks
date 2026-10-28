@@ -190,7 +190,7 @@ pub fn step(
                     let crops = if in_crop { inf.model.tall_crops.visible_fraction.get() } else { 1.0 };
                     let c = &inf.model.camouflage;
                     let camo = match s.posture {
-                        _ if s.in_building.is_some() => 1.0,
+                        _ if s.in_building.is_some() => inf.model.camouflage_in_building.get(),
                         Posture::Moving => c.moving.get(),
                         Posture::Halted => c.halted.get(),
                         Posture::DugIn => c.dug_in.get(),

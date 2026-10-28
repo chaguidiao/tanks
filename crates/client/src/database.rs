@@ -618,6 +618,7 @@ fn infantry_model_sheet(ds: &DataSet) -> Sheet {
         stat("OPTICAL CONTRAST", &m.optical_contrast, |x| format!("× {x:.2}")),
         stat("CAMOUFLAGE HALTED", &m.camouflage.halted, |x| format!("× {x:.2}")),
         stat("CAMOUFLAGE DUG IN", &m.camouflage.dug_in, |x| format!("× {x:.2}")),
+        stat("CAMOUFLAGE IN BUILDING", &m.camouflage_in_building, |x| format!("× {x:.2}")),
         stat("TALL CROPS VISIBLE", &m.tall_crops.visible_fraction, pct),
         fact("TALL CROP MONTHS", m.tall_crops.months.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")),
         section("MOUNTED SQUADS"),

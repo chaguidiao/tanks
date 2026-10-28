@@ -135,6 +135,19 @@ the batch. Golden hash unchanged (no squads in it).
 
 ## 7. Decisions
 
+**Decided 2026-10-28** (user):
+
+- **#1** Reverse out is the default; the player sets the SOP per leg: a new leg setting
+  **ON AMBUSH** (REVERSE OUT / DRIVE THROUGH / HALT), plus an **AMBUSHED** condition for
+  IF ON LEG branches (e.g. if ambushed, go to CP 5).
+- **#2** Changed from the recommendation: tank-only platoons **always** avoid built-up ground,
+  for commander-AI and player routes alike, from the start (not only once infantry is seen); a
+  leg setting **BUILT-UP** (AVOID / ENTER) overrides it per leg. The v1 scenarios' routes
+  change: golden hash update and balance re-run (and retune if needed). §3 and §9 below are
+  superseded on this point.
+- **#3, #4, #6** as recommended. **#5 (B33)** factor 0.5 as recommended.
+
+
 | # | Question | Options | Recommendation and why |
 |---|---|---|---|
 | 1 | Close-ambush reaction (§2) | (a) reverse out of the kill zone, smoke, then fight; (b) drive through the kill zone; (c) keep today's halt-and-fight | **(a)**. Tanks in a village street cannot outrun the next house; reversing keeps the front armour on the shooter over ground already driven. (b) remains available as the leg's ON CONTACT CONTINUE |

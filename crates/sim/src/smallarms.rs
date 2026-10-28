@@ -154,7 +154,12 @@ pub fn step(ctx: &mut Ctx) -> Vec<Volley> {
                 .filter(|w| w.bursts > 0)
                 .map(|w| def.weapons[w.def].max_range_m.get())
                 .fold(0.0, f64::max);
-            let target = squad_target(ctx.world, k, reach, ctx.model.vehicle_engage_m.get(), ctx.tick);
+            // A squad lying in ambush with rockets or missiles left does not give itself away
+            // with rifle fire at a vehicle: its anti-armour weapons open the ambush (FM 100-2-1
+            // (1984) ambush: fire is opened on command when the column is in the kill zone).
+            let ambush = !s.sprung && s.anti_armour.iter().any(|w| w.stock.iter().any(|&n| n > 0));
+            let vehicle_reach = if ambush { 0.0 } else { ctx.model.vehicle_engage_m.get() };
+            let target = squad_target(ctx.world, k, reach, vehicle_reach, ctx.tick);
             if let Some(s) = ctx.world.squad[k].as_mut() {
                 s.target = target;
             }
