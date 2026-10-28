@@ -8,7 +8,7 @@
 
 use ai::picture::{Condition, ContactLevel, WeaponsStatus};
 use rand_chacha::ChaCha8Rng;
-use sim_data::{AmmoDef, AmmoKind, DamageTables, Outcomes, PenetrationModel, SmokeModel, VehicleDef};
+use sim_data::{AmmoDef, AmmoKind, DamageTables, FireControlDef, Outcomes, PenetrationModel, SmokeModel, VehicleDef};
 use terrain::hash::StableHasher;
 
 use crate::command::KillKind;
@@ -202,8 +202,7 @@ pub struct ShotGeometry {
 
 /// Total 1σ random error (mrad) for one round, excluding per-engagement bias. Public for the
 /// validation harness.
-pub fn random_sigma_mrad(def: &VehicleDef, ammo: &AmmoDef, g: &ShotGeometry) -> (f64, f64) {
-    let fc = &def.fire_control;
+pub fn random_sigma_mrad(fc: &FireControlDef, ammo: &AmmoDef, g: &ShotGeometry) -> (f64, f64) {
     let aim = if g.shooter_moving { fc.moving_error_mrad.get() } else { fc.aim_error_mrad.get() };
     let disp = ammo.dispersion_mrad.get();
     // A guided round is steered onto the moving target: no lead error.
@@ -219,8 +218,7 @@ pub fn random_sigma_mrad(def: &VehicleDef, ammo: &AmmoDef, g: &ShotGeometry) -> 
 
 /// Per-engagement bias σ (mrad): ranging error through the superelevation plus residual
 /// ballistic error.
-pub fn bias_sigma_mrad(def: &VehicleDef, ammo: &AmmoDef, range: f64) -> f64 {
-    let fc = &def.fire_control;
+pub fn bias_sigma_mrad(fc: &FireControlDef, ammo: &AmmoDef, range: f64) -> f64 {
     let range_sigma = if fc.laser_rangefinder {
         fc.laser_range_error_m.get()
     } else {
@@ -283,10 +281,11 @@ fn line_of_sight_armour(target: &VehicleDef, face: Face, obliq: f64, chemical: b
 
 /// Resolve one round: error sample → hit test against the visible silhouette → face and
 /// obliquity → penetration vs. armour (ERA, KE or CE) → damage roll. `era_left` is the number of
-/// reactive tiles the target still carries.
+/// reactive tiles the target still carries. The shooter is only its fire control, so a squad's
+/// launcher fires through the same path as a vehicle's gun (plan M8B-AT-TEAMS §2.2).
 #[allow(clippy::too_many_arguments)]
 pub fn resolve(
-    shooter: &VehicleDef,
+    fc: &FireControlDef,
     target: &VehicleDef,
     era_left: u32,
     ammo: &AmmoDef,
@@ -296,7 +295,7 @@ pub fn resolve(
     bias: (f64, f64),
     rng: &mut ChaCha8Rng,
 ) -> ShotOutcome {
-    let (sv, sh) = random_sigma_mrad(shooter, ammo, g);
+    let (sv, sh) = random_sigma_mrad(fc, ammo, g);
     let ev = (bias.0 + gauss(rng) * sv) * g.range / 1000.0;
     let eh = (bias.1 + gauss(rng) * sh) * g.range / 1000.0;
     let d = &target.dimensions;
@@ -672,7 +671,7 @@ pub fn step(
         let Some(li) = select_round(g, &loadouts[vi], ammo, pen, tdef, era_left, &geo) else { continue };
         let a = &ammo[loadouts[vi][li]];
         if g.rounds_at_target == 0 {
-            let bs = bias_sigma_mrad(def, a, r);
+            let bs = bias_sigma_mrad(&def.fire_control, a, r);
             g.bias = (gauss(rng) * bs, gauss(rng) * bs * 0.5);
         } else {
             // Adjusted fire: the crew corrects most of the observed bias.
@@ -683,7 +682,7 @@ pub fn step(
         g.stock[li] -= 1;
         let reload = a.reload_s.as_ref().map_or(def.armament.reload_s.get(), |x| x.get());
         g.phase = Phase::Reloading { left: reload * slow };
-        let outcome = resolve(def, tdef, era_left, a, pen, dmg, &geo, bias, rng);
+        let outcome = resolve(&def.fire_control, tdef, era_left, a, pen, dmg, &geo, bias, rng);
         let tof = time_of_flight(a, r);
         let miss_offset = if outcome.hit { [0.0, 0.0] } else { [gauss(rng) * 6.0, gauss(rng) * 6.0 + 8.0] };
         world.last_fired[k] = Some(tick);
@@ -733,7 +732,7 @@ fn fire_he_at_infantry(
         shooter_moving: speed > 1.0,
     };
     if g.rounds_at_target == 0 {
-        let bs = bias_sigma_mrad(def, a, r);
+        let bs = bias_sigma_mrad(&def.fire_control, a, r);
         g.bias = (gauss(rng) * bs, gauss(rng) * bs * 0.5);
     } else {
         g.bias = (g.bias.0 * 0.4, g.bias.1 * 0.4);
@@ -742,7 +741,7 @@ fn fire_he_at_infantry(
     g.stock[li] -= 1;
     let reload = a.reload_s.as_ref().map_or(def.armament.reload_s.get(), |x| x.get());
     g.phase = Phase::Reloading { left: reload * slow };
-    let (sv, sh) = random_sigma_mrad(def, a, &geo);
+    let (sv, sh) = random_sigma_mrad(&def.fire_control, a, &geo);
     let ev = (g.bias.0 + gauss(rng) * sv) * r / 1000.0;
     let eh = (g.bias.1 + gauss(rng) * sh) * r / 1000.0;
     // Descent angle of a flat trajectory is about twice the superelevation; at least 0.05 rad.
@@ -910,8 +909,8 @@ mod tests {
         let apds = ds.ammo("apds_30").unwrap();
         assert!(atgm.guided && !apds.guided);
         assert_eq!(drop_at(atgm, 2000.0), 0.0);
-        assert_eq!(bias_sigma_mrad(ifv, atgm, 2000.0), 0.0);
-        assert!(bias_sigma_mrad(ifv, apds, 1500.0) > 0.0);
+        assert_eq!(bias_sigma_mrad(&ifv.fire_control, atgm, 2000.0), 0.0);
+        assert!(bias_sigma_mrad(&ifv.fire_control, apds, 1500.0) > 0.0);
         let g = ShotGeometry {
             range: 2000.0,
             visible: 1.0,
@@ -920,7 +919,7 @@ mod tests {
             crossing_speed: 10.0,
             shooter_moving: false,
         };
-        let (v, h) = random_sigma_mrad(ifv, atgm, &g);
+        let (v, h) = random_sigma_mrad(&ifv.fire_control, atgm, &g);
         assert_eq!(v, h, "no lead error for a guided round");
     }
 
@@ -986,9 +985,9 @@ mod tests {
             let n = 4000;
             let hits = (0..n)
                 .filter(|_| {
-                    let bs = bias_sigma_mrad(s, a, r);
+                    let bs = bias_sigma_mrad(&s.fire_control, a, r);
                     let bias = (gauss(&mut rng) * bs, gauss(&mut rng) * bs * 0.5);
-                    resolve(s, t, 0, a, &ds.penetration, &ds.damage, &geo, bias, &mut rng).hit
+                    resolve(&s.fire_control, t, 0, a, &ds.penetration, &ds.damage, &geo, bias, &mut rng).hit
                 })
                 .count();
             hits as f64 / n as f64

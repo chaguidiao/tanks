@@ -42,7 +42,7 @@ fn penetration_rate(ds: &DataSet, shooter: &str, round: &str, target: &str, era:
     let mut rng = ChaCha8Rng::seed_from_u64(11);
     let (mut hits, mut pens, mut tiles) = (0, 0, 0);
     for _ in 0..3000 {
-        let o = gunnery::resolve(s, t, era, a, &ds.penetration, &ds.damage, &g, (0.0, 0.0), &mut rng);
+        let o = gunnery::resolve(&s.fire_control, t, era, a, &ds.penetration, &ds.damage, &g, (0.0, 0.0), &mut rng);
         if o.hit {
             hits += 1;
             pens += o.penetrated as u32;
