@@ -1,7 +1,8 @@
 # M8b-b anti-tank teams: design plan
 
-Status: **agreed 2026-10-24** (all recommendations in §9 accepted). Calibrated against public
-sources on 2026-10-24 (§12); nothing implemented yet. Covers TODO.md B2, B6, B9, B12 and B19.
+Status: **done 2026-10-28** (agreed 2026-10-24, all recommendations in §9 accepted; calibrated
+against public sources on 2026-10-24, §12; results and deviations in §13). Covers TODO.md B2, B6,
+B9, B12 and B19.
 Builds on M8b-a (`docs/plans/M8B-INFANTRY.md`) and the calibration work
 (`docs/plans/M8B-CALIBRATION-NOTES.md`).
 
@@ -346,3 +347,46 @@ Still to check, before the data commit:
 - Dragon II and 9M111M service dates;
 - RPG-18 and RPG-26 penetration;
 - M72A2 penetration.
+
+## 13. Results and deviations (2026-10-28)
+
+Validation targets (§11), all in tests:
+
+| # | Result | Test |
+|---|---|---|
+| A1 | RPG-7 (PG-7V), 5 x 2.5 m panel, stationary: 0.92 / 0.55 / 0.31 / 0.11 at 100 / 200 / 300 / 500 m | `antiarmour::tests::the_rpg7_matches_the_published_hit_tables` |
+| A2 | Crossing at 4 m/s: 0.91 / 0.51 / 0.27 / 0.15 / 0.09 at 100-500 m | same |
+| A3 | M72 0.5 at 200 m, AT4 0.5 at 300 m (see deviation 1) | `light_disposables_hit_one_in_two_at_their_effective_range` |
+| A4 | PG-7V stopped by a T-72A's front, penetrates its side | `gunnery::tests::an_upper_floor_rocket_penetrates_an_mbt_roof_and_not_its_front` |
+| A5 | Upper-floor PG-7V (25 deg plunge) penetrates the roof | same |
+| A6 | PG-7VR spends a Kontakt tile and keeps its penetration | `a_tandem_rocket_spends_the_tile_without_losing_penetration` |
+| A7 | Fagot with the gunner pinned in flight: 0/8 hits (6+/8 when tracking) | `m8b_at::a_pinned_gunner_loses_his_missile` |
+| A8 | PG-7V: 3.4 side hits to destroy a T-72 (about 1 without the factor) | `light_rockets_need_about_three_hits_to_destroy_a_t72_from_the_side` |
+| A9 | Javelin class 0.88 at 500-2,000 m | `a_fire_and_forget_missile_hits_about_nine_in_ten_in_the_open` |
+| A10 | Tank killed or disabled in 13/16 (crew unaware, see deviation 4) | `m8b_at::an_rpg_team_in_a_house_kills_a_tank_passing_its_flank` |
+
+Also: a missile team firing at a halted platoon's flank at 1,500 m hits with its first missile in
+5/8 runs, then the tanks' HE pins the gunner and all later missiles are lost (0/15), and the post
+is out in 7/8 runs within 5 minutes (the 1973 Sagger pattern). Duels (`tanks-headless duel
+--shooter <squad>`): RPG-7 at a T-72 side 0.89 / 0.58 / 0.34 at 100 / 200 / 300 m; Fagot at an M1
+side 1.0 to 1,000 m and 0.85 at 2 km (no suppression in the duel); Javelin head-on 0.98 at 1 km,
+0.67 at 2 km.
+
+Deviations from the plan:
+1. **A3 is 0.5, not 0.25-0.3.** FM 3-23.25 (via Wikipedia, M72 LAW) defines the effective range
+   as the range beyond which the hit chance is below one half; the plan's figure was derived from
+   the RPG-7's quoted effective range instead.
+2. **Launch cloud.** The cue factor alone did not reveal a dug-in team at 1,200 m: it multiplies
+   a near-zero detection chance, and the line-of-sight samples were at the men's height. A launch
+   now also shows, for 3 s, a dust and smoke cloud (`detection.ron` `launch_cloud_m`, 3 m,
+   estimate) that rises above the men and is not camouflaged. Found after firing 6/6, before 0/6.
+3. **Symbol modifier** on missile teams and on contacts seen launching, not on every squad with a
+   rocket: APP-6D marks anti-armour units, and a rifle squad with an RPG is still infantry.
+4. **A10 with an unaware crew.** With its weapons free the tank finds the squad in the house at
+   350-450 m within about 15 s and clears it with HE first (about 1/16). That is the detection step
+   B24 D2 (search time with narrow-field sights), kept as its own model-wide step; TODO B26.
+5. **Squads placed in a building at the start occupy it** (prepared positions), so a scenario can
+   set an ambush without a walk-in.
+6. **Not done:** Metis class, RPG-29, ERA on roofs, operator in the loop for vehicle missiles
+   (TODO B27-B32).
+

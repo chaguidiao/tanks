@@ -92,16 +92,24 @@ Notes, sources and proposed values: `docs/plans/M8B-CALIBRATION-NOTES.md`. §4 q
 
 ## M8b-b — Anti-tank teams
 Plan: `docs/plans/M8B-AT-TEAMS.md`. Agreed 2026-10-24, with all 12 recommendations in §9 accepted, and calibrated against public data (§12: RPG-7 hit tables, Grozny and Iraq damage, Sagger and Javelin combat hit rates). Work follows §10; validation targets A1–A10 are in §11. Before the data commit, check the open items at the end of §12.
-- [ ] B2 ATGM teams on the existing guided-round model — §13.2
-- [ ] B6 AI preference for ATGM range — §13.1 M7b
-- [ ] B9 Unguided short-range launchers (RPG-7 class): short range, hold-fire-until-close, side/rear-weighted hit chance, back-blast reveals the shooter
-- [ ] B12 Close-in vulnerability: tank damage tables for short-range side/rear/top hits (a top-armour value stays M9 T2 for dedicated top-attack)
-- [ ] B19 Anti-tank team data (RPG, ATGM per era, sourced) and ambush doctrine in `generic-opfor`
-- Exit: a scripted test where an RPG team in a village kills a tank from the flank; per-pairing unit tests; balance batch.
+- [x] B2 ATGM teams on the existing guided-round model — §13.2. **Done 2026-10-28**: squad types `at_team_b` (Dragon, Dragon II, Javelin class) and `at_team_r` (Fagot, 9M111M, Kornet class); missiles through `gunnery::resolve`; operator in the loop (a pinned or lost gunner's command-guided missile misses; fire-and-forget immune); top attack
+- [x] B6 AI preference for ATGM range — §13.1 M7b. **Done 2026-10-28**: `prefer_beyond_m` on loadout entries (TOW and SK-5 beyond 2 km, gun-launched missiles beyond 2.5 km; the gun inside it); threat order puts squads seen launching and identified missile teams first; HE at missile posts beyond coax reach
+- [x] B9 Unguided short-range launchers (RPG-7 class): short range, hold-fire-until-close, side/rear-weighted hit chance, back-blast reveals the shooter. **Done 2026-10-28**: the side/rear weighting is geometric (ambush holds on a front it cannot defeat); range estimation through the rocket's drop fitted to the published tables; launch cue plus a 3 m launch cloud
+- [x] B12 Close-in vulnerability: tank damage tables for short-range side/rear/top hits (a top-armour value stays M9 T2 for dedicated top-attack). **Done 2026-10-28**: `armour.top` per vehicle (estimate), top face for plunging fire over 20 deg and top-attack missiles, `behind_armour` factor on light rockets (PG-7V about 3.4 side hits to destroy a T-72), tandem warheads
+- [x] B19 Anti-tank team data (RPG, ATGM per era, sourced) and ambush doctrine in `generic-opfor`. **Done 2026-10-28**: 13 rounds, dated launchers on both rifle squads, `ambush` blocks in both doctrine packs
+- Exit (met 2026-10-28): A10 RPG team in a house kills or disables a passing tank from the flank in 13/16 seeds (crew unaware, see below); per-pairing unit tests; balance batch (DESIGN.md §13.1 M8b-b). Tech demo `m8b-ambush`.
 - Deferred by the plan (§9 #7, #10, #12):
   - AT teams moving after firing (F11);
   - per-shot crosswind on rockets (ENG);
   - active protection (Drozd/Arena/Trophy class) and loitering munitions, for scenarios after 2005.
+- Deferred or open after M8b-b (2026-10-28):
+  - [ ] B26 With its weapons free, a tank finds a squad hidden in a house at 350-450 m within about 15 s and clears it with HE before the ambush is sprung (A10 then 1/16). Re-check A10 with the crew alert once B24 D2 (search time with narrow-field sights) is in; the test scripts an unaware crew until then
+  - [ ] B27 Check against primary copies: Isby's RPG-7 table (only a forum transcription seen), the 9M111M service date (1991 is an estimate), the AN/TAS-5 Dragon night tracker date (1981 estimate)
+  - [ ] B28 Metis class (9K115) team not modelled (Fagot covers the Red medium missile); RPG-29 class not modelled
+  - [ ] B29 Reactive armour on turret roofs (Kontakt-1 roof bricks, Kontakt-5) not modelled: top hits never meet ERA
+  - [ ] B30 Operator in the loop applies to squad missiles only; a suppressed vehicle missile gunner is not checked
+  - [ ] B31 A sprung team also fires at a front it cannot defeat (best margin): real gunners do not know the margin, but a "no shot below margin x" rule could save rounds
+  - [ ] B32 Minimum arming distance of rockets (2-5 m) not modelled (no fight is that close)
 
 ## M8c — Logistics
 - [ ] C1 Vehicle ammunition and fuel resupply; supply point or trucks — §11, §13.1 M7b. Plan: `docs/plans/M8C-LOGISTICS.md`. **In progress 2026-10-21**: slices 1–4 done (data `logistics.ron`, scenario `supply_points`, `Command::Resupply` service-station resupply with stock accounting, re-arm events (C4), tests `m8c.rs`; client 2026-10-24: supply point symbol, RESUPPLY card button (R), resupply stage on the platoon/vehicle cards, supply point placement in the scenario editor); still open in the client: radio `AT SUPPLY POINT`, roster ammo/fuel warnings, choosing a point other than the nearest, re-arm events in the editor; next: tailgate trucks (slice 6)
