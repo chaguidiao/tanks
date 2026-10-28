@@ -386,6 +386,35 @@ pub fn resolve(
     ShotOutcome { hit, turret, face, penetration_mm: p, armour_mm: armour, penetrated, kill, sights_damaged, era_fired }
 }
 
+/// Expected penetration over the armour round `a` meets on `target` from `geo` (hull and turret
+/// averaged, ERA weighted by its coverage): above 1 the round is expected to penetrate.
+pub fn round_margin(
+    a: &AmmoDef,
+    pen: &PenetrationModel,
+    target: &VehicleDef,
+    era_left: u32,
+    geo: &ShotGeometry,
+    top_above: f64,
+) -> f64 {
+    let (face, obliq) = hit_face(geo, a, top_above);
+    let chem = a.kind.is_chemical();
+    let mut p = penetration_mm(pen, a, velocity_at(a, geo.range));
+    if chem
+        && !a.tandem
+        && era_left > 0
+        && matches!(face, Face::Front | Face::Side)
+        && let Some(era) = &target.armour.era
+    {
+        p *= 1.0 - era.coverage.get() * era.ce_defeat.get();
+    }
+    p / line_of_sight_armour(target, face, obliq, chem, None)
+}
+
+/// The face a shot from `geo` meets (public for the squad launchers' aspect preference).
+pub fn face_for(geo: &ShotGeometry, a: &AmmoDef, top_above: f64) -> Face {
+    hit_face(geo, a, top_above).0
+}
+
 /// Which round of the loadout the crew fires at a target: the commander's choice if stocked and
 /// in range, else the first round meant for the target's class that defeats its armour, else the
 /// one with the best margin (FM 3-20.12 ammunition selection by target type).
@@ -404,21 +433,7 @@ pub fn select_round(
         let a = &ammo[loadout[li]];
         g.stock[li] > 0 && a.kind != AmmoKind::Smoke && a.max_range_m.as_ref().is_none_or(|m| geo.range <= m.get())
     };
-    let margin = |li: usize| {
-        let a = &ammo[loadout[li]];
-        let (face, obliq) = hit_face(geo, a, top_above);
-        let chem = a.kind.is_chemical();
-        let mut p = penetration_mm(pen, a, velocity_at(a, geo.range));
-        if chem
-            && !a.tandem
-            && era_left > 0
-            && matches!(face, Face::Front | Face::Side)
-            && let Some(era) = &target.armour.era
-        {
-            p *= 1.0 - era.coverage.get() * era.ce_defeat.get();
-        }
-        p / line_of_sight_armour(target, face, obliq, chem, None)
-    };
+    let margin = |li: usize| round_margin(&ammo[loadout[li]], pen, target, era_left, geo, top_above);
     let all: Vec<usize> = (0..loadout.len()).filter(|&li| usable(li)).collect();
     if let Some(kind) = g.selected
         && let Some(&li) = all.iter().find(|&&li| ammo[loadout[li]].kind == kind)
@@ -456,6 +471,11 @@ pub enum Effect {
 pub struct Projectile {
     pub impact_tick: u64,
     pub shooter: usize,
+    /// Command-guided missile: the squad whose gunner must keep tracking until impact (plan
+    /// M8B-AT-TEAMS §2.2, operator in the loop).
+    pub operator: Option<usize>,
+    /// The operator was pinned or lost during the flight: the missile misses.
+    pub guidance_lost: bool,
     pub from: [f64; 2],
     pub to: [f64; 2],
     pub effect: Effect,
@@ -729,6 +749,8 @@ pub fn step(
             projectile: Projectile {
                 impact_tick: tick + (tof / DT).ceil() as u64,
                 shooter: k,
+                operator: None,
+                guidance_lost: false,
                 from: pos,
                 to: [tp[0] + miss_offset[0], tp[1] + miss_offset[1]],
                 effect: Effect::Shot { target: t, outcome },
@@ -795,6 +817,8 @@ fn fire_he_at_infantry(
         projectile: Projectile {
             impact_tick: tick + (time_of_flight(a, r) / DT).ceil() as u64,
             shooter: k,
+            operator: None,
+            guidance_lost: false,
             from: pos,
             to,
             effect: Effect::Burst { lethal_radius_m: lethal },
@@ -849,6 +873,8 @@ fn smoke_mission(
         projectile: Projectile {
             impact_tick: tick + (time_of_flight(a, r) / DT).ceil() as u64,
             shooter: k,
+            operator: None,
+            guidance_lost: false,
             from: pos,
             to,
             effect: Effect::Smoke { kind: kind.0, clouds: kind.1 },

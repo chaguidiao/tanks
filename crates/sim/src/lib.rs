@@ -11,6 +11,7 @@
 //! Tick pipeline: deliver orders → platoon AI (1 Hz) → vehicle AI (5 Hz) → sensors (4 Hz) →
 //! reports → gunnery → impacts → mobility → pictures.
 
+pub mod antiarmour;
 pub mod command;
 pub mod control;
 pub mod fires;
@@ -183,6 +184,7 @@ fn logpacs(
 fn spawn_squad(
     world: &mut World,
     squads: &mut Vec<SquadDef>,
+    ammo: &mut Vec<AmmoDef>,
     data: &DataSet,
     g: &Ground,
     side: SideId,
@@ -222,8 +224,31 @@ fn spawn_squad(
         Some(c) => (world.transform[c].pos, world.transform[c].heading),
         None => (u.position, u.heading_deg.to_radians()),
     };
+    // Anti-armour rounds join the sim's ammo table; rounds not in service at the date are not
+    // carried (as for vehicles).
+    let mut anti_armour = Vec::new();
+    for (wi, w) in def.anti_armour.iter().enumerate() {
+        if !w.in_service.is_none_or(|d| d.contains(year)) {
+            continue;
+        }
+        let mut st =
+            world::AntiArmourState { def: wi, count: w.count, ammo: Vec::new(), stock: Vec::new(), cooldown: 0.0 };
+        for l in &w.load {
+            let round = data.ammo(&l.ammo).ok_or_else(|| format!("{}: unknown ammo '{}'", def.id, l.ammo))?;
+            let i = match ammo.iter().position(|a| a.id == round.id) {
+                Some(i) => i,
+                None => {
+                    ammo.push(round.clone());
+                    ammo.len() - 1
+                }
+            };
+            st.ammo.push(i);
+            st.stock.push(if round.in_service.contains(year) { l.count * w.count as u32 } else { 0 });
+        }
+        anti_armour.push(st);
+    }
     let z = g.height(pos[0], pos[1]);
-    world.spawn_squad(side, &u.callsign, si, def, pos, z, heading, year, carrier);
+    world.spawn_squad(side, &u.callsign, si, def, pos, z, heading, year, carrier, anti_armour);
     Ok(world.len() - 1)
 }
 
@@ -254,7 +279,7 @@ impl Sim {
                 .clone();
             for u in &side.units {
                 let k = if let Some(sq) = &u.squad {
-                    spawn_squad(&mut world, &mut squads, &data, &g, SideId(si as u8), u, sq, year)?
+                    spawn_squad(&mut world, &mut squads, &mut ammo, &data, &g, SideId(si as u8), u, sq, year)?
                 } else {
                     let def = data
                         .vehicle(&u.vehicle)
@@ -836,7 +861,27 @@ impl Sim {
             tick,
             &mut self.rngs.gunnery,
         );
-        for f in fired {
+        // 6b. Squad rockets and missiles (plan M8B-AT-TEAMS §2.2), through the same shot path.
+        let launched = {
+            let ambush: Vec<sim_data::AmbushDoctrine> =
+                self.sides.iter().map(|s| s.doctrine.infantry.ambush.clone()).collect();
+            let mut actx = antiarmour::Ctx {
+                world: &mut self.world,
+                squads: &self.squads,
+                vehicles: &self.vehicles,
+                ammo: &self.ammo,
+                pen: &self.data.penetration,
+                dmg: &self.data.damage,
+                map: &self.map,
+                td: &self.data.terrain,
+                ambush: &ambush,
+                slow_gain: self.data.fires.suppression.slow_gain.get(),
+                tick,
+                rng: &mut self.rngs.gunnery,
+            };
+            antiarmour::step(&mut actx)
+        };
+        for f in fired.into_iter().chain(launched) {
             let p = &f.projectile;
             let r = dist(p.from, p.to);
             let hit = matches!(&p.effect, gunnery::Effect::Shot { outcome, .. } if outcome.hit);
@@ -883,7 +928,8 @@ impl Sim {
             }
         }
 
-        // 7. Impacts.
+        // 7. Impacts. A command-guided missile misses if its gunner was pinned or lost in flight.
+        antiarmour::track_guidance(&mut self.projectiles, &self.world, self.data.infantry.pinned_above.get());
         let (hits, flying): (Vec<_>, Vec<_>) =
             std::mem::take(&mut self.projectiles).into_iter().partition(|p| p.impact_tick <= tick);
         self.projectiles = flying;
@@ -914,6 +960,14 @@ impl Sim {
                     continue;
                 }
                 gunnery::Effect::Shot { target, outcome } => (*target, outcome),
+            };
+            let lost;
+            let o = if p.guidance_lost {
+                lost =
+                    gunnery::ShotOutcome { hit: false, penetrated: false, kill: None, era_fired: false, ..o.clone() };
+                &lost
+            } else {
+                o
             };
             if self.world.alive(target) {
                 let sup = &self.data.fires.suppression;
@@ -1802,7 +1856,7 @@ impl Sim {
 /// Behaviour version of the simulation. A replay records it and is only played back by a build
 /// with the same version: bump it whenever a change makes an old command log play out
 /// differently (plan M8B-INFANTRY §8, DESIGN.md §14 #29). Replays from before versioning read as 0.
-pub const SIM_VERSION: u32 = 1;
+pub const SIM_VERSION: u32 = 2;
 
 /// A recorded game: scenario id plus the external command log. Re-simulating it reproduces the
 /// game exactly (determinism), which is what the after-action review and replays rely on.

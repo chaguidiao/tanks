@@ -15,6 +15,9 @@ pub struct DetectionModel {
     pub moving_target_factor: Stat<f64>,
     pub firing_target_factor: Stat<f64>,
     pub observer_moving_factor: Stat<f64>,
+    /// Size of the dust and smoke cloud of a rocket or missile launch, seen for a few seconds
+    /// after it whatever the firer's camouflage (m; plan M8B-AT-TEAMS §4).
+    pub launch_cloud_m: Stat<f64>,
     /// Optical sight effectiveness by sun elevation, listed from the highest elevation down;
     /// interpolated linearly in the logarithm of the factor.
     pub light_curve: Vec<LightPoint>,

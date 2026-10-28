@@ -7,6 +7,8 @@
     moving_target_factor: (value: 1.5, source: "estimate", confidence: estimate, notes: "Motion and dust draw the eye."),
     firing_target_factor: (value: 6.0, source: "estimate", confidence: estimate, notes: "Muzzle flash, blast and obscuration cue observers."),
     observer_moving_factor: (value: 0.5, source: "estimate", confidence: estimate, notes: "Crews search poorly on the move."),
+    launch_cloud_m: (value: 3.0, source: "estimate (plan M8B-AT-TEAMS §4)", confidence: estimate,
+        notes: "Backblast raises dust and smoke several metres across behind a rocket launcher; a missile launch adds the motor's smoke and flare. Grau (FMSO, 1997) and the Sagger record (1973): crews found ATGM posts by their launch. Neither camouflage nor the men's low contrast hides it."),
     // Optical sight effectiveness by sun elevation (log-linear between points). Civil twilight
     // ends at -6 deg, nautical at -12, astronomical at -18.
     light_curve: [

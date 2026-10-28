@@ -26,8 +26,10 @@ const USAGE: &str = "usage: tanks-headless <command> [options]
                                                                        (--mutual: the target fires back; exchange ratio)
   replay  --file <replay.ron>                                          re-simulate a replay, verify its hash
   bench   [--samples <n>] [--ticks <n>] [--csv]                        timings: LOS, viewshed, battle-position search, sim throughput
-  duel    [--shooter <id>] [--target <id>] [--ranges 500,1000,..] [--trials <n>] [--aspect front|side] [--year <y>]
-          [--out <csv>]                                                Monte-Carlo duel validation harness
+  duel    [--shooter <vehicle|squad>] [--target <id>] [--ranges 500,1000,..] [--trials <n>] [--aspect front|side]
+          [--year <y>] [--out <csv>]                                   Monte-Carlo duel validation harness (a squad
+                                                                       shooter fires its rockets or missiles, set up
+                                                                       and with its ambush already sprung)
 
 Options: --data <dir> (default: ./data or $TANKS_DATA)";
 
@@ -381,6 +383,8 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
         .map(|r| r.trim().parse::<f64>().map_err(|_| format!("bad range '{r}'")))
         .collect::<Result<_, _>>()?;
     let side_on = a.get("--aspect") == Some("side");
+    // A squad shooter (plan M8B-AT-TEAMS §10.5): its launchers, set up, ambush sprung.
+    let squad_shooter = ds.squad(&shooter).is_some();
     let year: i32 = a.get("--year").unwrap_or("1990").parse().map_err(|_| "bad --year")?;
     let max_r = ranges.iter().copied().fold(0.0, f64::max);
     let h_cells = ((max_r + 800.0) / 4.0) as usize;
@@ -395,7 +399,7 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
     };
     let mut pkg = AuthoringPackage::new_flat(m, 100.0);
     pkg.landcover.data.fill(ds.terrain.landcover_id("road").ok_or("no road class")?); // no micro-relief
-    let classes: Vec<MobilityClass> = ds.vehicles.iter().map(MobilityClass::from).collect();
+    let classes: Vec<MobilityClass> = terrain::mobility::all_classes(ds);
     let map = Arc::new(terrain::bake(&pkg, &ds.terrain, &classes));
     let data = Arc::new(ds.clone());
 
@@ -421,11 +425,11 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                         tech_year: None,
                         units: vec![UnitDef {
                             callsign: "S".into(),
-                            vehicle: shooter.clone(),
+                            vehicle: if squad_shooter { String::new() } else { shooter.clone() },
                             position: [400.0, 200.0],
                             heading_deg: 0.0,
                             platoon: None,
-                            squad: None,
+                            squad: squad_shooter.then(|| shooter.clone()),
                             mounted_in: None,
                         }],
                         ai: None,
@@ -461,6 +465,13 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                 SideId(1),
                 Command::WeaponsControl { to: Addressee::Unit(EntityId(2)), status: WeaponsStatus::Hold },
             );
+            if let Some(s) = sim.truth_mut().squad[0].as_mut() {
+                s.sprung = true;
+                s.halted_s = 1000.0;
+                for w in s.weapons.iter_mut() {
+                    w.bursts = 0; // launchers only
+                }
+            }
             let mut seen = false;
             let mut rounds = 0;
             let mut results = 0;

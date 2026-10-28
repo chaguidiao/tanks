@@ -46,6 +46,9 @@ pub fn ttpf(n: f64, n50: f64) -> f64 {
     p / (1.0 + p)
 }
 
+/// A launch cloud and the firing cue last this many ticks (3 s).
+const LAUNCH_SEEN: u64 = (3.0 / crate::DT) as u64;
+
 /// Speed above which a vehicle raises a visible dust plume (m/s).
 const DUST_SPEED_MPS: f64 = 4.0;
 
@@ -168,7 +171,7 @@ pub fn step(
             // seen only through the facade facing the observer; low in standing crops).
             enum Look<'a> {
                 Vehicle(&'a VehicleDef),
-                Squad { w: f64, h: f64, floor: f64, building: Option<u32>, crops: f64, camo: f64 },
+                Squad { w: f64, h: f64, floor: f64, building: Option<u32>, crops: f64, camo: f64, launch: bool },
             }
             let look = match (world.vehicle[t], world.squad[t].as_ref()) {
                 (Some(tvi), _) => Look::Vehicle(&vehicles[tvi]),
@@ -187,13 +190,18 @@ pub fn step(
                         Posture::Halted => c.halted.get(),
                         Posture::DugIn => c.dug_in.get(),
                     };
+                    // A launch cloud (plan M8B-AT-TEAMS §4) rises above the men and is larger than
+                    // them for a few seconds; it is not camouflaged and not hidden by crops.
+                    let launch = world.launch[t].is_some_and(|(lt, _)| tick.saturating_sub(lt) < LAUNCH_SEEN);
+                    let cloud = if launch { m.launch_cloud_m.get() } else { 0.0 };
                     Look::Squad {
-                        w: sig.width_m.get(),
-                        h: sig.height_m.get(),
+                        w: sig.width_m.get().max(cloud),
+                        h: sig.height_m.get().max(cloud),
                         floor,
                         building: s.in_building,
-                        crops,
-                        camo,
+                        crops: if launch { 1.0 } else { crops },
+                        camo: if launch { 1.0 } else { camo },
+                        launch,
                     }
                 }
                 _ => continue,
@@ -216,7 +224,11 @@ pub fn step(
                     squad_heights(*h, *floor),
                 ),
             };
-            let s = cache.get(g, (world.id[o].0, world.id[t].0), opos, eye, tpos, &heights[..nh]);
+            // The cache keys on positions only, so a launch cloud's taller samples bypass it.
+            let s = match &look {
+                Look::Squad { launch: true, .. } => sight(g, opos, eye, tpos, &heights[..nh]),
+                _ => cache.get(g, (world.id[o].0, world.id[t].0), opos, eye, tpos, &heights[..nh]),
+            };
             let mut f = s.fraction();
             if let Look::Squad { crops, .. } = &look {
                 f *= crops;
@@ -231,11 +243,12 @@ pub fn step(
                     let vis_h = tdef.dimensions.height_m.get() * f;
                     (libm::sqrt(w * vis_h), atm.thermal, 1.0)
                 }
-                // People stay warmer than their background through the crossover.
-                Look::Squad { w, h, camo, .. } => (
+                // People stay warmer than their background through the crossover; a launch is hot
+                // and stands out in daylight.
+                Look::Squad { w, h, camo, launch, .. } => (
                     libm::sqrt(w * h * f),
-                    1.0 - (1.0 - atm.thermal) * inf.model.thermal_crossover_share.get(),
-                    inf.model.optical_contrast.get() * camo,
+                    if *launch { 1.0 } else { 1.0 - (1.0 - atm.thermal) * inf.model.thermal_crossover_share.get() },
+                    if *launch { 1.0 } else { inf.model.optical_contrast.get() * camo },
                 ),
             };
             let sens = world.sensors[o].as_ref().expect("checked");
@@ -271,7 +284,10 @@ pub fn step(
             }
             let moving = world.mobility[t].as_ref().is_some_and(|mv| mv.speed > 1.0)
                 || world.squad[t].as_ref().is_some_and(|s| s.speed > 0.3);
-            let fired = world.last_fired[t].is_some_and(|ft| tick.saturating_sub(ft) < (3.0 / crate::DT) as u64);
+            let recent = |ft: u64| tick.saturating_sub(ft) < LAUNCH_SEEN;
+            let fired = world.last_fired[t].is_some_and(recent);
+            // Backblast of a rocket or missile launch: a stronger cue (plan M8B-AT-TEAMS §2.2).
+            let launch = world.launch[t].filter(|&(lt, _)| recent(lt)).map_or(1.0, |(_, f)| f);
             let mut cue = 1.0;
             if moving {
                 cue *= m.moving_target_factor.get();
@@ -281,7 +297,7 @@ pub fn step(
                 }
             }
             if fired {
-                cue *= m.firing_target_factor.get();
+                cue *= m.firing_target_factor.get() * launch;
             }
             if observer_moving {
                 cue *= m.observer_moving_factor.get();

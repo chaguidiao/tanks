@@ -144,6 +144,27 @@ impl SmallArmState {
     }
 }
 
+/// One anti-armour weapon type carried by a squad (plan M8B-AT-TEAMS §2.1).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AntiArmourState {
+    /// Index into the squad definition's `anti_armour`.
+    pub def: usize,
+    /// Launchers of this type at full strength.
+    pub count: u8,
+    /// Per entry of the definition's `load`: index into the sim's ammo table, and rounds left
+    /// (all launchers together).
+    pub ammo: Vec<usize>,
+    pub stock: Vec<u32>,
+    /// Seconds until the next shot of this type.
+    pub cooldown: f64,
+}
+
+impl AntiArmourState {
+    pub fn rounds(&self) -> u32 {
+        self.stock.iter().sum()
+    }
+}
+
 /// A dismounted squad: one abstract element (plan M8B-INFANTRY §1–§2, DESIGN.md §14 #29).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SquadState {
@@ -177,6 +198,11 @@ pub struct SquadState {
     pub fragment_factor: f64,
     /// Night aiming error multiplier of its aiming aid, if it carries one.
     pub night_aid: Option<f64>,
+    /// Rockets and missiles (plan M8B-AT-TEAMS §2).
+    pub anti_armour: Vec<AntiArmourState>,
+    /// Ambush sprung: the squad has fired its anti-armour weapons or been fired on, so it no
+    /// longer holds fire for the kill zone (plan M8B-AT-TEAMS §2.2).
+    pub sprung: bool,
 }
 
 /// An IFV's troop compartment.
@@ -207,6 +233,9 @@ pub struct World {
     pub platoon: Vec<Option<PlatoonId>>,
     /// Tick of the last main-gun shot (detection cue).
     pub last_fired: Vec<Option<u64>>,
+    /// Tick and signature factor of the last rocket or missile launch (backblast: a stronger
+    /// firing cue; plan M8B-AT-TEAMS §2.2).
+    pub launch: Vec<Option<(u64, f64)>>,
     pub smoke: Vec<SmokeState>,
     /// Reactive armour tiles left.
     pub era: Vec<u32>,
@@ -266,6 +295,7 @@ impl World {
         self.weapons.push(WeaponsStatus::Free);
         self.platoon.push(None);
         self.last_fired.push(None);
+        self.launch.push(None);
         self.suppression.push(0.0);
         self.smoke.push(SmokeState { salvos: 0, engine_on: false, last_launch: None, last_targeted: None });
         self.era.push(0);
@@ -285,6 +315,7 @@ impl World {
         heading: f64,
         year: i32,
         carrier: Option<usize>,
+        anti_armour: Vec<AntiArmourState>,
     ) -> EntityId {
         let id = self.push_common(side, callsign, pos, z, heading);
         self.vehicle.push(None);
@@ -322,6 +353,8 @@ impl World {
             bullet_factor: def.armour_in(year).map_or(1.0, |a| a.bullet_factor.get()),
             fragment_factor: def.armour_in(year).map_or(1.0, |a| a.fragment_factor.get()),
             night_aid: def.aiming_aid_in(year).map(|a| a.night_factor.get()),
+            anti_armour,
+            sprung: false,
         }));
         self.carrier.push(None);
         self.coax.push(None);
@@ -485,6 +518,13 @@ impl World {
                     h.u32(w.bursts);
                     h.f64(w.cooldown);
                 }
+                for w in &s.anti_armour {
+                    for &n in &w.stock {
+                        h.u32(n);
+                    }
+                    h.f64(w.cooldown);
+                }
+                h.u8(s.sprung as u8);
             }
             if let Some(c) = &self.carrier[k]
                 && (!c.embarked.is_empty() || c.dismounting.is_some())
