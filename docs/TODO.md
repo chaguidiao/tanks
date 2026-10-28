@@ -8,7 +8,8 @@ Rules for every item (CLAUDE.md): data in `data/**/*.ron` with source and confid
 
 ## Waiting on the user (decisions; check here first)
 Added 2026-10-21. Remove a line when it is decided, and record the decision on the item it belongs to.
-- B33 (2026-10-28): add a concealment factor for squads in buildings so the house ambush can be re-checked with an alert crew (B26)? A tuning call; proposed after B24 D2 left B26 unchanged
+- B33 (2026-10-28): add a concealment factor for squads in buildings so the house ambush can be re-checked with an alert crew (B26)? A tuning call; proposed after B24 D2 left B26 unchanged; folded into the M8f1 plan as decision 5
+- M8f1 plan (2026-10-28): `docs/plans/M8F1-INFANTRY-AI.md` §7 has six decisions with recommendations (close-ambush reaction, built-up avoidance, IFV dismount timing, AT teams moving after firing, B33, attack scope); F11, F5 and B13 start once they are agreed
 
 ## Phase map (v1.x = M8, v1.5 = M9, then v2+)
 
@@ -141,7 +142,7 @@ Plan: `docs/plans/M8B-AT-TEAMS.md`. Agreed 2026-10-24, with all 12 recommendatio
 - Exit: UAS and degraded-comms scenarios; tests that UAS contacts arrive only via the picture.
 
 ## M8f1 / M8f2 — Commander AI and fire-support AI
-M8f1 (right after infantry, kept small so infantry is playable): F11, F5, plus B13 as the exit scenario. M8f2 (after M8c–e): F1, F2, F3, F4, F6, F7, F8, F10. F9 is tracked as Z4.
+M8f1 (right after infantry, kept small so infantry is playable): F11, F5, plus B13 as the exit scenario. Plan: `docs/plans/M8F1-INFANTRY-AI.md` (draft 2026-10-28, decisions open). M8f2 (after M8c–e): F1, F2, F3, F4, F6, F7, F8, F10. F9 is tracked as Z4.
 - [ ] F11 Reaction to infantry contacts: tanks use HE/coax and reverse out of close ambush, platoon avoids buildings without dismounted support, IFVs dismount at the right time — new
 - [ ] F1 Re-planning and COA choice (HTN/utility), HTN method library — §13.1 M5, M4, Phase 2
 - [ ] F2 OPFOR use of plans — §13.1 Plans, Phase 2
