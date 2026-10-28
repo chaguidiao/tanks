@@ -8,6 +8,7 @@ Rules for every item (CLAUDE.md): data in `data/**/*.ron` with source and confid
 
 ## Waiting on the user (decisions; check here first)
 Added 2026-10-21. Remove a line when it is decided, and record the decision on the item it belongs to.
+- B33 (2026-10-28): add a concealment factor for squads in buildings so the house ambush can be re-checked with an alert crew (B26)? A tuning call; proposed after B24 D2 left B26 unchanged
 
 ## Phase map (v1.x = M8, v1.5 = M9, then v2+)
 
