@@ -470,7 +470,8 @@ fn range_text(r: Option<f64>, a: &AmmoDef) -> String {
 fn front_vs(a: &AmmoDef, v: &VehicleDef, mm: f64) -> Front {
     let era = v.armour.era.as_ref();
     if a.kind.is_chemical() {
-        Front { armour_mm: mm * v.armour.ce_factor.get(), pen_factor: era.map_or(1.0, |e| 1.0 - e.ce_defeat.get()) }
+        let defeat = era.filter(|_| !a.tandem).map_or(0.0, |e| e.ce_defeat.get());
+        Front { armour_mm: mm * v.armour.ce_factor.get(), pen_factor: 1.0 - defeat }
     } else {
         Front { armour_mm: mm + era.map_or(0.0, |e| e.ke_gain_mm.get()), pen_factor: 1.0 }
     }
@@ -481,7 +482,7 @@ fn defeat_text(ds: &DataSet, a: &AmmoDef, v: &VehicleDef) -> String {
     format!("TURRET FRONT {}  ·  HULL FRONT {}", at(v.armour.turret_front.get()), at(v.armour.hull_front.get()))
 }
 
-const DEFEAT_FORMULA: &str = "PENETRATION AT REMAINING VELOCITY ≥ ARMOUR, TO THE ROUND'S MAX RANGE (CHEMICAL ROUNDS: × CE FACTOR; ERA TILE ASSUMED TO FIRE)";
+const DEFEAT_FORMULA: &str = "PENETRATION AT REMAINING VELOCITY ≥ ARMOUR, TO THE ROUND'S MAX RANGE (CHEMICAL ROUNDS: × CE FACTOR; ERA TILE ASSUMED TO FIRE, NO LOSS FOR TANDEM)";
 
 /// Rows for one small arm or MG (burst model, plan M8B-INFANTRY §4).
 fn small_arm_lines(head: &str, w: &SmallArmDef) -> Vec<Line> {

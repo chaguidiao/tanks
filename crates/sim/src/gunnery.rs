@@ -229,13 +229,16 @@ pub fn bias_sigma_mrad(fc: &FireControlDef, ammo: &AmmoDef, range: f64) -> f64 {
     libm::sqrt(ranging * ranging + b * b)
 }
 
-pub(crate) fn roll(o: &Outcomes, exposed_factor: f64, u: f64) -> Option<KillKind> {
-    let cat = (o.catastrophic.get() * exposed_factor).min(1.0);
+/// Damage roll on table `o`. `behind` scales the catastrophic, firepower and crew outcomes (a small
+/// warhead's narrow path behind the armour; plan M8B-AT-TEAMS §2.3); mobility keeps its value, and
+/// the difference becomes a hit with no lasting effect.
+pub(crate) fn roll(o: &Outcomes, exposed_factor: f64, behind: f64, u: f64) -> Option<KillKind> {
+    let cat = (o.catastrophic.get() * exposed_factor).min(1.0) * behind;
     let mut acc = cat;
     if u < acc {
         return Some(KillKind::Catastrophic);
     }
-    acc += o.firepower.get();
+    acc += o.firepower.get() * behind;
     if u < acc {
         return Some(KillKind::Firepower);
     }
@@ -243,7 +246,7 @@ pub(crate) fn roll(o: &Outcomes, exposed_factor: f64, u: f64) -> Option<KillKind
     if u < acc {
         return Some(KillKind::Mobility);
     }
-    acc += o.crew.get();
+    acc += o.crew.get() * behind;
     if u < acc {
         return Some(KillKind::Crew);
     }
@@ -320,7 +323,8 @@ pub fn resolve(
         && u_era < era.coverage.get()
     {
         era_fired = true;
-        if chemical {
+        // A tandem precursor fires the tile ahead of the main jet (plan M8B-AT-TEAMS §2.4).
+        if chemical && !ammo.tandem {
             p *= 1.0 - era.ce_defeat.get();
         } else {
             armour += era.ke_gain_mm.get() / libm::cos(obliq.min(70f64.to_radians()));
@@ -348,7 +352,8 @@ pub fn resolve(
         (true, false, Face::Front) => &dmg.hull_front_penetration,
         (true, false, _) => &dmg.hull_side_rear_penetration,
     };
-    let kill = roll(table, if penetrated { exposed } else { 1.0 }, u_dmg);
+    let (exposed, behind) = if penetrated { (exposed, ammo.behind_armour_factor()) } else { (1.0, 1.0) };
+    let kill = roll(table, exposed, behind, u_dmg);
     let sights_damaged = !penetrated && u_sight < dmg.non_penetration_sights.get();
     ShotOutcome { hit, turret, face, penetration_mm: p, armour_mm: armour, penetrated, kill, sights_damaged, era_fired }
 }
@@ -376,6 +381,7 @@ pub fn select_round(
         let chem = a.kind.is_chemical();
         let mut p = penetration_mm(pen, a, velocity_at(a, geo.range));
         if chem
+            && !a.tandem
             && era_left > 0
             && face != Face::Rear
             && let Some(era) = &target.armour.era
@@ -996,5 +1002,95 @@ mod tests {
         assert!(p1 > 0.9, "first-round Ph at 1 km = {p1}");
         assert!(p3 < p1 && p3 > 0.3, "Ph at 3 km = {p3}");
         assert!(p3h < p3, "hull-down target harder to hit: {p3h} vs {p3}");
+    }
+
+    /// A side-on shot at 100 m that always hits (geometry for the warhead tests).
+    fn side_shot() -> ShotGeometry {
+        ShotGeometry {
+            range: 100.0,
+            visible: 1.0,
+            bearing_to_shooter: std::f64::consts::FRAC_PI_2,
+            target_heading: 0.0,
+            crossing_speed: 0.0,
+            shooter_moving: false,
+        }
+    }
+
+    fn perfect_sight() -> FireControlDef {
+        let mut fc = ds().vehicle("bulwark_a1").unwrap().fire_control.clone();
+        for s in [&mut fc.aim_error_mrad, &mut fc.ballistic_error_mrad, &mut fc.moving_error_mrad] {
+            s.value = 0.0;
+        }
+        fc
+    }
+
+    #[test]
+    fn a_tandem_rocket_spends_the_tile_without_losing_penetration() {
+        // Target A6 (plan M8B-AT-TEAMS §11): PG-7VR against Kontakt-class ERA; the single-charge
+        // PG-7VL loses the tile's share of its penetration.
+        use rand_chacha::rand_core::SeedableRng;
+        let ds = ds();
+        let t72b = ds.vehicle("kurgan_b").unwrap();
+        let era = t72b.armour.era.as_ref().unwrap();
+        let fc = perfect_sight();
+        let mut fired = (0, 0);
+        for seed in 0..200 {
+            for (id, n) in [("rkt_pg7vr", &mut fired.0), ("rkt_pg7vl", &mut fired.1)] {
+                let a = ds.ammo(id).unwrap();
+                let mut rng = ChaCha8Rng::seed_from_u64(seed);
+                let o = resolve(&fc, t72b, 10, a, &ds.penetration, &ds.damage, &side_shot(), (0.0, 0.0), &mut rng);
+                assert!(o.hit);
+                if o.era_fired {
+                    *n += 1;
+                    let full = a.flat_penetration_mm.as_ref().unwrap().get();
+                    let want = if a.tandem { full } else { full * (1.0 - era.ce_defeat.get()) };
+                    assert!((o.penetration_mm - want).abs() < 1e-9, "{id}: {} vs {want}", o.penetration_mm);
+                }
+            }
+        }
+        assert!(fired.0 > 100 && fired.1 > 100, "tiles fire on most side hits: {fired:?}");
+    }
+
+    #[test]
+    fn light_rockets_need_about_three_hits_to_destroy_a_t72_from_the_side() {
+        // Target A8 (plan M8B-AT-TEAMS §11): PG-7V class hits on a T-72 side until it is destroyed
+        // (catastrophic or firepower kill), mean 2-4 (Grau 1997: 3-6 lethal hits per destroyed
+        // vehicle in Grozny, all aspects). Without the behind-armour factor it would be about one.
+        use rand_chacha::rand_core::SeedableRng;
+        let ds = ds();
+        let t72 = ds.vehicle("kurgan_a").unwrap();
+        let fc = perfect_sight();
+        let mut rng = ChaCha8Rng::seed_from_u64(11);
+        let mean_hits = |a: &AmmoDef, rng: &mut ChaCha8Rng| {
+            let n = 2000;
+            let mut total = 0u32;
+            for _ in 0..n {
+                let (mut fp, mut crew) = (false, 0);
+                for hits in 1..=30 {
+                    // Aim at the centre of mass: half the hits on the turret, half on the hull.
+                    let bias = (gauss(rng) * 3.0, 0.0);
+                    let o = resolve(&fc, t72, 0, a, &ds.penetration, &ds.damage, &side_shot(), bias, rng);
+                    match o.kill {
+                        // A mobility kill leaves the tank fighting (a later firepower kill destroys it).
+                        Some(KillKind::Catastrophic | KillKind::Firepower) => fp = true,
+                        Some(KillKind::Crew) => crew += 1,
+                        Some(KillKind::Mobility) | None => {}
+                    }
+                    if fp || crew >= 2 || hits == 30 {
+                        total += hits;
+                        break;
+                    }
+                }
+            }
+            total as f64 / n as f64
+        };
+        let pg7v = ds.ammo("rkt_pg7v").unwrap().clone();
+        let m = mean_hits(&pg7v, &mut rng);
+        println!("PG-7V hits to destroy a T-72 from the side: {m:.2}");
+        assert!((2.0..=4.0).contains(&m), "mean hits to destroy {m:.2}");
+        let mut full = pg7v.clone();
+        full.behind_armour = None;
+        let one = mean_hits(&full, &mut rng);
+        assert!(one < 1.8, "a full-effect penetration kills at once most of the time: {one:.2}");
     }
 }

@@ -1,11 +1,13 @@
 // Fictional gun-launched laser-beam-riding missile mirroring the 9M119 class (fired from the
-// 125 mm tank gun). Guided: the gunner holds the sight on the target; no ballistic error.
+// 125 mm tank gun). Guided: the gunner holds the sight on the target; no ballistic error. Tandem
+// warhead as in the 9M119M (plan M8B-AT-TEAMS §2.4).
 (
     id: "atgm_refleks",
     name: "ATGM RF-1 (GUN-LAUNCHED)",
     mirrors: "9M119 Svir/Refleks",
     kind: heat,
     guided: true,
+    tandem: true,
     stow: main_gun, // racked and loaded like a 125 mm round
     in_service: (from: 1992),
     muzzle_velocity_mps: (value: 350.0, source: "open-source estimates: average flight speed of the order of 300-400 m/s", confidence: low),

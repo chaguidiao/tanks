@@ -364,7 +364,7 @@ fn burst(ctx: &mut Ctx, side: SideId, at: Vec2) -> Vec<(SideId, Vec2)> {
         if !direct && d > eff.near_radius_m.get() {
             continue;
         }
-        let kill = gunnery::roll(if direct { &ce.direct } else { &ce.near }, 1.0, uniform(ctx.rng));
+        let kill = gunnery::roll(if direct { &ce.direct } else { &ce.near }, 1.0, 1.0, uniform(ctx.rng));
         let sights = !direct && uniform(ctx.rng) < ce.near_sights.get();
         let kill = gunnery::apply_damage(ctx.world, k, kill, sights);
         let pen = kill.is_some_and(|kk| kk != KillKind::Crew);
