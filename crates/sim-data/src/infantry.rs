@@ -285,6 +285,30 @@ pub struct InfantryDoctrine {
     pub ambush: AmbushDoctrine,
     /// Vehicles' react to ambush (near) (plan M8F1-INFANTRY-AI §2).
     pub react_ambush: ReactAmbushDoctrine,
+    /// Tank-only platoons and built-up ground (plan M8F1-INFANTRY-AI §3).
+    pub built_up: BuiltUpDoctrine,
+    /// When the commander's IFVs put their squads on the ground (plan M8F1-INFANTRY-AI §4).
+    pub dismount: DismountDoctrine,
+}
+
+/// Commander-AI dismount points for carrier platoons.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DismountDoctrine {
+    /// Attack: the squads dismount when the carriers are this close to the objective, or a
+    /// fresh contact is this close to them (m).
+    pub attack_m: Stat<f64>,
+}
+
+/// How tank-only platoons keep out of built-up ground (FM 3-06.11 (2002)).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuiltUpDoctrine {
+    /// Ground this close to a building counts as built-up (m).
+    pub margin_m: Stat<f64>,
+    /// Route-planning speed on built-up ground, as a fraction of the vehicle's own: the planner
+    /// takes a detour up to about 1 / factor as long instead.
+    pub speed_factor: Stat<f64>,
+    /// A platoon with friendly squads on the ground this close enters built-up ground (m).
+    pub support_radius_m: Stat<f64>,
 }
 
 /// How vehicles react when rockets or missiles are fired at them from close range.
@@ -309,6 +333,11 @@ pub struct AmbushDoctrine {
     /// Hold fire on a vehicle showing its front while its front cannot be penetrated, until the
     /// squad is fired on.
     pub prefer_flank: bool,
+    /// Shoot and move: after this many rockets or missiles from one building the squad moves to
+    /// the next (plan M8F1-INFANTRY-AI §5).
+    pub displace_after_shots: Stat<f64>,
+    /// Looking this far for the next building (m).
+    pub displace_radius_m: Stat<f64>,
 }
 
 #[cfg(test)]

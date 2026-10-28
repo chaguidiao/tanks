@@ -499,7 +499,32 @@ fn run_actions(actions: &[StepAction], n: u16, at: crate::Vec2, p: &mut Platoon,
                     drill = true;
                 }
             }
-            StepAction::Dismount | StepAction::Mount | StepAction::OccupyBuilding => {}
+            StepAction::OccupyBuildings { radius_m, facing } if p.dismount => {
+                let squads: Vec<usize> = p
+                    .alive_members(ctx.world)
+                    .into_iter()
+                    .filter(|&k| ctx.world.squad[k].as_ref().is_some_and(|s| s.mounted_in.is_none() && !s.ineffective))
+                    .collect();
+                let chosen = crate::infantry::choose_buildings(
+                    ctx.world,
+                    ctx.map,
+                    ctx.td,
+                    at,
+                    *radius_m,
+                    *facing,
+                    squads.len(),
+                    None,
+                );
+                for (&k, b) in squads.iter().zip(chosen) {
+                    let unit = ctx.world.id[k];
+                    ctx.sim_cmds.push((p.side, Command::OccupyBuilding { to: Addressee::Unit(unit), building: b }));
+                    drill = true;
+                }
+            }
+            StepAction::Dismount
+            | StepAction::Mount
+            | StepAction::OccupyBuilding
+            | StepAction::OccupyBuildings { .. } => {}
         }
     }
     drill

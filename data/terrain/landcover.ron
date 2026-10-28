@@ -50,7 +50,7 @@
         canopy_height_m: (value: 0.0, source: "estimate", confidence: estimate),
         attenuation_per_m: (value: 0.0, source: "TERRAIN.md §5.3 Beer–Lambert; estimate", confidence: estimate),
         foot_speed_factor: (value: 0.4, source: "FM 3-21.18 Foot Marches (2017) ch. 1, terrain and march rates; estimate", confidence: estimate, notes: "Wading; depth checked separately against the fording depth.")),
-    (id: 8, name: "village", display_rgb: (70, 66, 62),
+    (id: 8, name: "village", display_rgb: (70, 66, 62), built_up: true,
         speed_factor: (value: 0.4, source: "TERRAIN.md §5.4", confidence: estimate, notes: "Streets and gardens between buildings; buildings themselves are not modelled yet."),
         micro_relief_m: (value: 0.2, source: "estimate", confidence: estimate),
         canopy_height_m: (value: 4.0, source: "estimate", confidence: estimate, notes: "Gardens, hedges and trees between buildings; buildings themselves are footprints."),

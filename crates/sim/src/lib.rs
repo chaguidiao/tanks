@@ -12,6 +12,7 @@
 //! reports → gunnery → impacts → mobility → pictures.
 
 pub mod antiarmour;
+pub mod builtup;
 pub mod command;
 pub mod control;
 pub mod fires;
@@ -107,6 +108,8 @@ pub struct Sim {
     side_names: Vec<String>,
     platoons: Vec<platoon::Platoon>,
     pathfinder: Pathfinder,
+    /// Speed rasters for routes round built-up ground, per (side, vehicle id).
+    avoid: builtup::AvoidLayers,
     rngs: Rngs,
     start_time_s: u32,
     los_cache: sensors::LosCache,
@@ -488,6 +491,22 @@ impl Sim {
             }
         }
         let logpacs = logpacs(scenario, &platoons, &batteries)?;
+        let avoid = {
+            let fielded: Vec<(u8, &sim_data::BuiltUpDoctrine, Vec<String>)> = sides
+                .iter()
+                .enumerate()
+                .map(|(si, s)| {
+                    let mut v: Vec<String> = (0..world.len())
+                        .filter(|&k| world.side[k].0 as usize == si)
+                        .filter_map(|k| world.vehicle[k].map(|vi| vehicles[vi].id.clone()))
+                        .collect();
+                    v.sort();
+                    v.dedup();
+                    (si as u8, &s.doctrine.infantry.built_up, v)
+                })
+                .collect();
+            builtup::layers(&map, &data.terrain, &fielded)
+        };
         let mut sim = Self {
             tick: 0,
             map,
@@ -505,6 +524,7 @@ impl Sim {
             side_names: scenario.sides.iter().map(|s| s.name.clone()).collect(),
             platoons,
             pathfinder: Pathfinder::new(),
+            avoid,
             rngs: Rngs::new(scenario.seed),
             start_time_s: scenario.start_time_s,
             los_cache: sensors::LosCache::default(),
@@ -731,6 +751,11 @@ impl Sim {
                             kind: PositionKind::HullDown,
                         },
                         ai::commander::Order::Halt { platoon } => Command::Halt { to: Addressee::Platoon(platoon) },
+                        ai::commander::Order::Dismount { platoon } => Command::Dismount { platoon },
+                        ai::commander::Order::Plan { platoon, plan } => {
+                            let start = plan.steps.first().map_or(1, |s| s.id);
+                            Command::SetPlan { platoon, plan, start }
+                        }
                         ai::commander::Order::CallFire { battery, at, volleys, smoke } => Command::CallForFire {
                             battery,
                             at,
@@ -763,6 +788,7 @@ impl Sim {
                 loadouts: &self.loadouts,
                 ammo: &self.ammo,
                 logistics: &self.data.logistics,
+                avoid: &self.avoid,
                 recalled: Vec::new(),
             };
             platoon_ai::step(&mut self.platoons, &mut ctx);
@@ -1911,7 +1937,7 @@ impl Sim {
 /// Behaviour version of the simulation. A replay records it and is only played back by a build
 /// with the same version: bump it whenever a change makes an old command log play out
 /// differently (plan M8B-INFANTRY §8, DESIGN.md §14 #29). Replays from before versioning read as 0.
-pub const SIM_VERSION: u32 = 5;
+pub const SIM_VERSION: u32 = 6;
 
 /// A recorded game: scenario id plus the external command log. Re-simulating it reproduces the
 /// game exactly (determinism), which is what the after-action review and replays rely on.

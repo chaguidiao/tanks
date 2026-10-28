@@ -121,6 +121,8 @@ const RAMP_M: f64 = 6.0;
 const REACT_SUPPRESSION: f64 = 0.3;
 /// After this long quiet in cover, a squad that reacted to contact continues its move (s).
 const REACT_QUIET_S: f64 = 30.0;
+/// A building covers a direction if it sees a point this far out along it (m).
+const COVER_AXIS_M: f64 = 500.0;
 
 pub struct Ctx<'a> {
     pub world: &'a mut World,
@@ -249,8 +251,123 @@ pub fn occupy_here(world: &mut World, map: &terrain::BakedMap, td: &sim_data::Te
     if let Some(s) = world.squad[k].as_mut() {
         s.in_building = Some(b.id);
         s.posture = Posture::DugIn;
+        s.shots_here = 0;
+        s.shelled_here = false;
     }
     true
+}
+
+/// Squads already in building `id`.
+fn occupants(world: &World, id: u32) -> usize {
+    (0..world.len())
+        .filter(|&q| world.alive(q) && world.squad[q].as_ref().is_some_and(|s| s.in_building == Some(id)))
+        .count()
+}
+
+/// Buildings for `n` squads within `radius` m of `centre` that cover the direction `facing`
+/// (plan M8F1-INFANTRY-AI §5; FM 3-06.11 (2002): positions in buildings that cover the avenue
+/// of approach, masonry and upper floors preferred). One squad to a building while there are
+/// enough, then filled up to capacity. A building sees the approach if its facade towards a
+/// point 500 m out along `facing` has a line of sight to it.
+#[allow(clippy::too_many_arguments)]
+pub fn choose_buildings(
+    world: &World,
+    map: &terrain::BakedMap,
+    td: &sim_data::TerrainData,
+    centre: crate::Vec2,
+    radius: f64,
+    facing: f64,
+    n: usize,
+    exclude: Option<u32>,
+) -> Vec<u32> {
+    let g = terrain::ground::Ground::new(map, td);
+    let axis = [centre[0] + libm::sin(facing) * COVER_AXIS_M, centre[1] + libm::cos(facing) * COVER_AXIS_M];
+    let mut scored: Vec<(f64, u32, usize)> = map
+        .buildings
+        .iter()
+        .filter(|b| !b.entrances.is_empty() && Some(b.id) != exclude)
+        .filter_map(|b| {
+            let c = [b.centroid[0] as f64, b.centroid[1] as f64];
+            let d = crate::dist(c, centre);
+            if d > radius {
+                return None;
+            }
+            let cap = td.squad_capacity(b.class, b.footprint_m2 as f64, b.height_m as f64) as usize;
+            let room = cap.saturating_sub(occupants(world, b.id));
+            if room == 0 {
+                return None;
+            }
+            let floors = td.floors(b.class, b.height_m as f64);
+            let floor = (floors.min(2) - 1) as f64 * td.building(b.class).floor_height_m.get();
+            let face = facade_point(map, b.id, c, axis);
+            let sees = terrain::los::sight(&g, face, floor + 1.5, axis, &[1.0]).any();
+            let ahead =
+                ((c[0] - centre[0]) * libm::sin(facing) + (c[1] - centre[1]) * libm::cos(facing)) / radius.max(1.0);
+            let walls = 1.0 - td.protection(b.class, sim_data::BuildingThreat::Fragments);
+            let score = 2.0 * sees as u8 as f64 + 0.5 * ahead + walls + 0.3 * (floors > 1) as u8 as f64;
+            Some((score, b.id, room))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    let mut out: Vec<u32> = scored.iter().take(n).map(|s| s.1).collect();
+    'fill: while out.len() < n {
+        let before = out.len();
+        for &(_, id, room) in &scored {
+            if out.iter().filter(|&&x| x == id).count() < room {
+                out.push(id);
+                if out.len() == n {
+                    break 'fill;
+                }
+            }
+        }
+        if out.len() == before {
+            break;
+        }
+    }
+    out
+}
+
+/// Anti-tank teams shoot and move (plan M8F1-INFANTRY-AI §5, decision #4; Grau (FMSO, 1997):
+/// Grozny hunter-killer teams fired and changed position before the return fire): after the
+/// doctrine's number of rockets or missiles from one building, or once HE reaches it there, a
+/// squad with launchers left moves to the next building that covers the threat, not nearer to it.
+fn displace(ctx: &mut Ctx, k: usize) {
+    let Some(s) = ctx.world.squad[k].as_ref() else { return };
+    let Some(here) = s.in_building else { return };
+    let amb = &ctx.doctrines[ctx.world.side[k].0 as usize].infantry.ambush;
+    let due = s.shots_here as f64 >= amb.displace_after_shots.get() || s.shelled_here;
+    let armed = s.anti_armour.iter().any(|w| w.stock.iter().any(|&n| n > 0));
+    if !due || !armed || s.ineffective || s.boarding.is_some() || ctx.world.suppression[k] > REACT_SUPPRESSION * 2.0 {
+        return;
+    }
+    let pos = ctx.world.transform[k].pos;
+    // Towards the nearest vehicle it tracks (its own sight of the enemy).
+    let threat = ctx.world.sensors[k].as_ref().and_then(|sn| {
+        sn.tracks
+            .iter()
+            .filter(|t| ctx.world.alive(t.target) && ctx.world.vehicle[t.target].is_some())
+            .min_by(|a, b| a.range_m.total_cmp(&b.range_m).then(a.target.cmp(&b.target)))
+            .map(|t| ctx.world.transform[t.target].pos)
+    });
+    let Some(threat) = threat else { return };
+    let facing = ai::drive::bearing(pos, threat);
+    let r = amb.displace_radius_m.get();
+    let to_threat = crate::dist(pos, threat);
+    let next = choose_buildings(ctx.world, ctx.map, ctx.td, pos, r, facing, 4, Some(here))
+        .into_iter()
+        .filter_map(|id| ctx.map.building(id))
+        .find(|b| crate::dist([b.centroid[0] as f64, b.centroid[1] as f64], threat) >= to_threat - 10.0)
+        .map(|b| b.id);
+    let Some(goal) = next.and_then(|id| ctx.map.building_goal(id)) else { return };
+    let Some(route) = foot_route(ctx.map, ctx.pathfinder, pos, &[], goal) else { return };
+    ctx.world.set_route(k, route, None, None, true, FOOT_ARRIVE_M);
+    if let Some(s) = ctx.world.squad[k].as_mut() {
+        s.in_building = None;
+        s.shots_here = 0;
+        s.shelled_here = false;
+        s.posture = Posture::Moving;
+        s.halted_s = 0.0;
+    }
 }
 
 /// Squad AI and carrier drills (5 Hz, after the vehicle AI so a carrier in a ramp drill is held).
@@ -263,6 +380,7 @@ pub fn step(ctx: &mut Ctx) {
             continue;
         }
         boarding(ctx, k, dt);
+        displace(ctx, k);
         posture(ctx, k, dt);
         react_to_contact(ctx, k);
     }

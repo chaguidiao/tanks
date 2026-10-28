@@ -75,6 +75,12 @@
             missile_trigger_m: (value: 2000.0, source: "FM 100-2-3 (1991): Fagot class to 2,000 m; estimate", confidence: estimate,
                 notes: "Capped by each missile's own maximum range."),
             prefer_flank: true,
+            // Shoot and move (plan M8F1-INFANTRY-AI §5): Grau (FMSO, 1997), Grozny hunter-killer
+            // teams changed position after firing; FM 3-23.25 (2001): the backblast gives the
+            // firing position away (wording to verify).
+            displace_after_shots: (value: 2.0, source: "estimate (plan M8F1-INFANTRY-AI decision #4)", confidence: estimate),
+            displace_radius_m: (value: 250.0, source: "estimate", confidence: estimate,
+                notes: "The next house or two along the street."),
         ),
         // Vehicles' react to ambush (near) (plan M8F1-INFANTRY-AI §2): ATP 3-21.8 (2016) battle drill
         // react to ambush (near): leave the kill zone at once and return fire; ATP 3-20.15 App. F
@@ -87,6 +93,23 @@
                 notes: "Back along the ground just driven, about a village block, before fighting from there."),
             drive_through_s: (value: 60.0, source: "estimate", confidence: estimate,
                 notes: "Time to clear a kill zone of a few hundred metres at road speed."),
+        ),
+        // Tanks and built-up ground (plan M8F1-INFANTRY-AI §3, decided 2026-10-28): FM 3-06.11 (2002)
+        // Combined Arms Operations in Urban Terrain: tanks do not enter built-up areas without
+        // dismounted infantry; they overwatch from stand-off. A leg's BUILT-UP ENTER overrides it.
+        built_up: (
+            margin_m: (value: 30.0, source: "estimate", confidence: estimate,
+                notes: "About a house plot and a street: ground the crews cannot see round."),
+            speed_factor: (value: 0.2, source: "estimate", confidence: estimate,
+                notes: "Routes accept up to about five times the distance to stay out of built-up ground."),
+            support_radius_m: (value: 300.0, source: "estimate", confidence: estimate,
+                notes: "Friendly squads on the ground this close can clear ahead of the tanks."),
+        ),
+        // Commander-AI dismount points (plan M8F1-INFANTRY-AI §4): the squads go on foot when
+        // the carriers are this close to the objective or to a fresh contact; the IFVs then
+        // overwatch from there and move up when the objective is taken.
+        dismount: (
+            attack_m: (value: 400.0, source: "FM 100-2-1 (1984) ch. 5: in a dismounted attack the motorised rifle squads dismount 300-400 m short of the enemy forward positions; estimate", confidence: estimate),
         ),
     ),
 )

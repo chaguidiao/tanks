@@ -24,6 +24,10 @@ pub struct LandCoverDef {
     pub is_forest: bool,
     #[serde(default)]
     pub is_water: bool,
+    /// Settled ground (villages, towns): tank-only platoons route round it (plan
+    /// M8F1-INFANTRY-AI §3).
+    #[serde(default)]
+    pub built_up: bool,
 }
 
 /// Soil class table (`data/terrain/soils.ron`).

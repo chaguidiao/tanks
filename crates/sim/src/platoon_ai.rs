@@ -64,28 +64,68 @@ pub struct Ctx<'a> {
     pub loadouts: &'a [Vec<usize>],
     pub ammo: &'a [sim_data::AmmoDef],
     pub logistics: &'a sim_data::LogisticsModel,
+    /// Speed rasters round built-up ground (crate::builtup).
+    pub avoid: &'a crate::builtup::AvoidLayers,
     /// Carrier platoons whose plans called their squads back aboard this tick: the orders and
     /// plans of their dismount platoons end.
     pub recalled: Vec<PlatoonId>,
 }
 
-impl Ctx<'_> {
+impl<'a> Ctx<'a> {
     pub(crate) fn report(&mut self, p: &Platoon, r: PlatoonReport) {
         self.events.push(Event::PlatoonReport { side: p.side, platoon: p.id, report: r });
     }
 
-    fn route(&mut self, k: usize, to: Vec2) -> Option<Vec<Vec2>> {
-        let vi = self.world.vehicle[k]?;
-        let layer = self.map.mobility(&self.vehicles[vi].id)?;
-        self.pathfinder.find(&layer.speed, self.map.manifest.cell_size_m, self.world.transform[k].pos, to)
+    /// The speed raster member `k`'s routes are planned on: its own, or the one round built-up
+    /// ground (`avoid`).
+    fn speed(&self, k: usize, avoid: bool) -> Option<&'a terrain::Grid<u8>> {
+        let (map, layers): (&'a BakedMap, &'a crate::builtup::AvoidLayers) = (self.map, self.avoid);
+        let id = &self.vehicles[self.world.vehicle[k]?].id;
+        if avoid && let Some(g) = layers.get(&(self.world.side[k].0, id.clone())) {
+            return Some(g);
+        }
+        Some(&map.mobility(id)?.speed)
+    }
+
+    fn route(&mut self, k: usize, to: Vec2, avoid: bool) -> Option<Vec<Vec2>> {
+        let (cell, from) = (self.map.manifest.cell_size_m, self.world.transform[k].pos);
+        let speed = self.speed(k, avoid)?;
+        self.pathfinder.find(speed, cell, from, to)
     }
 
     /// Route through checkpoints; also returns the arc length of each checkpoint.
-    fn route_via(&mut self, k: usize, via: &[Vec2], to: Vec2) -> Option<(Vec<Vec2>, Vec<f64>)> {
-        let vi = self.world.vehicle[k]?;
-        let layer = self.map.mobility(&self.vehicles[vi].id)?;
-        self.pathfinder.find_via(&layer.speed, self.map.manifest.cell_size_m, self.world.transform[k].pos, via, to)
+    fn route_via(&mut self, k: usize, via: &[Vec2], to: Vec2, avoid: bool) -> Option<(Vec<Vec2>, Vec<f64>)> {
+        let (cell, from) = (self.map.manifest.cell_size_m, self.world.transform[k].pos);
+        let speed = self.speed(k, avoid)?;
+        self.pathfinder.find_via(speed, cell, from, via, to)
     }
+}
+
+/// Does the platoon route round built-up ground (plan M8F1-INFANTRY-AI §3; FM 3-06.11)? Tanks
+/// without dismounted support do, unless the leg says BUILT-UP ENTER; carriers and platoons with
+/// friendly squads on the ground close by do not.
+fn avoids_built_up(p: &Platoon, ctx: &Ctx) -> bool {
+    use ai::picture::BuiltUp;
+    if p.built_up == BuiltUp::Enter || p.dismount {
+        return false;
+    }
+    let w = &ctx.world;
+    if p.members.iter().any(|&k| w.carrier[k].is_some()) {
+        return false;
+    }
+    let alive = p.alive_members(w);
+    if alive.is_empty() {
+        return false;
+    }
+    let c = centroid(w, &alive);
+    let r = ctx.doctrines[p.side.0 as usize].infantry.built_up.support_radius_m.get();
+    let supported = (0..w.len()).any(|q| {
+        w.side[q] == p.side
+            && w.alive(q)
+            && w.squad[q].as_ref().is_some_and(|s| s.mounted_in.is_none() && !s.ineffective)
+            && dist(w.transform[q].pos, c) <= r
+    });
+    !supported
 }
 
 pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
@@ -356,6 +396,7 @@ fn section(i: usize, n: usize) -> usize {
 }
 
 fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
+    let avoid = avoids_built_up(p, ctx);
     let movers: Vec<usize> = p.members.iter().copied().filter(|&k| ctx.world.can_move(k)).collect();
     let PlatoonOrder::Move { destination, via, mut checkpoints, mut route, mut progress, mut active } = p.order.clone()
     else {
@@ -367,7 +408,7 @@ fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
     }
     if route.is_empty() {
         let leader = movers[0];
-        match ctx.route_via(leader, &via, destination) {
+        match ctx.route_via(leader, &via, destination, avoid) {
             Some((r, marks)) => {
                 route = r;
                 checkpoints = marks;
@@ -463,7 +504,7 @@ fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
         let d_slot = dist(p.slot_targets[i], sp);
         let moved = d_slot.is_nan() || d_slot >= REPLAN_DISTANCE;
         if far && (moved || replan_due) {
-            if let Some(r) = ctx.route(k, sp) {
+            if let Some(r) = ctx.route(k, sp, avoid) {
                 let limit = ctx.vehicles[ctx.world.vehicle[k].expect("vehicle")]
                     .mobility
                     .max_speed_road_mps
@@ -498,6 +539,7 @@ fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
 /// the rest wait in a holding line on the approach side. When every member is done the platoon
 /// reports and holds. Members that cannot move are skipped.
 fn resupply_step(p: &mut Platoon, ctx: &mut Ctx) {
+    let avoid = avoids_built_up(p, ctx);
     use crate::logistics::{Tables, transfer};
     use ai::picture::ServiceStage;
     let PlatoonOrder::Resupply { point, approach, mut members } = p.order.clone() else { return };
@@ -545,7 +587,7 @@ fn resupply_step(p: &mut Platoon, ctx: &mut Ctx) {
         let idle = ctx.world.ai[k].as_ref().is_some_and(|a| matches!(a.order, Order::Idle | Order::Face { .. }));
         let moved = st.goal[0].is_nan() || dist(st.goal, goal) > 1.0;
         if dist(pos, goal) > arrive && (moved || idle) {
-            if let Some(r) = ctx.route(k, goal) {
+            if let Some(r) = ctx.route(k, goal, avoid) {
                 ctx.world.set_route(k, r, p.speed_limit, None, true, arrive);
             }
             st.goal = goal;
@@ -571,6 +613,7 @@ fn assign_positions(
     facing: f64,
     kind: PositionKind,
 ) {
+    let avoid = avoids_built_up(p, ctx);
     let movers: Vec<usize> = p.members.iter().copied().filter(|&k| ctx.world.can_move(k)).collect();
     let Some(vi) = movers.first().and_then(|&k| ctx.world.vehicle[k]) else { return };
     let v = &ctx.vehicles[vi];
@@ -606,7 +649,7 @@ fn assign_positions(
     }
     p.bp.clear();
     for (&k, c) in movers.iter().zip(chosen) {
-        if let Some(r) = ctx.route(k, c.pos) {
+        if let Some(r) = ctx.route(k, c.pos, avoid) {
             ctx.world.set_route(k, r, None, Some(facing), true, BP_ARRIVE);
         }
         p.bp.push((k, c));

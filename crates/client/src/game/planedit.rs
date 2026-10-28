@@ -131,6 +131,8 @@ pub enum Pick {
     Bp(PositionKind),
     FireSmoke,
     CallFire(FireKind),
+    /// Squads: the direction their buildings must cover.
+    Buildings,
     Move,
 }
 
@@ -138,6 +140,7 @@ impl Pick {
     pub fn prompt(self) -> &'static str {
         match self {
             Pick::Face => "CLICK THE DIRECTION TO FACE",
+            Pick::Buildings => "CLICK THE DIRECTION THE BUILDINGS MUST COVER",
             Pick::Bp(_) => "CLICK THE THREAT DIRECTION OF THE BATTLE POSITION",
             Pick::FireSmoke => "CLICK THE SMOKE AIM POINT",
             Pick::CallFire(_) => "CLICK THE FIRE MISSION TARGET",
@@ -232,6 +235,9 @@ fn speed_text(s: SpeedSetting) -> String {
         SpeedSetting::Limit(v) => format!("{} KM/H", format::kmh(v)),
     }
 }
+
+/// OCCUPY BUILDINGS FACING: buildings this close to the checkpoint (m).
+const SQUAD_BUILDINGS_M: f64 = 200.0;
 
 /// ON AMBUSH values (plan M8F1-INFANTRY-AI §2).
 pub(super) const AMBUSH_REACTIONS: [AmbushReaction; 3] =
@@ -521,6 +527,7 @@ impl Game {
                 return;
             }
             Pick::Face => StepAction::Face { bearing },
+            Pick::Buildings => StepAction::OccupyBuildings { radius_m: SQUAD_BUILDINGS_M, facing: bearing },
             Pick::Bp(kind) => StepAction::OccupyBp { radius_m: radius, facing: bearing, kind },
             Pick::FireSmoke => StepAction::FireSmoke { at: world, rounds: 1 },
             Pick::CallFire(kind) => {
@@ -803,6 +810,9 @@ impl Game {
             let occ = MenuItem::new("OCCUPY BUILDING", act(ActKind::OccupyBuilding)).key("O");
             return vec![
                 if near { occ } else { occ.disabled("NO BUILDING AT THE CP") },
+                MenuItem::new("OCCUPY BUILDINGS FACING...", act(ActKind::Pick(Pick::Buildings)))
+                    .key("B")
+                    .tip("ONE SQUAD TO A HOUSE WITHIN 200 M OF THE CP THAT SEES THE DIRECTION YOU CLICK (MASONRY, UPPER FLOORS FIRST)"),
                 cff("Y"),
                 MenuItem::new("REPORT", act(ActKind::Report)).key("R"),
                 clear,
@@ -1166,6 +1176,7 @@ impl Game {
                 StepAction::Dismount => "DISMOUNT".into(),
                 StepAction::Mount => "MOUNT".into(),
                 StepAction::OccupyBuilding => "OCC BLDG".into(),
+                StepAction::OccupyBuildings { facing, .. } => format!("OCC BLDGS {}", format::mils(*facing)),
             })
             .collect();
         v.join(", ")

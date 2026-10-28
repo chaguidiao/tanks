@@ -456,6 +456,13 @@ pub enum StepAction {
     /// Dismount platoon: occupy the building at (or nearest to) the checkpoint; the plan holds
     /// until the squads are inside or stopped.
     OccupyBuilding,
+    /// Dismount platoon: occupy buildings within `radius_m` of the checkpoint that cover the
+    /// direction `facing`, one squad to a building where there are enough (plan
+    /// M8F1-INFANTRY-AI §5).
+    OccupyBuildings {
+        radius_m: f64,
+        facing: f64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

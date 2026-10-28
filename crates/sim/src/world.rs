@@ -204,6 +204,10 @@ pub struct SquadState {
     /// Ambush sprung: the squad has fired its anti-armour weapons or been fired on, so it no
     /// longer holds fire for the kill zone (plan M8B-AT-TEAMS §2.2).
     pub sprung: bool,
+    /// Rockets and missiles fired from the building it occupies, and whether HE has reached it
+    /// there: the cues to move to the next building (plan M8F1-INFANTRY-AI §5).
+    pub shots_here: u8,
+    pub shelled_here: bool,
 }
 
 /// An IFV's troop compartment.
@@ -359,6 +363,8 @@ impl World {
             night_aid: def.aiming_aid_in(year).map(|a| a.night_factor.get()),
             anti_armour,
             sprung: false,
+            shots_here: 0,
+            shelled_here: false,
         }));
         self.carrier.push(None);
         self.coax.push(None);
@@ -532,6 +538,10 @@ impl World {
                     h.f64(w.cooldown);
                 }
                 h.u8(s.sprung as u8);
+                if s.shots_here > 0 || s.shelled_here {
+                    h.u8(s.shots_here);
+                    h.u8(s.shelled_here as u8);
+                }
             }
             if let Some(c) = &self.carrier[k]
                 && (!c.embarked.is_empty() || c.dismounting.is_some())

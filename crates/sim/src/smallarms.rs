@@ -306,8 +306,12 @@ pub fn he_burst(
             Posture::DugIn => model.he_exposure.dug_in.get(),
         };
         let p = (frac * exposure * prot * s.fragment_factor).clamp(0.0, 1.0);
+        let shelled = s.in_building.is_some() && frac > 0.0;
         let lost = (0..s.strength).filter(|_| uniform(rng) < p).count() as u8;
         let thr = ineffective[world.side[k].0 as usize];
+        if shelled && let Some(s) = world.squad[k].as_mut() {
+            s.shelled_here = true;
+        }
         crate::infantry::casualties(world, k, lost, by, CasualtyCause::HighExplosive, thr, events);
     }
 }

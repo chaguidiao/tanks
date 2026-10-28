@@ -24,14 +24,42 @@
 
 use sim_data::{BattlePosition, DoctrinePack, Formation, Mission, ObjectiveDef, Technique};
 
-use crate::picture::{BatteryStatus, Condition, PerceivedWorld, PlatoonId, Vec2};
+use crate::picture::{
+    BatteryStatus, Condition, PerceivedWorld, Plan, PlanStep, PlatoonId, PositionKind, SquadPosture, StepAction, Vec2,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Order {
-    Move { platoon: PlatoonId, destination: Vec2, formation: Formation, technique: Technique },
-    Occupy { platoon: PlatoonId, centre: Vec2, radius: f64, facing: f64 },
-    Halt { platoon: PlatoonId },
-    CallFire { battery: u32, at: Vec2, volleys: u32, smoke: bool },
+    Move {
+        platoon: PlatoonId,
+        destination: Vec2,
+        formation: Formation,
+        technique: Technique,
+    },
+    Occupy {
+        platoon: PlatoonId,
+        centre: Vec2,
+        radius: f64,
+        facing: f64,
+    },
+    Halt {
+        platoon: PlatoonId,
+    },
+    CallFire {
+        battery: u32,
+        at: Vec2,
+        volleys: u32,
+        smoke: bool,
+    },
+    /// The carrier platoon's squads dismount where they are.
+    Dismount {
+        platoon: PlatoonId,
+    },
+    /// A checkpoint plan (dismount platoons, and carriers that must pick up their squads).
+    Plan {
+        platoon: PlatoonId,
+        plan: Plan,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -74,6 +102,12 @@ pub struct TaskState {
     /// platoon reported in position.
     pub assault_pos: Vec<(PlatoonId, Vec2)>,
     pub sync_since_s: Option<f64>,
+    /// Carrier platoons of the task whose squads it has put on the ground: they overwatch
+    /// instead of assaulting (plan M8F1-INFANTRY-AI §4).
+    pub dismounted: Vec<PlatoonId>,
+    /// Plans for dismount platoons, sent once their squads are out: (carrier platoon, plan,
+    /// squads seen aboard since the plan was made).
+    pub squad_plans: Vec<(PlatoonId, Plan, bool)>,
 }
 
 impl TaskState {
@@ -98,6 +132,8 @@ impl TaskState {
             displace_loss_mark: 0.0,
             assault_pos: Vec::new(),
             sync_since_s: None,
+            dismounted: Vec::new(),
+            squad_plans: Vec::new(),
         }
     }
 }
@@ -108,6 +144,12 @@ pub struct Commander {
     /// Time of the last call for fire (s).
     pub last_call_s: f64,
 }
+
+/// Defending squads take buildings this far beyond the battle position's radius (m; plan
+/// M8F1-INFANTRY-AI §5: within about 300 m of the position).
+const SQUAD_BUILDINGS_M: f64 = 150.0;
+/// Carriers are sent to their dismount point when this much short of it (m).
+const DISMOUNT_LEAD_M: f64 = 400.0;
 
 fn dist(a: Vec2, b: Vec2) -> f64 {
     libm::sqrt((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2))
@@ -181,12 +223,72 @@ impl Commander {
 
     /// Occupy `pos` with the active platoons side by side across the threat axis.
     fn occupy_all(out: &mut Vec<Order>, active: &[(usize, PlatoonId)], pos: &BattlePosition) {
+        for (p, c, f) in Self::bp_slots(active, pos) {
+            out.push(Order::Occupy { platoon: p, centre: c, radius: pos.radius_m, facing: f });
+        }
+    }
+
+    fn bp_slots(active: &[(usize, PlatoonId)], pos: &BattlePosition) -> Vec<(PlatoonId, Vec2, f64)> {
         let n = active.len() as f64;
         let f = pos.facing_deg.to_radians();
-        for (k, (_, p)) in active.iter().enumerate() {
-            let off = (k as f64 - (n - 1.0) / 2.0) * pos.radius_m * 1.6;
-            let c = crate::formation::slot_position(pos.centre, f, (off, 0.0));
-            out.push(Order::Occupy { platoon: *p, centre: c, radius: pos.radius_m, facing: f });
+        active
+            .iter()
+            .enumerate()
+            .map(|(k, (_, p))| {
+                let off = (k as f64 - (n - 1.0) / 2.0) * pos.radius_m * 1.6;
+                (*p, crate::formation::slot_position(pos.centre, f, (off, 0.0)), f)
+            })
+            .collect()
+    }
+
+    /// The dismount platoon of carrier platoon `p`, and whether any of its squads ride (picture
+    /// only: own units).
+    fn troops(pic: &PerceivedWorld, p: PlatoonId) -> Option<(PlatoonId, bool)> {
+        let pv = pic.platoon(p)?;
+        let squads: Vec<_> = pic
+            .own
+            .iter()
+            .filter(|u| u.condition != Condition::Destroyed)
+            .filter(|u| u.squad.as_ref().and_then(|s| s.carrier).is_some_and(|c| pv.members.contains(&c)))
+            .collect();
+        let dp = squads.iter().find_map(|u| u.platoon)?;
+        let aboard = squads.iter().any(|u| u.squad.as_ref().is_some_and(|s| s.posture == SquadPosture::Mounted));
+        Some((dp, aboard))
+    }
+
+    /// Defend with IFVs (plan M8F1-INFANTRY-AI §4; ATP 3-21.71 (2010) ch. 3): the carriers drive
+    /// to their slot of the battle position, dismount there and take it; the squads, once out,
+    /// move to the house (or ground) at the front of the position. With `mount`, the squads first
+    /// walk back and board where the carriers stand (displacement to the next position).
+    #[allow(clippy::too_many_arguments)]
+    fn defend_with_troops(
+        t: &mut TaskState,
+        out: &mut Vec<Order>,
+        p: PlatoonId,
+        c: Vec2,
+        pos: &BattlePosition,
+        f: f64,
+        here: Option<Vec2>,
+    ) {
+        let mut steps = Vec::new();
+        if let Some(h) = here {
+            let mut s = PlanStep::new(1, h);
+            s.actions = vec![StepAction::Mount];
+            steps.push(s);
+        }
+        let mut s = PlanStep::new(steps.len() as u16 + 1, c);
+        s.actions = vec![
+            StepAction::Dismount,
+            StepAction::OccupyBp { radius_m: pos.radius_m, facing: f, kind: PositionKind::HullDown },
+        ];
+        steps.push(s);
+        out.push(Order::Plan { platoon: p, plan: Plan { steps } });
+        let mut sq = PlanStep::new(1, c);
+        sq.actions = vec![StepAction::OccupyBuildings { radius_m: pos.radius_m + SQUAD_BUILDINGS_M, facing: f }];
+        t.squad_plans.retain(|(q, ..)| *q != p);
+        t.squad_plans.push((p, Plan { steps: vec![sq] }, here.is_none()));
+        if !t.dismounted.contains(&p) {
+            t.dismounted.push(p);
         }
     }
 
@@ -255,6 +357,17 @@ impl Commander {
                 t.phase = Phase::BrokenOff;
                 continue;
             }
+            // Squad plans go out once the squads are on the ground (after the ramp drill).
+            let mut keep = Vec::new();
+            for (p, plan, seen) in std::mem::take(&mut t.squad_plans) {
+                match Self::troops(pic, p) {
+                    Some((_, true)) => keep.push((p, plan, true)),
+                    Some((dp, false)) if seen => out.push(Order::Plan { platoon: dp, plan }),
+                    Some(_) => keep.push((p, plan, false)),
+                    None => {}
+                }
+            }
+            t.squad_plans = keep;
             match t.mission.clone() {
                 Mission::Defend { centre, radius_m, facing_deg, alternates } => {
                     let position = |i: usize| -> BattlePosition {
@@ -265,7 +378,13 @@ impl Commander {
                         t.bp_index = 0;
                         // The hold time only spaces displacements; the first one may come at once.
                         t.bp_since_s = f64::NEG_INFINITY;
-                        Self::occupy_all(&mut out, &active, &position(0));
+                        let pos = position(0);
+                        for (p, c, f) in Self::bp_slots(&active, &pos) {
+                            match Self::troops(pic, p) {
+                                Some((_, true)) => Self::defend_with_troops(t, &mut out, p, c, &pos, f, None),
+                                _ => out.push(Order::Occupy { platoon: p, centre: c, radius: pos.radius_m, facing: f }),
+                            }
+                        }
                     } else if let Some(def) = d.defence.as_ref()
                         && t.bp_index < alternates.len()
                         && pic.time_s - t.bp_since_s >= def.displace_hold_s.get()
@@ -279,7 +398,22 @@ impl Commander {
                             t.bp_index += 1;
                             t.bp_since_s = pic.time_s;
                             t.displace_loss_mark = lost;
-                            Self::occupy_all(&mut out, &active, &position(t.bp_index));
+                            let pos = position(t.bp_index);
+                            for (p, c, f) in Self::bp_slots(&active, &pos) {
+                                let here = Self::centroid(pic, p).map(|x| x.0);
+                                match Self::troops(pic, p) {
+                                    Some((_, aboard)) if t.dismounted.contains(&p) || aboard => {
+                                        let mount = if aboard { None } else { here };
+                                        Self::defend_with_troops(t, &mut out, p, c, &pos, f, mount);
+                                    }
+                                    _ => out.push(Order::Occupy {
+                                        platoon: p,
+                                        centre: c,
+                                        radius: pos.radius_m,
+                                        facing: f,
+                                    }),
+                                }
+                            }
                         }
                     }
                 }
@@ -345,9 +479,18 @@ impl Commander {
                 }
                 Mission::Attack { axis, objective } => {
                     let Some(obj) = objectives.iter().find(|o| o.name == objective) else { continue };
+                    // The task's squads on foot count as its lead too: the IFVs consolidate on the
+                    // objective once their squads hold it.
+                    let squads_out = active
+                        .iter()
+                        .filter(|(_, p)| t.dismounted.contains(p))
+                        .filter_map(|(_, p)| Self::troops(pic, *p))
+                        .filter(|(_, aboard)| !aboard)
+                        .filter_map(|(dp, _)| Self::centroid(pic, dp).map(|c| c.0));
                     let lead = active
                         .iter()
                         .filter_map(|(_, p)| Self::centroid(pic, *p).map(|c| c.0))
+                        .chain(squads_out)
                         .min_by(|a, b| dist(*a, obj.centre).total_cmp(&dist(*b, obj.centre)));
                     let Some(lead) = lead else { continue };
                     let d_obj = dist(lead, obj.centre);
@@ -405,6 +548,49 @@ impl Commander {
                         }
                         _ => want,
                     };
+                    // Dismount point (plan M8F1-INFANTRY-AI §4): the squads go on foot short of the
+                    // objective, or when a fresh contact is as close; the carriers overwatch from
+                    // there and move up only to consolidate.
+                    let dm = d.infantry.dismount.attack_m.get();
+                    for &(_, p) in &active {
+                        if t.dismounted.contains(&p) || want == Phase::Consolidate {
+                            continue;
+                        }
+                        let (Some((_, true)), Some((c, ..))) = (Self::troops(pic, p), Self::centroid(pic, p)) else {
+                            continue;
+                        };
+                        // The carriers get a plan ending at the dismount point a little before they
+                        // reach it, so the order is through and they stop on the point.
+                        let to_obj = dist(c, obj.centre);
+                        let at = dm + obj.radius_m;
+                        if to_obj > at + DISMOUNT_LEAD_M && !fresh.iter().any(|f| dist(*f, c) <= dm) {
+                            continue;
+                        }
+                        t.dismounted.push(p);
+                        let point = if to_obj > at {
+                            crate::formation::slot_position(
+                                obj.centre,
+                                crate::drive::bearing(c, obj.centre),
+                                (0.0, -at),
+                            )
+                        } else {
+                            c
+                        };
+                        let mut stop = PlanStep::new(1, point);
+                        stop.actions = vec![StepAction::Dismount];
+                        out.push(Order::Plan { platoon: p, plan: Plan { steps: vec![stop] } });
+                        let edge = crate::formation::slot_position(
+                            obj.centre,
+                            crate::drive::bearing(c, obj.centre),
+                            (0.0, -obj.radius_m * 0.5),
+                        );
+                        let mut s = PlanStep::new(1, edge);
+                        s.actions = vec![StepAction::OccupyBuildings {
+                            radius_m: obj.radius_m,
+                            facing: crate::drive::bearing(c, obj.centre),
+                        }];
+                        t.squad_plans.push((p, Plan { steps: vec![s] }, true));
+                    }
                     if want == t.phase {
                         continue;
                     }
@@ -420,6 +606,9 @@ impl Commander {
                     t.sync_since_s = None;
                     for (k, (_, p)) in active.iter().enumerate() {
                         let lateral = k as f64 - (n - 1.0) / 2.0;
+                        if t.dismounted.contains(p) && want != Phase::Consolidate {
+                            continue; // overwatching its squads from the dismount point
+                        }
                         match want {
                             Phase::March { waypoint } => {
                                 let wp = axis.get(waypoint).copied().unwrap_or(obj.centre);

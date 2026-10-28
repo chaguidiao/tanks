@@ -214,6 +214,9 @@ fn fire(ctx: &mut Ctx, k: usize, wi: usize, c: &Choice) -> Option<FireEvent> {
     st.stock[c.li] -= 1;
     st.cooldown = reload * (1.0 + ctx.slow_gain * sup);
     s.sprung = true;
+    if s.in_building.is_some() {
+        s.shots_here = s.shots_here.saturating_add(1);
+    }
     ctx.world.last_fired[k] = Some(ctx.tick);
     ctx.world.launch[k] = Some((ctx.tick, signature));
     Some(FireEvent {
