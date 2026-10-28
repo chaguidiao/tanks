@@ -134,6 +134,15 @@ fn section(s: &str) -> Line {
     Line::Section(s.to_owned())
 }
 
+/// A sight's search field and the share of its in-view detection rate it keeps while sweeping the
+/// search sector (B24 D2).
+fn fov_line(ds: &DataSet, s: &sim_data::SensorDef) -> Option<Line> {
+    let sector = ds.detection.search_sector_deg.get();
+    s.field_of_view_deg
+        .as_ref()
+        .map(|f| stat("  FIELD OF VIEW", f, |x| format!("{x:.1}° · SEARCH RATE × {:.2}", (x / sector).min(1.0))))
+}
+
 fn years(d: &ServiceDates) -> String {
     match d.to {
         Some(t) => format!("{}–{t}", d.from),
@@ -366,6 +375,7 @@ fn vehicle_sheet(ds: &DataSet, v: &VehicleDef) -> Sheet {
         l.push(stat(&s.name, &s.cycles_per_mrad, |x| {
             format!("{kind} · {x:.1} CYCLES/MRAD · {}{reach}", years(&s.in_service))
         }));
+        l.extend(fov_line(ds, s));
     }
     if v.smoke_launcher.is_some() || v.engine_smoke.is_some() {
         l.push(section("SMOKE"));
@@ -565,6 +575,7 @@ fn squad_sheet(ds: &DataSet, s: &SquadDef) -> Sheet {
         l.push(stat(&format!("{} ({})", se.name, years(&se.in_service)), &se.cycles_per_mrad, |x| {
             format!("{x:.1} CYC/MRAD")
         }));
+        l.extend(fov_line(ds, se));
     }
     let sig = &s.signature;
     l.extend(posture_lines("SIGNATURE: MOVING", &sig.moving));
@@ -831,6 +842,9 @@ fn combat_sheet(ds: &DataSet, k: usize) -> Option<Sheet> {
                 stat("TARGET MOVING", &d.moving_target_factor, |x| format!("× {x:.2}")),
                 stat("TARGET FIRING", &d.firing_target_factor, |x| format!("× {x:.2}")),
                 stat("OBSERVER MOVING", &d.observer_moving_factor, |x| format!("× {x:.2}")),
+                stat("SEARCH SECTOR", &d.search_sector_deg, |x| {
+                    format!("{x:.0}° (NARROW SIGHTS FIND NEW TARGETS AT FIELD / SECTOR)")
+                }),
                 section("OPTICAL SIGHTS BY LIGHT"),
             ];
             lines.extend(curve);

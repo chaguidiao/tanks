@@ -552,3 +552,43 @@ fn camouflage_slows_optical_detection_of_a_dug_in_squad() {
     let (open, camo) = (mean_detect(1.0), mean_detect(data().infantry.camouflage.dug_in.get()));
     assert!(camo > 2.0 * open, "camouflaged {camo:.1} s vs not {open:.1} s");
 }
+
+/// Mean time (s, 120 if never) for a T-72B by day to first detect a squad at `range` on open grass
+/// over 20 seeds, with the search sector `sector` (deg) and the squad halted or dug in.
+fn mean_first_detection(sector: f64, range: f64, dug_in: bool) -> f64 {
+    let mut ds = (*data()).clone();
+    ds.detection.search_sector_deg.value = sector;
+    let ds = std::sync::Arc::new(ds);
+    let m = map(&ds, 300, 700, "grassland", |_, _| 0.0);
+    let mut total = 0.0;
+    for seed in 1..=20 {
+        let blue = vec![squad("A", "rifle_squad_b", [600.0, 200.0 + range], Some("1-D"), None)];
+        let red = vec![unit("211", "kurgan_b", [600.0, 200.0], 0.0, Some("21"))];
+        let mut sc = scenario(10 * 3600, blue, red);
+        sc.seed = seed;
+        let mut sim = Sim::new(&sc, ds.clone(), m.clone()).unwrap();
+        sim.set_ai_enabled(SideId(1), false);
+        sim.truth_mut().squad[0].as_mut().unwrap().halted_s = if dug_in { 1.0e6 } else { 1.0 };
+        let mut t = 120.0;
+        for _ in 0..(120 * sim::TICK_HZ) {
+            sim.step();
+            if sim.truth().sensors[1].as_ref().unwrap().track(0).is_some() {
+                t = sim.time_s();
+                break;
+            }
+        }
+        total += t;
+    }
+    total / 20.0
+}
+
+#[test]
+fn a_narrow_sight_searches_its_sector_slowly() {
+    // B24 D2 (NVESD field-of-regard search): the T-72B finds a dug-in squad at 1 km only through
+    // its 8x sight (7.5 deg field), so sweeping a 60 deg sector takes several times longer than
+    // the in-view ACQUIRE time. A tank in the open is seen by the commander's wide view and is
+    // unaffected (duel harness: 9-13 s at 1-3 km either way).
+    let in_view = mean_first_detection(0.001, 1000.0, true);
+    let searched = mean_first_detection(60.0, 1000.0, true);
+    assert!(searched > 2.0 * in_view, "searched {searched:.1} s vs in view {in_view:.1} s");
+}

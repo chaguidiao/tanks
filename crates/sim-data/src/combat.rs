@@ -26,6 +26,9 @@ pub struct DetectionModel {
     pub thermal_crossover: CrossoverDef,
     /// Maximum range at which detection checks are made (m).
     pub max_range_m: Stat<f64>,
+    /// Arc a crew or squad searches for new targets (deg; B24 D2, NVESD field-of-regard search):
+    /// a sight with a narrower field of view detects at `fov / sector` of its in-view rate.
+    pub search_sector_deg: Stat<f64>,
     /// A local track is dropped after this long without sight (s).
     pub track_timeout_s: Stat<f64>,
 }

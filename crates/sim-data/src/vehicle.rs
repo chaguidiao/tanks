@@ -99,6 +99,11 @@ pub struct SensorDef {
     /// Hard range limit (e.g. an active-IR illuminator's reach) (m).
     #[serde(default)]
     pub max_range_m: Option<Stat<f64>>,
+    /// Field of view the sight searches with (deg; B24 D2). A sight narrower than the search
+    /// sector finds a target outside its view only as fast as it sweeps the sector. None = a wide
+    /// view (eyes, periscopes) that covers the sector.
+    #[serde(default)]
+    pub field_of_view_deg: Option<Stat<f64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

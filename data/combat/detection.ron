@@ -27,4 +27,6 @@
     ),
     max_range_m: (value: 6000.0, source: "estimate", confidence: estimate),
     track_timeout_s: (value: 15.0, source: "estimate", confidence: estimate),
+    search_sector_deg: (value: 60.0, source: "estimate", confidence: estimate,
+        notes: "A tank's share of its platoon's sector of observation. NVESD search models (field-of-regard extension of ACQUIRE): a sight narrower than the arc searched spends time moving between fields of view."),
 )

@@ -11,6 +11,10 @@
 //! - ACQUIRE time-to-detect: detection is a Poisson process with rate `P∞ / τ`
 //!   scaled by vegetation transmittance and cue factors (target moving or firing, observer
 //!   moving). Recognition and identification upgrade the same way with their N50 values.
+//! - Field-of-regard search (B24 D2): a first detection through a sight whose field of view is
+//!   narrower than the search sector runs at `fov / sector` of its in-view rate; the crew's best
+//!   sight counts, so the commander's wide view finds big, near targets and the magnified sights
+//!   far, small ones slowly. A target that fires shows where to look (no search penalty).
 //!
 //! Detections become vehicle-level tracks; reporting into the side picture is `picture.rs`.
 
@@ -139,6 +143,7 @@ pub fn step(
 ) -> Vec<Sighting> {
     let light = atm.light;
     let max_r = m.max_range_m.get();
+    let sector = m.search_sector_deg.get();
     let timeout = (m.track_timeout_s.get() / crate::DT) as u64;
     let mut out = Vec::new();
     let n = world.len();
@@ -260,11 +265,11 @@ pub fn step(
                 t_th *= smoke.transmittance(opos, tp.pos, Band::Thermal);
             }
             let (mut in_range, mut blinded) = (0, 0);
-            let (cycles, best) = sens
+            let looks: Vec<(f64, SensorKind, f64)> = sens
                 .sensors
                 .iter()
-                .filter(|&&(_, _, max)| r <= max)
-                .filter_map(|&(kind, cpm, _)| {
+                .filter(|&&(_, _, max, _)| r <= max)
+                .filter_map(|&(kind, cpm, _, fov)| {
                     let (eff, band_t) = match kind {
                         SensorKind::Optical => (cpm * light * optical, t_vis),
                         SensorKind::NightChannel => (cpm * optical, t_vis),
@@ -275,13 +280,15 @@ pub fn step(
                         blinded += 1;
                         return None;
                     }
-                    Some((dc / r * 1000.0 * eff * band_t * degrade, kind))
+                    Some((dc / r * 1000.0 * eff * band_t * degrade, kind, (fov / sector).min(1.0)))
                 })
-                .fold((0.0, SensorKind::Optical), |a, b| if b.0 > a.0 { b } else { a });
+                .collect();
             // Every sensor that could reach is screened: the pair is not seen, so tracks go stale.
             if in_range > 0 && blinded == in_range {
                 continue;
             }
+            let (cycles, best) =
+                looks.iter().fold((0.0, SensorKind::Optical), |a, &(n, k, _)| if n > a.0 { (n, k) } else { a });
             let moving = world.mobility[t].as_ref().is_some_and(|mv| mv.speed > 1.0)
                 || world.squad[t].as_ref().is_some_and(|s| s.speed > 0.3);
             let recent = |ft: u64| tick.saturating_sub(ft) < LAUNCH_SEEN;
@@ -303,9 +310,12 @@ pub fn step(
                 cue *= m.observer_moving_factor.get();
             }
             let tau = m.acquire_tau_s.get();
-            let hazard = |n50: f64| {
-                let lambda = ttpf(cycles, n50) * s.transmittance * cue / tau;
-                1.0 - libm::exp(-lambda * check_dt)
+            let hazard = |p: f64| 1.0 - libm::exp(-p * s.transmittance * cue / tau * check_dt);
+            // First detection: each sight finds a target outside its view only as fast as it
+            // sweeps the search sector (NVESD field-of-regard search, B24 D2); the crew's best
+            // look counts. A target that fires shows where to look. Upgrades are made in view.
+            let search = |n50: f64| {
+                looks.iter().map(|&(n, _, s)| ttpf(n, n50) * if fired { 1.0 } else { s }).fold(0.0, f64::max)
             };
             let sens = world.sensors[o].as_mut().expect("checked");
             match sens.tracks.iter_mut().find(|tr| tr.target == t) {
@@ -320,7 +330,7 @@ pub fn step(
                     };
                     if let Some((lvl, n50)) = next {
                         let u = uniform(rng);
-                        if u < hazard(n50) {
+                        if u < hazard(ttpf(cycles, n50)) {
                             tr.level = lvl;
                             out.push(Sighting { observer: o, target: t, level: lvl, new: false });
                         }
@@ -328,7 +338,7 @@ pub fn step(
                 }
                 None => {
                     let u = uniform(rng);
-                    if u < hazard(m.n50_detect.get()) {
+                    if u < hazard(search(m.n50_detect.get())) {
                         sens.tracks.push(LocalTrack {
                             target: t,
                             level: ContactLevel::Detected,

@@ -87,8 +87,9 @@ pub struct LocalTrack {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SensorState {
-    /// Sensors available at the scenario date: (kind, cycles per mrad, max range m).
-    pub sensors: Vec<(SensorKind, f64, f64)>,
+    /// Sensors available at the scenario date: (kind, cycles per mrad, max range m, field of view
+    /// deg; infinite for a wide view).
+    pub sensors: Vec<(SensorKind, f64, f64, f64)>,
     pub tracks: Vec<LocalTrack>,
     /// Sights degraded by a hit (cycles halved).
     pub degraded: bool,
@@ -325,7 +326,10 @@ impl World {
             .sensors
             .iter()
             .filter(|s| s.in_service.contains(year))
-            .map(|s| (s.kind, s.cycles_per_mrad.get(), s.max_range_m.as_ref().map_or(f64::INFINITY, |r| r.get())))
+            .map(|s| {
+                let max = s.max_range_m.as_ref().map_or(f64::INFINITY, |r| r.get());
+                (s.kind, s.cycles_per_mrad.get(), max, s.field_of_view_deg.as_ref().map_or(f64::INFINITY, |f| f.get()))
+            })
             .collect();
         self.sensors.push(Some(SensorState { sensors, tracks: Vec::new(), degraded: false }));
         self.gun.push(None);
@@ -396,7 +400,10 @@ impl World {
             .sensors
             .iter()
             .filter(|s| s.in_service.contains(year))
-            .map(|s| (s.kind, s.cycles_per_mrad.get(), s.max_range_m.as_ref().map_or(f64::INFINITY, |r| r.get())))
+            .map(|s| {
+                let max = s.max_range_m.as_ref().map_or(f64::INFINITY, |r| r.get());
+                (s.kind, s.cycles_per_mrad.get(), max, s.field_of_view_deg.as_ref().map_or(f64::INFINITY, |f| f.get()))
+            })
             .collect();
         self.sensors.push(Some(SensorState { sensors, tracks: Vec::new(), degraded: false }));
         self.gun.push(Some(crate::gunnery::GunState::new(heading, stock)));

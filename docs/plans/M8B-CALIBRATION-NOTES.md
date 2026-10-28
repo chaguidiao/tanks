@@ -161,6 +161,42 @@ Before → after:
 - Test: `m8b::camouflage_slows_optical_detection_of_a_dug_in_squad` (T-72B, 1 km, 20 seeds:
   13.8 s against 4.7 s).
 
+### 2.5 D2 result (2026-10-28, `tanks-headless detect` and `duel`, 200 trials, flat grass, by day)
+
+Implemented as `field_of_view_deg` per sight and `search_sector_deg` (60 deg) in
+`data/combat/detection.ron`: a first detection through a sight runs at `fov / sector` of its
+in-view ACQUIRE rate, and the crew's best sight counts. The commander's wide view and the
+squad's eyes are not slowed; a target that fires is found without the penalty; recognition and
+identification are unchanged (the target is in view). There were no explicit Phase 0 detection
+targets to tune against, so the checks were: tanks in the open keep their duel timings, and
+squads move towards the camouflage-test band.
+
+Mean time to first detection (s) and share found within 2 minutes. Before → after:
+
+| Observer | Target | Range | Found in 2 min | Mean time |
+|---|---|---|---|---|
+| M1A1 (duel) | T-72B in the open | 1,000 / 2,000 / 3,000 m | 100 % | 9.3 / 9.0 / 9.9 → 9.3 / 9.3 / 12.8 |
+| T-72A (duel) | M1 in the open | 1,000 / 2,000 / 3,000 m | 100 % | 9.6 / 9.6 / 10.1 → 9.6 / 9.7 / 12.5 |
+| M1A1 | halted squad | 500 m | 100 % → 100 % | 3.0 → 8.7 |
+| M1A1 | dug in | 500 m | 100 % → 100 % | 3.0 → 12.4 |
+| M1A1 | dug in | 2,000 m | 82 % → 63 % | 23 → 44 |
+| T-72A | halted | 2,000 m | 100 % → 70 % | 12 → 45 |
+| T-72A | dug in | 1,000 m | 92 % → 53 % | 19 → 49 |
+| Rifle squad | dug in | 300 m | 95 % → 92 % | 4.8 → 25 |
+| Rifle squad | dug in | 500 m | 89 % → 66 % | 14 → 44 |
+| Rifle squad | halted | 1,000 m | 100 % → 89 % | 7 → 38 |
+
+- **Vehicles in the open barely change.** The commander's unaided view (1.5 cycles/mrad, no
+  search penalty) resolves a tank at 2 km at P∞ ≈ 0.95; only at 3 km do the sights take over.
+- **Squads are found 2–8× more slowly** through the magnified sights. A rifle squad's 50 %
+  detection range for a dug-in squad within 2 minutes falls from about 1 km to about 600 m on
+  open grass, nearer the 35–500 m woodland band of the camouflage tests (§2.1).
+- **Not fixed: a squad in a lone house.** An alert M1 still finds an RPG squad in a house at
+  350–450 m within about 15 s (B26): the commander's eye resolves the window (0.6 × 0.8 m,
+  about 1.2 cycles at 450 m, mean about 6 s), and the thermal sight follows (about 14 s).
+  Concealment back from the windows (FM 3-06.11 firing positions inside the room) would be a
+  camouflage factor for squads in buildings, as D1 did for dug-in squads (TODO B33).
+
 ## 3. Era changes up to 2005
 
 The squads were frozen at about 1990. Squad weapons and sensors already carry service dates, so
