@@ -420,11 +420,13 @@ pub fn face_for(geo: &ShotGeometry, a: &AmmoDef, top_above: f64) -> Face {
 /// beyond the gun's effective range, plan M8B-AT-TEAMS §5) that defeats the target, else the first
 /// round meant for the target's class that defeats its armour (stand-off rounds only beyond their
 /// range), else the one with the best margin (FM 3-20.12 ammunition selection by target type).
+/// Beyond `open_fire_m` (the doctrine's open-fire range) only stand-off rounds may fire.
 #[allow(clippy::too_many_arguments)]
 pub fn select_round(
     g: &GunState,
     loadout: &[usize],
     beyond: &[Option<f64>],
+    open_fire_m: f64,
     ammo: &[AmmoDef],
     pen: &PenetrationModel,
     target: &VehicleDef,
@@ -434,7 +436,10 @@ pub fn select_round(
 ) -> Option<usize> {
     let usable = |li: usize| {
         let a = &ammo[loadout[li]];
-        g.stock[li] > 0 && a.kind != AmmoKind::Smoke && a.max_range_m.as_ref().is_none_or(|m| geo.range <= m.get())
+        g.stock[li] > 0
+            && a.kind != AmmoKind::Smoke
+            && a.max_range_m.as_ref().is_none_or(|m| geo.range <= m.get())
+            && (geo.range <= open_fire_m || beyond.get(li).copied().flatten().is_some())
     };
     let margin = |li: usize| round_margin(&ammo[loadout[li]], pen, target, era_left, geo, top_above);
     let all: Vec<usize> = (0..loadout.len()).filter(|&li| usable(li)).collect();
@@ -546,6 +551,7 @@ fn choose_target(
     squads: &[sim_data::SquadDef],
     k: usize,
     max_range: f64,
+    reach: f64,
     close_infantry: f64,
     tick: u64,
 ) -> Option<usize> {
@@ -557,11 +563,12 @@ fn choose_target(
         WeaponsStatus::Free => ContactLevel::Recognised,
     };
     let ok = |t: usize| {
+        let limit = if world.squad[t].is_some() { max_range } else { reach };
         s.track(t).is_some_and(|tr| {
             tr.level >= min_level
                 && tick.saturating_sub(tr.last_seen_tick) <= 20
                 && tr.visible_fraction > 0.0
-                && tr.range_m <= max_range
+                && tr.range_m <= limit
         }) && world.alive(t)
             && !world.mounted(t)
     };
@@ -660,11 +667,22 @@ pub fn step(
             continue;
         }
         let side = world.side[k].0 as usize;
-        let max_range = def.armament.max_engagement_range_m.get().min(engage_range[side]);
+        let crew_max = def.armament.max_engagement_range_m.get();
+        let max_range = crew_max.min(engage_range[side]);
+        let beyond: Vec<Option<f64>> =
+            def.armament.load.iter().map(|l| l.prefer_beyond_m.as_ref().map(|b| b.get())).collect();
+        // Stand-off rounds (gun-launched and vehicle missiles) open fire at vehicles out to their
+        // own reach, past the doctrine's open-fire range for the gun (B6, N9).
+        let reach = world.gun[k].as_ref().map_or(max_range, |g| {
+            (0..loadouts[vi].len())
+                .filter(|&li| beyond[li].is_some() && g.stock[li] > 0)
+                .map(|li| ammo[loadouts[vi][li]].max_range_m.as_ref().map_or(crew_max, |m| m.get()).min(crew_max))
+                .fold(max_range, f64::max)
+        });
         let target = if tick.is_multiple_of(crate::VEHICLE_AI_EVERY)
             || world.gun[k].as_ref().is_some_and(|g| g.target.is_none())
         {
-            choose_target(world, inf.squads, k, max_range, inf.close_infantry[side], tick)
+            choose_target(world, inf.squads, k, max_range, reach, inf.close_infantry[side], tick)
         } else {
             world.gun[k].as_ref().and_then(|g| g.target).filter(|&t| world.alive(t) && !world.mounted(t))
         };
@@ -759,9 +777,8 @@ pub fn step(
         let era_left = world.era[t];
         let g = world.gun[k].as_mut().expect("checked");
         let top_above = dmg.top_hit_above_deg.get().to_radians();
-        let beyond: Vec<Option<f64>> =
-            def.armament.load.iter().map(|l| l.prefer_beyond_m.as_ref().map(|b| b.get())).collect();
-        let Some(li) = select_round(g, &loadouts[vi], &beyond, ammo, pen, tdef, era_left, &geo, top_above) else {
+        let Some(li) = select_round(g, &loadouts[vi], &beyond, max_range, ammo, pen, tdef, era_left, &geo, top_above)
+        else {
             continue;
         };
         let a = &ammo[loadouts[vi][li]];
@@ -1259,11 +1276,36 @@ mod tests {
             geo.bearing_to_shooter = 0.0;
             geo.range = r;
             let t = ds.vehicle(target).unwrap();
-            let li = select_round(&g, &loadout, &beyond, &ammo, &ds.penetration, t, 0, &geo, 0.35).unwrap();
+            let li =
+                select_round(&g, &loadout, &beyond, f64::INFINITY, &ammo, &ds.penetration, t, 0, &geo, 0.35).unwrap();
             ammo[li].guided
         };
         assert!(pick("skif_m1", 2500.0), "TOW beyond the gun's range");
         assert!(!pick("skif_m1", 1000.0), "25 mm inside it");
         assert!(pick("kurgan_a", 1000.0), "TOW at a tank");
+    }
+
+    #[test]
+    fn only_stand_off_rounds_fire_past_the_open_fire_range() {
+        // N9: a T-64B class tank with a 2.5 km open-fire range fires its gun-launched missile at
+        // 3 km, and nothing once the missiles are gone.
+        let ds = ds();
+        let t64 = ds.vehicle("kholm_b").unwrap();
+        let ammo: Vec<AmmoDef> = t64.armament.load.iter().map(|l| ds.ammo(&l.ammo).unwrap().clone()).collect();
+        let loadout: Vec<usize> = (0..ammo.len()).collect();
+        let beyond: Vec<Option<f64>> =
+            t64.armament.load.iter().map(|l| l.prefer_beyond_m.as_ref().map(|b| b.get())).collect();
+        let mut g = GunState::new(0.0, t64.armament.load.iter().map(|l| l.count).collect());
+        let mut geo = side_shot();
+        geo.bearing_to_shooter = 0.0;
+        geo.range = 3000.0;
+        let t = ds.vehicle("bulwark_a0").unwrap();
+        let li = select_round(&g, &loadout, &beyond, 2500.0, &ammo, &ds.penetration, t, 0, &geo, 0.35).unwrap();
+        assert!(ammo[li].guided);
+        g.stock[li] = 0;
+        assert_eq!(select_round(&g, &loadout, &beyond, 2500.0, &ammo, &ds.penetration, t, 0, &geo, 0.35), None);
+        geo.range = 2000.0;
+        let li = select_round(&g, &loadout, &beyond, 2500.0, &ammo, &ds.penetration, t, 0, &geo, 0.35).unwrap();
+        assert!(!ammo[li].guided, "the gun inside the open-fire range");
     }
 }
