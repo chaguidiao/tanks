@@ -362,7 +362,9 @@ fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), St
 }
 
 /// Duel validation harness (CLAUDE.md testing): stationary shooter vs. stationary target on
-/// flat open ground by day; the target holds fire. Writes one CSV row per range.
+/// flat open ground by day; the target holds fire but still screens itself with smoke when shot
+/// at (M7a drill), so a hit that does not kill delays the next shot by the screen's life (about a
+/// minute; `kill_within_120s` counts this, N10). Writes one CSV row per range.
 fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
     use std::fmt::Write as _;
     use std::sync::Arc;
