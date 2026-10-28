@@ -89,4 +89,27 @@
             night_factor: (value: 1.1, source: "estimate (calibration notes §3)", confidence: estimate,
                 notes: "An infrared laser seen through the goggles allows aimed fire at night. Issue date around 2000-03, unconfirmed. Earlier IR aiming lights (AN/PAQ-4 class) are not listed: their issue dates are not in the sources yet.")),
     ],
+    anti_armour: [
+        // Light anti-armour weapons carried by the riflemen (FM 3-23.25, 2001).
+        (name: "M72 LAW CLASS", in_service: (from: 1963, to: 1986), class: rocket, count: 2,
+            load: [(ammo: "rkt_66", count: 1)],
+            sight: (
+            estimated_range_error_fraction: (value: 0.12, source: "US Army tests via Isby (1988) and plan M8B-AT-TEAMS §2.2", confidence: low, notes: "Trained gunners were 10-15 % off in range; through the rocket's drop this becomes a vertical miss growing with range."),
+            ballistic_error_mrad: (value: 1.5, source: "estimate", confidence: estimate, notes: "Launch jitter and crosswind (decision 10: wind folded in here)."),
+            aim_error_mrad: (value: 5.7, source: "fitted to FM 3-23.25 (2001) via Wikipedia (M72 LAW): below one hit in two beyond the effective range", confidence: low, notes: "0.5 at 200 m on a stationary 5 x 2.5 m panel with the M72 rocket."),
+            lead_error_fraction: (value: 0.3, source: "estimate", confidence: estimate)),
+            setup_s: (value: 10.0, source: "estimate", confidence: estimate, notes: "Extend the tube, arm, aim."),
+            reload_s: (value: 5.0, source: "estimate", confidence: estimate, notes: "The next man fires his own launcher."),
+            signature_factor: (value: 1.5, source: "estimate", confidence: estimate)),
+        (name: "AT4 CLASS", in_service: (from: 1987), class: rocket, count: 2,
+            load: [(ammo: "rkt_84", count: 1)],
+            sight: (
+            estimated_range_error_fraction: (value: 0.12, source: "US Army tests via Isby (1988) and plan M8B-AT-TEAMS §2.2", confidence: low, notes: "Trained gunners were 10-15 % off in range; through the rocket's drop this becomes a vertical miss growing with range."),
+            ballistic_error_mrad: (value: 1.5, source: "estimate", confidence: estimate, notes: "Launch jitter and crosswind (decision 10: wind folded in here)."),
+            aim_error_mrad: (value: 4.7, source: "fitted to FM 3-23.25 (2001): effective range 300 m stationary", confidence: low, notes: "0.5 at 300 m on a stationary 5 x 2.5 m panel with the AT4 rocket."),
+            lead_error_fraction: (value: 0.3, source: "estimate", confidence: estimate)),
+            setup_s: (value: 10.0, source: "estimate", confidence: estimate, notes: "Extend the tube, arm, aim."),
+            reload_s: (value: 5.0, source: "estimate", confidence: estimate, notes: "The next man fires his own launcher."),
+            signature_factor: (value: 1.5, source: "estimate", confidence: estimate)),
+    ],
 )

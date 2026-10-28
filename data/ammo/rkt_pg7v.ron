@@ -1,0 +1,19 @@
+// Fictional 85 mm shaped-charge rocket for a reusable shoulder launcher, mirroring the RPG-7's
+// PG-7V. Calibration: docs/plans/M8B-AT-TEAMS.md §2.2 and §12 (hit table, Isby 1988).
+(
+    id: "rkt_pg7v",
+    name: "ROCKET 85 (PG-7V CLASS)",
+    mirrors: "PG-7V",
+    kind: heat,
+    in_service: (from: 1961),
+    muzzle_velocity_mps: (value: 260.0, source: "Wikipedia (RPG-7): 115 m/s from the booster, about 295 m/s after the rocket motor", confidence: low,
+        notes: "Mean speed over the first 300 m, used for the whole flight: the drop through which range estimation errors become vertical misses."),
+    velocity_loss_mps_per_km: (value: 60.0, source: "estimate", confidence: estimate, notes: "Drag after motor burn-out."),
+    flat_penetration_mm: (value: 260.0, source: "Wikipedia (RPG-7): 260 mm RHA", confidence: low, notes: "Other open sources give up to 330 mm."),
+    dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate, notes: "Round-to-round; the gunner's aim error dominates (launcher sight data)."),
+    max_range_m: (value: 300.0, source: "Wikipedia (RPG-7): effective range 330 m; Isby (1988): 27 % hit at 300 m", confidence: low,
+        notes: "Not fired beyond the range where about one shot in four hits."),
+    preferred_vs: [mbt, ifv, recon],
+    behind_armour: (value: 0.4, source: "estimate (plan M8B-AT-TEAMS §2.3)", confidence: estimate,
+        notes: "A narrow jet behind the armour: Grau (FMSO, 1997) counts 3-6 lethal hits per vehicle destroyed in Grozny; tuned to about 3 hits to destroy a T-72 from the side (target A8)."),
+)

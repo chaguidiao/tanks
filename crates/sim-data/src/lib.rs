@@ -151,6 +151,15 @@ impl DataSet {
                     message: format!("{}: squad ids must differ from vehicle ids; needs men and weapons", s.id),
                 });
             }
+            for w in &s.anti_armour {
+                let bad = w.load.is_empty() || w.count == 0 || w.load.iter().any(|l| ds.ammo(&l.ammo).is_none());
+                if bad {
+                    return Err(DataError {
+                        path: root.join("infantry"),
+                        message: format!("{}: {} needs launchers and known rounds", s.id, w.name),
+                    });
+                }
+            }
         }
         for v in &ds.vehicles {
             for l in &v.armament.load {

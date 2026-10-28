@@ -154,6 +154,9 @@ pub struct ArmourDef {
     pub hull_front: Stat<f64>,
     pub hull_side: Stat<f64>,
     pub hull_rear: Stat<f64>,
+    /// Turret roof and engine deck, met by plunging fire from above and by top-attack missiles
+    /// (plan M8B-AT-TEAMS §3). Plain steel: `ce_factor` does not apply.
+    pub top: Stat<f64>,
 }
 
 /// Explosive reactive armour: a finite number of tiles on the front and sides. A hit on a
@@ -269,6 +272,25 @@ pub struct AmmoDef {
     pub stow: Option<crate::StowClass>,
     #[serde(default)]
     pub smoke: Option<AmmoSmoke>,
+    /// Tandem shaped charge: the precursor fires a reactive tile, which is spent but does not
+    /// disrupt the main jet (plan M8B-AT-TEAMS §2.4).
+    #[serde(default)]
+    pub tandem: bool,
+    /// Share of a penetration's catastrophic, firepower and crew outcomes this round achieves
+    /// (small warheads make a narrow path behind the armour; plan M8B-AT-TEAMS §2.3). Mobility
+    /// outcomes keep their full value. None = 1.
+    #[serde(default)]
+    pub behind_armour: Option<Stat<f64>>,
+    /// Guided round whose seeker flies it to the target after launch: the gunner does not need
+    /// to keep tracking (plan M8B-AT-TEAMS §2.2).
+    #[serde(default)]
+    pub fire_and_forget: bool,
+    /// Top-attack missile: dives onto the roof at this angle below the horizontal (deg).
+    #[serde(default)]
+    pub top_attack_deg: Option<Stat<f64>>,
+    /// Shortest range at which the round arms or is gathered into guidance (m).
+    #[serde(default)]
+    pub min_range_m: Option<Stat<f64>>,
     /// Round-to-round dispersion, 1σ (mrad).
     pub dispersion_mrad: Stat<f64>,
     /// Published/estimated penetration at 2 km into RHA at normal (mm), for validation only.
@@ -277,6 +299,11 @@ pub struct AmmoDef {
 }
 
 impl AmmoDef {
+    /// Behind-armour factor (see `behind_armour`).
+    pub fn behind_armour_factor(&self) -> f64 {
+        self.behind_armour.as_ref().map_or(1.0, |b| b.get())
+    }
+
     /// Stow class for resupply (see `stow`).
     pub fn stow_class(&self) -> crate::StowClass {
         self.stow.unwrap_or(if self.guided { crate::StowClass::Missile } else { crate::StowClass::MainGun })

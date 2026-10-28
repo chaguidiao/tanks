@@ -66,5 +66,15 @@
         ineffective_fraction: (value: 0.5, source: "estimate", confidence: estimate, notes: "Half the men lost: the squad can defend in place but no longer manoeuvre."),
         close_infantry_m: (value: 500.0, source: "estimate", confidence: estimate, notes: "Inside RPG and short-range anti-tank range infantry is the more dangerous target."),
         squad_spacing_m: (value: 50.0, source: "ATP 3-21.8 (2016) ch. 2, platoon formations; estimate", confidence: estimate),
+        // Anti-armour ambush (plan M8B-AT-TEAMS §6). ATP 3-21.8 (2016) ch. 7: the ambush is
+        // initiated when the lead vehicle is in the kill zone; FM 3-23.25 (2001) ch. 5: fire
+        // light anti-armour weapons at the flank or rear of armoured vehicles.
+        ambush: (
+            rocket_trigger_m: (value: 200.0, source: "FM 3-23.25 (2001): M72 and AT4 effective ranges 200-300 m against a stationary target; ATP 3-21.8 (2016) ch. 7", confidence: low,
+                notes: "Inside the effective range of the shorter-ranged launcher, so the first volley has about an even chance of a hit."),
+            missile_trigger_m: (value: 2000.0, source: "FM 3-22.37 (2008): Javelin effective to 2,000 m; FM 23-24 (1987): Dragon to 1,000 m", confidence: low,
+                notes: "Capped by each missile's own maximum range."),
+            prefer_flank: true,
+        ),
     ),
 )

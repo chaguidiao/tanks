@@ -1,0 +1,16 @@
+// Fictional improved Dragon round, mirroring the Dragon II warhead.
+(
+    id: "atgm_dragon2",
+    name: "ATGM DR-2",
+    mirrors: "M47 Dragon II",
+    kind: heat,
+    guided: true,
+    in_service: (from: 1988),
+    muzzle_velocity_mps: (value: 95.0, source: "Wikipedia (M47 Dragon): as the first version", confidence: low),
+    velocity_loss_mps_per_km: (value: 0.0, source: "side thrusters keep the speed", confidence: low),
+    flat_penetration_mm: (value: 610.0, source: "Wikipedia (M47 Dragon): about 610 mm, an 85 % increase", confidence: low),
+    dispersion_mrad: (value: 0.6, source: "estimate as for the first version", confidence: estimate),
+    min_range_m: (value: 65.0, source: "Wikipedia (M47 Dragon): 65 m", confidence: low),
+    max_range_m: (value: 1000.0, source: "Wikipedia (M47 Dragon): 1,000 m", confidence: low),
+    preferred_vs: [mbt, ifv],
+)

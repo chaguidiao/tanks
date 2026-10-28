@@ -1,0 +1,86 @@
+// Red anti-tank missile team (plan M8B-AT-TEAMS §2.1): a dismounted team of three with a
+// tripod-mounted wire-guided missile, Fagot class, then Kornet class. Mirrors the ATGM teams of a
+// motorised rifle battalion's anti-tank platoon (FM 100-2-3, 1991).
+(
+    id: "at_team_r",
+    name: "AT TEAM (ATGM)",
+    mirrors: "Soviet battalion ATGM team (FM 100-2-3, 1991)",
+    in_service: (from: 1970),
+    men: 3,
+    weapons: [
+        (name: "ASSAULT RIFLES", count: 3,
+            rounds_per_burst: (value: 3.0, source: "as for the MR squad", confidence: low),
+            burst_interval_s: (value: 10.0, source: "as for the MR squad", confidence: estimate),
+            max_range_m: (value: 500.0, source: "FM 100-2-3 (1991)", confidence: low),
+            dispersion_mrad: (value: 6.0, source: "as for the MR squad", confidence: low),
+            bursts: 50),
+    ],
+    sensors: [
+        (name: "EYES", kind: optical, in_service: (from: 1900),
+            cycles_per_mrad: (value: 1.7, source: "estimate: visual acuity of about 1 arcminute per detail", confidence: estimate)),
+        (name: "BINOCULARS", kind: optical, in_service: (from: 1900),
+            cycles_per_mrad: (value: 4.0, source: "estimate", confidence: estimate)),
+        (name: "NIGHT SIGHT (1PN58 CLASS)", kind: night_channel, in_service: (from: 1975, to: 1997),
+            cycles_per_mrad: (value: 0.7, source: "estimate as for the MR squad", confidence: low),
+            max_range_m: (value: 400.0, source: "1PN58 recognition range under starlight (Wikipedia, 1PN58)", confidence: low)),
+        (name: "THERMAL SIGHT (1PN79 CLASS)", kind: thermal, in_service: (from: 1998),
+            cycles_per_mrad: (value: 2.0, source: "estimate", confidence: estimate,
+                notes: "Kornet thermal sight; performance is an estimate."),
+            max_range_m: (value: 3500.0, source: "estimate", confidence: estimate)),
+    ],
+    signature: (
+        moving: (
+            width_m: (value: 1.2, source: "estimate (plan M8B-AT-TEAMS §4: a smaller group than a squad)", confidence: estimate, notes: "Three men carrying the launcher and rounds."),
+            height_m: (value: 1.8, source: "estimate", confidence: estimate),
+            man_area_m2: (value: 0.5, source: "estimate as for a squad", confidence: estimate),
+            eye_height_m: (value: 1.6, source: "estimate", confidence: estimate)),
+        halted: (
+            width_m: (value: 0.8, source: "estimate", confidence: estimate),
+            height_m: (value: 0.6, source: "estimate", confidence: estimate),
+            man_area_m2: (value: 0.15, source: "estimate as for a squad", confidence: estimate),
+            eye_height_m: (value: 0.7, source: "estimate", confidence: estimate)),
+        dug_in: (
+            width_m: (value: 0.6, source: "estimate", confidence: estimate),
+            height_m: (value: 0.3, source: "estimate", confidence: estimate),
+            man_area_m2: (value: 0.06, source: "estimate as for a squad", confidence: estimate),
+            eye_height_m: (value: 0.5, source: "estimate", confidence: estimate)),
+        in_building: (
+            width_m: (value: 0.6, source: "estimate as for a squad: a window", confidence: estimate),
+            height_m: (value: 0.8, source: "estimate", confidence: estimate),
+            man_area_m2: (value: 0.1, source: "estimate as for a squad", confidence: estimate),
+            eye_height_m: (value: 1.5, source: "estimate", confidence: estimate)),
+    ),
+    dig_in_s: (value: 1200.0, source: "estimate as for a squad", confidence: estimate),
+    anti_armour: [
+        (name: "FAGOT CLASS", in_service: (from: 1970, to: 1990), class: missile, count: 1,
+            load: [(ammo: "atgm_fagot", count: 3)],
+            sight: (
+                estimated_range_error_fraction: (value: 0.12, source: "US tests via plan M8B-AT-TEAMS §2.2", confidence: low, notes: "Unused for a guided round (no drop)."),
+                ballistic_error_mrad: (value: 0.0, source: "guided: no ballistic error", confidence: high),
+                aim_error_mrad: (value: 0.3, source: "estimate as for the vehicle SACLOS missiles", confidence: estimate, notes: "The gunner keeps the cross-hair on the target; the launcher tracks the missile."),
+                lead_error_fraction: (value: 0.0, source: "guided: no lead", confidence: high)),
+            setup_s: (value: 60.0, source: "estimate", confidence: estimate, notes: "Emplace the tripod and launcher (FM 100-2-3 gives about a minute to bring the system into action; estimate)."),
+            reload_s: (value: 20.0, source: "estimate", confidence: estimate, notes: "Load the next canister."),
+            signature_factor: (value: 2.0, source: "estimate", confidence: estimate, notes: "Launch flash and smoke, and a missile in flight that observers follow back to the post.")),
+        (name: "FAGOT CLASS", in_service: (from: 1991, to: 1997), class: missile, count: 1,
+            load: [(ammo: "atgm_fagot_m", count: 3)],
+            sight: (
+                estimated_range_error_fraction: (value: 0.12, source: "US tests via plan M8B-AT-TEAMS §2.2", confidence: low, notes: "Unused for a guided round (no drop)."),
+                ballistic_error_mrad: (value: 0.0, source: "guided: no ballistic error", confidence: high),
+                aim_error_mrad: (value: 0.3, source: "estimate as for the 9M111", confidence: estimate, notes: "As the 9M111."),
+                lead_error_fraction: (value: 0.0, source: "guided: no lead", confidence: high)),
+            setup_s: (value: 60.0, source: "estimate", confidence: estimate, notes: "As the 9M111."),
+            reload_s: (value: 20.0, source: "estimate", confidence: estimate, notes: "Load the next canister."),
+            signature_factor: (value: 2.0, source: "estimate", confidence: estimate, notes: "Launch flash and smoke, and a missile in flight that observers follow back to the post.")),
+        (name: "KORNET CLASS", in_service: (from: 1998), class: missile, count: 1,
+            load: [(ammo: "atgm_kornet", count: 2)],
+            sight: (
+                estimated_range_error_fraction: (value: 0.12, source: "US tests via plan M8B-AT-TEAMS §2.2", confidence: low, notes: "Unused for a guided round (no drop)."),
+                ballistic_error_mrad: (value: 0.0, source: "guided: no ballistic error", confidence: high),
+                aim_error_mrad: (value: 0.25, source: "estimate", confidence: estimate, notes: "Laser beam riding: the gunner keeps the sight on the target."),
+                lead_error_fraction: (value: 0.0, source: "guided: no lead", confidence: high)),
+            setup_s: (value: 60.0, source: "estimate", confidence: estimate, notes: "Emplace the tripod and sight."),
+            reload_s: (value: 30.0, source: "estimate", confidence: estimate, notes: "Heavier round: load the next canister."),
+            signature_factor: (value: 2.0, source: "estimate", confidence: estimate, notes: "Launch flash and smoke, and a missile in flight that observers follow back to the post.")),
+    ],
+)

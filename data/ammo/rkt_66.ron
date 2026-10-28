@@ -1,0 +1,17 @@
+// Fictional 66 mm disposable shaped-charge rocket, mirroring the M72 LAW (A2/A3).
+(
+    id: "rkt_66",
+    name: "ROCKET 66 (LAW CLASS)",
+    mirrors: "M72A2/A3 LAW",
+    kind: heat,
+    in_service: (from: 1963),
+    muzzle_velocity_mps: (value: 145.0, source: "FM 7-7 (1985) via Wikipedia (M72 LAW): 145 m/s", confidence: low,
+        notes: "The motor burns out inside the tube."),
+    velocity_loss_mps_per_km: (value: 40.0, source: "estimate", confidence: estimate),
+    flat_penetration_mm: (value: 300.0, source: "FM 3-23.25 (2001) via Wikipedia (M72 LAW): 300 mm for the M72A2/A3", confidence: low),
+    dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate),
+    max_range_m: (value: 250.0, source: "FM 3-23.25 (2001) via Wikipedia (M72 LAW): effective 200 m stationary, 165 m moving", confidence: low,
+        notes: "Beyond the effective range the hit chance is below one half."),
+    preferred_vs: [ifv, recon, mbt],
+    behind_armour: (value: 0.4, source: "estimate (plan M8B-AT-TEAMS §2.3)", confidence: estimate),
+)

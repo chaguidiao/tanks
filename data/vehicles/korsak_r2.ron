@@ -99,6 +99,8 @@
             notes: "The upper front plate is thinner (5 mm) but sloped; the nose figure is used."),
         hull_side: (value: 7.0, source: "open-source summaries (Wikipedia, BRDM-2, 2026): 7 mm", confidence: low),
         hull_rear: (value: 7.0, source: "open-source summaries (Wikipedia, BRDM-2, 2026): 7 mm", confidence: low),
+        top: (value: 7.0, source: "estimate (plan M8B-AT-TEAMS §3)", confidence: estimate,
+            notes: "Light armour roof; no authoritative public figure. Only autocannon and HE fragments are sensitive to it."),
     ),
     ammo_stowage: isolated, // machine-gun belts only, no main-gun rounds to cook off
     // No smoke grenade launchers and no engine smoke system.

@@ -1,0 +1,17 @@
+// Fictional 72.5 mm disposable shaped-charge rocket, mirroring the RPG-26 (with the RPG-22 of
+// the same period).
+(
+    id: "rkt_72",
+    name: "ROCKET 72 (RPG-26 CLASS)",
+    mirrors: "RPG-26 (RPG-22)",
+    kind: heat,
+    in_service: (from: 1985),
+    muzzle_velocity_mps: (value: 144.0, source: "Wikipedia (RPG-26): 144 m/s", confidence: low),
+    velocity_loss_mps_per_km: (value: 40.0, source: "estimate", confidence: estimate),
+    flat_penetration_mm: (value: 440.0, source: "Wikipedia (RPG-26): 440 mm RHA", confidence: low,
+        notes: "The RPG-22 of the same year gives about 390-400 mm (secondary sources)."),
+    dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate),
+    max_range_m: (value: 250.0, source: "Wikipedia (RPG-26): effective range 250 m", confidence: low),
+    preferred_vs: [ifv, recon, mbt],
+    behind_armour: (value: 0.4, source: "estimate (plan M8B-AT-TEAMS §2.3)", confidence: estimate),
+)

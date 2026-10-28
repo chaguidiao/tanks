@@ -104,6 +104,8 @@
             notes: "Aluminium counted at about 0.4 of RHA."),
         hull_rear: (value: 18.0, source: "open-source summaries (Wikipedia, BMP-3, 2026): 43 mm aluminium", confidence: estimate,
             notes: "Aluminium counted at about 0.4 of RHA."),
+        top: (value: 10.0, source: "estimate (plan M8B-AT-TEAMS §3)", confidence: estimate,
+            notes: "Thin steel roof of a few millimetres to about 10 mm; no authoritative public figure. Only autocannon and HE fragments are sensitive to it."),
     ),
     ammo_stowage: exposed,
     smoke_launcher: (

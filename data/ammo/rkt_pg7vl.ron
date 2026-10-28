@@ -1,0 +1,17 @@
+// Fictional 93 mm shaped-charge rocket for the RPG-7 class launcher, mirroring the PG-7VL.
+(
+    id: "rkt_pg7vl",
+    name: "ROCKET 93 (PG-7VL CLASS)",
+    mirrors: "PG-7VL",
+    kind: heat,
+    in_service: (from: 1977),
+    muzzle_velocity_mps: (value: 250.0, source: "estimate from the PG-7V (Wikipedia, RPG-7)", confidence: estimate,
+        notes: "Larger, heavier warhead (2.6 kg) on the same motor: a little slower."),
+    velocity_loss_mps_per_km: (value: 60.0, source: "estimate", confidence: estimate),
+    flat_penetration_mm: (value: 500.0, source: "Wikipedia (RPG-7): more than 500 mm RHA", confidence: low),
+    dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate),
+    max_range_m: (value: 300.0, source: "estimate as for the PG-7V", confidence: estimate),
+    preferred_vs: [mbt, ifv, recon],
+    behind_armour: (value: 0.45, source: "estimate (plan M8B-AT-TEAMS §2.3)", confidence: estimate,
+        notes: "Larger charge than the PG-7V, still a light warhead."),
+)

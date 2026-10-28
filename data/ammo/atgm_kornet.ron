@@ -1,0 +1,17 @@
+// Fictional laser-beam-riding heavy anti-tank missile, mirroring the 9M133 Kornet.
+(
+    id: "atgm_kornet",
+    name: "ATGM KR",
+    mirrors: "9M133 Kornet",
+    kind: heat,
+    guided: true,
+    tandem: true,
+    in_service: (from: 1998),
+    muzzle_velocity_mps: (value: 250.0, source: "Wikipedia (9M133 Kornet): above 250 m/s", confidence: low),
+    velocity_loss_mps_per_km: (value: 0.0, source: "a sustained rocket motor holds cruise speed", confidence: low),
+    flat_penetration_mm: (value: 1000.0, source: "Wikipedia (9M133 Kornet): about 1,000 mm RHA behind ERA (base version)", confidence: low),
+    dispersion_mrad: (value: 0.2, source: "estimate", confidence: estimate, notes: "Laser beam riding tracks better than wire SACLOS."),
+    min_range_m: (value: 100.0, source: "Wikipedia (9M133 Kornet): 100 m", confidence: low),
+    max_range_m: (value: 5500.0, source: "Wikipedia (9M133 Kornet): 5,500 m", confidence: low),
+    preferred_vs: [mbt, ifv],
+)

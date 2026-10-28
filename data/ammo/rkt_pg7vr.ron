@@ -1,0 +1,20 @@
+// Fictional 105 mm tandem shaped-charge rocket for the RPG-7 class launcher, mirroring the
+// PG-7VR: a 64 mm precursor fires reactive armour ahead of the main charge.
+(
+    id: "rkt_pg7vr",
+    name: "ROCKET 105 TANDEM (PG-7VR CLASS)",
+    mirrors: "PG-7VR",
+    kind: heat,
+    tandem: true,
+    in_service: (from: 1988),
+    muzzle_velocity_mps: (value: 200.0, source: "estimate from the PG-7V (Wikipedia, RPG-7)", confidence: estimate,
+        notes: "4.5 kg rocket on the same booster: much slower, hence the shorter effective range (200 m)."),
+    velocity_loss_mps_per_km: (value: 60.0, source: "estimate", confidence: estimate),
+    flat_penetration_mm: (value: 600.0, source: "Wikipedia (RPG-7): 600 mm behind reactive armour, 900 mm without", confidence: low,
+        notes: "The behind-ERA figure: with the tandem rule the tile is spent and does not reduce penetration, so this round is mostly fired at ERA tanks and the lower figure is used."),
+    dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate),
+    max_range_m: (value: 200.0, source: "Wikipedia (RPG-7): range about 200 m", confidence: low),
+    preferred_vs: [mbt],
+    behind_armour: (value: 0.6, source: "estimate (plan M8B-AT-TEAMS §2.3)", confidence: estimate,
+        notes: "105 mm main charge: a larger path behind the armour than the single-charge rockets."),
+)

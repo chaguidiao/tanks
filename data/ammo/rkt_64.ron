@@ -1,0 +1,15 @@
+// Fictional 64 mm disposable shaped-charge rocket, mirroring the RPG-18 (an M72 class weapon).
+(
+    id: "rkt_64",
+    name: "ROCKET 64 (RPG-18 CLASS)",
+    mirrors: "RPG-18",
+    kind: heat,
+    in_service: (from: 1972),
+    muzzle_velocity_mps: (value: 115.0, source: "Wikipedia (RPG-18): 115 m/s", confidence: low),
+    velocity_loss_mps_per_km: (value: 40.0, source: "estimate", confidence: estimate),
+    flat_penetration_mm: (value: 300.0, source: "Wikipedia (RPG-18): up to 300 mm RHA", confidence: low),
+    dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate),
+    max_range_m: (value: 150.0, source: "Wikipedia (RPG-18): effective 100-150 m, maximum 200 m", confidence: low),
+    preferred_vs: [ifv, recon, mbt],
+    behind_armour: (value: 0.4, source: "estimate (plan M8B-AT-TEAMS §2.3)", confidence: estimate),
+)

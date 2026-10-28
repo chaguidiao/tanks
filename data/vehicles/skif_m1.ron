@@ -85,6 +85,8 @@
         hull_front: (value: 33.0, source: "open-source estimates (~19-33 mm sloped glacis)", confidence: low),
         hull_side: (value: 16.0, source: "estimate", confidence: estimate),
         hull_rear: (value: 16.0, source: "estimate", confidence: estimate),
+        top: (value: 10.0, source: "estimate (plan M8B-AT-TEAMS §3)", confidence: estimate,
+            notes: "Thin steel roof of a few millimetres to about 10 mm; no authoritative public figure. Only autocannon and HE fragments are sensitive to it."),
     ),
     ammo_stowage: exposed,
     smoke_launcher: (

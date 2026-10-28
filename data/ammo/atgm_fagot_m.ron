@@ -1,0 +1,16 @@
+// Fictional improved Fagot missile, mirroring the 9M111M.
+(
+    id: "atgm_fagot_m",
+    name: "ATGM FG-2",
+    mirrors: "9M111M Faktoriya",
+    kind: heat,
+    guided: true,
+    in_service: (from: 1991),
+    muzzle_velocity_mps: (value: 180.0, source: "Wikipedia (9K111 Fagot): as the 9M111", confidence: low),
+    velocity_loss_mps_per_km: (value: 0.0, source: "a sustained rocket motor holds cruise speed", confidence: low),
+    flat_penetration_mm: (value: 600.0, source: "Wikipedia (9K111 Fagot): 600 mm RHA", confidence: low),
+    dispersion_mrad: (value: 0.3, source: "estimate as for the 9M111", confidence: estimate),
+    min_range_m: (value: 75.0, source: "Wikipedia (9K111 Fagot): 75 m", confidence: low),
+    max_range_m: (value: 2500.0, source: "Wikipedia (9K111 Fagot): 2,500 m", confidence: low),
+    preferred_vs: [mbt, ifv],
+)

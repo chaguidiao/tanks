@@ -1,0 +1,16 @@
+// Fictional 84 mm disposable shaped-charge rocket, mirroring the AT4 (M136).
+(
+    id: "rkt_84",
+    name: "ROCKET 84 (AT4 CLASS)",
+    mirrors: "AT4 (M136)",
+    kind: heat,
+    in_service: (from: 1987),
+    muzzle_velocity_mps: (value: 285.0, source: "Wikipedia (AT4): 285 m/s", confidence: low),
+    velocity_loss_mps_per_km: (value: 30.0, source: "estimate", confidence: estimate),
+    flat_penetration_mm: (value: 400.0, source: "FM 3-23.25 (2001): more than 14 in (356 mm); manufacturer figure 420 mm (Wikipedia, AT4)", confidence: low),
+    dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate),
+    max_range_m: (value: 400.0, source: "FM 3-23.25 (2001): effective 300 m stationary, 150 m moving; estimate", confidence: low,
+        notes: "Flatter trajectory than the M72: still about one hit in three at 400 m."),
+    preferred_vs: [ifv, recon, mbt],
+    behind_armour: (value: 0.4, source: "estimate (plan M8B-AT-TEAMS §2.3)", confidence: estimate),
+)

@@ -1,0 +1,17 @@
+// Fictional wire-guided medium anti-tank missile, mirroring the M47 Dragon (first version).
+(
+    id: "atgm_dragon",
+    name: "ATGM DR-1",
+    mirrors: "M47 Dragon",
+    kind: heat,
+    guided: true,
+    in_service: (from: 1975),
+    muzzle_velocity_mps: (value: 95.0, source: "Wikipedia (M47 Dragon): 85-110 m/s, about 11 s to 1,000 m", confidence: low),
+    velocity_loss_mps_per_km: (value: 0.0, source: "side thrusters keep the speed", confidence: low),
+    flat_penetration_mm: (value: 330.0, source: "Wikipedia (M47 Dragon): 330 mm", confidence: low),
+    dispersion_mrad: (value: 0.6, source: "estimate", confidence: estimate,
+        notes: "SACLOS; the thruster-steered missile and the shoulder-held tracker were hard to keep on target over 11 s of flight: wider than a vehicle missile."),
+    min_range_m: (value: 65.0, source: "Wikipedia (M47 Dragon): 65 m", confidence: low),
+    max_range_m: (value: 1000.0, source: "Wikipedia (M47 Dragon): 1,000 m", confidence: low),
+    preferred_vs: [mbt, ifv],
+)

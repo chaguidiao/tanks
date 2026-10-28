@@ -1,0 +1,16 @@
+// Fictional wire-guided anti-tank missile on a tripod launcher, mirroring the 9K111 Fagot.
+(
+    id: "atgm_fagot",
+    name: "ATGM FG-1",
+    mirrors: "9M111 Fagot",
+    kind: heat,
+    guided: true,
+    in_service: (from: 1970),
+    muzzle_velocity_mps: (value: 180.0, source: "Wikipedia (9K111 Fagot): 80 m/s at launch, 186 m/s in flight", confidence: low),
+    velocity_loss_mps_per_km: (value: 0.0, source: "a sustained rocket motor holds cruise speed", confidence: low),
+    flat_penetration_mm: (value: 400.0, source: "Wikipedia (9K111 Fagot): 400 mm RHA", confidence: low),
+    dispersion_mrad: (value: 0.3, source: "estimate as for the vehicle SACLOS missiles (atgm_sk5)", confidence: estimate),
+    min_range_m: (value: 75.0, source: "Wikipedia (9K111 Fagot): 70-75 m", confidence: low),
+    max_range_m: (value: 2000.0, source: "Wikipedia (9K111 Fagot): 2,000 m", confidence: low),
+    preferred_vs: [mbt, ifv],
+)

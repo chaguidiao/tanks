@@ -66,5 +66,15 @@
         ineffective_fraction: (value: 0.5, source: "estimate", confidence: estimate),
         close_infantry_m: (value: 500.0, source: "estimate", confidence: estimate),
         squad_spacing_m: (value: 50.0, source: "FM 100-2-1 (1984): dismounted platoon frontage about 100-150 m; estimate", confidence: estimate),
+        // Anti-armour ambush (plan M8B-AT-TEAMS §6). FM 100-2-1 (1984) ambush: fire is opened
+        // on command when the column is in the kill zone; Grau (1997): RPG teams in Grozny fired
+        // from upper floors and basements at 50-200 m at the flanks, rear and tops of vehicles.
+        ambush: (
+            rocket_trigger_m: (value: 200.0, source: "Grau (FMSO, 1997); FM 100-2-1 (1984) ambush; estimate", confidence: estimate,
+                notes: "Grozny hunter-killer teams fired from 50-200 m; the RPG-7's hit chance is about one half at 200 m (Isby 1988)."),
+            missile_trigger_m: (value: 2000.0, source: "FM 100-2-3 (1991): Fagot class to 2,000 m; estimate", confidence: estimate,
+                notes: "Capped by each missile's own maximum range."),
+            prefer_flank: true,
+        ),
     ),
 )

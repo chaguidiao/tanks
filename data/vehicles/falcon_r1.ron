@@ -83,6 +83,8 @@
         hull_front: (value: 14.0, source: "estimate", confidence: estimate),
         hull_side: (value: 12.0, source: "estimate", confidence: estimate),
         hull_rear: (value: 10.0, source: "estimate", confidence: estimate),
+        top: (value: 10.0, source: "estimate (plan M8B-AT-TEAMS §3)", confidence: estimate,
+            notes: "Light armour roof; no authoritative public figure. Only autocannon and HE fragments are sensitive to it."),
     ),
     ammo_stowage: isolated,
     smoke_launcher: (

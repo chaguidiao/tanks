@@ -90,6 +90,8 @@
         hull_front: (value: 40.0, source: "open-source estimates: sloped aluminium glacis, steel-equivalent", confidence: low),
         hull_side: (value: 25.0, source: "estimate", confidence: estimate),
         hull_rear: (value: 20.0, source: "estimate", confidence: estimate),
+        top: (value: 15.0, source: "estimate (plan M8B-AT-TEAMS §3)", confidence: estimate,
+            notes: "Aluminium-alloy roof, about a third as effective as steel per millimetre; no authoritative public figure. Only autocannon and HE fragments are sensitive to it."),
     ),
     ammo_stowage: exposed,
     smoke_launcher: (

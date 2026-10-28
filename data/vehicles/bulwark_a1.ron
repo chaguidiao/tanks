@@ -88,6 +88,8 @@
         hull_front: (value: 500.0, source: "open-source estimates (range ~400-600 mm)", confidence: estimate),
         hull_side: (value: 70.0, source: "estimate", confidence: estimate, notes: "Side skirts plus hull side."),
         hull_rear: (value: 40.0, source: "estimate", confidence: estimate),
+        top: (value: 40.0, source: "estimate (plan M8B-AT-TEAMS §3)", confidence: estimate,
+            notes: "No authoritative public figure. A game database gives about 45 mm for a T-72B turret roof and about 20 mm for its engine deck; one value stands for both, nearer the turret, which takes most plunging hits. Every anti-tank warhead in the data defeats it, so results do not depend on it (plan M8B-AT-TEAMS §3)."),
     ),
     ammo_stowage: isolated,
     smoke_launcher: (

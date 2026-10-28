@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{SensorDef, ServiceDates, Stat};
+use crate::{AmmoLoad, FireControlDef, SensorDef, ServiceDates, Stat};
 
 /// A squad type (`data/infantry/*.ron`). One squad is what one IFV carries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +30,9 @@ pub struct SquadDef {
     /// Night aiming aids by period (aiming lasers with goggles); none = unaided at night.
     #[serde(default)]
     pub aiming_aids: Vec<AimingAidDef>,
+    /// Anti-armour weapons (rockets and missiles) by period (plan M8B-AT-TEAMS §2.1).
+    #[serde(default)]
+    pub anti_armour: Vec<AntiArmourDef>,
 }
 
 impl SquadDef {
@@ -41,6 +44,11 @@ impl SquadDef {
     /// Body armour worn in `year` (the last listed row in service).
     pub fn armour_in(&self, year: i32) -> Option<&BodyArmourDef> {
         self.body_armour.iter().rev().find(|a| a.in_service.contains(year))
+    }
+
+    /// Anti-armour weapons carried in `year`.
+    pub fn anti_armour_in(&self, year: i32) -> impl Iterator<Item = &AntiArmourDef> {
+        self.anti_armour.iter().filter(move |w| w.in_service.is_none_or(|d| d.contains(year)))
     }
 
     /// Night aiming aid carried in `year` (the last listed row in service).
@@ -66,6 +74,71 @@ pub struct AimingAidDef {
     pub name: String,
     pub in_service: ServiceDates,
     pub night_factor: Stat<f64>,
+}
+
+/// Rocket launcher or anti-tank missile: what the doctrine's ambush trigger range applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AntiArmourClass {
+    /// Shoulder-fired rocket (RPG, LAW, AT4 class): unguided, short range.
+    Rocket,
+    /// Anti-tank guided missile team weapon.
+    Missile,
+}
+
+/// The aiming errors of a man-portable launcher (plan M8B-AT-TEAMS §2.2). No rangefinder: the
+/// gunner estimates range, and the error goes through the round's drop.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LauncherSightDef {
+    /// 1σ range estimation error as a fraction of range.
+    pub estimated_range_error_fraction: Stat<f64>,
+    /// 1σ ballistic error per shot (launch jitter, crosswind) (mrad); unguided rounds only.
+    pub ballistic_error_mrad: Stat<f64>,
+    /// 1σ aim or tracking error (mrad).
+    pub aim_error_mrad: Stat<f64>,
+    /// Residual lead error as a fraction of the lead angle.
+    pub lead_error_fraction: Stat<f64>,
+}
+
+impl LauncherSightDef {
+    /// The same errors as a vehicle fire-control block, for the shared shot resolution: no laser,
+    /// and a launcher is never fired on the move (the moving error is the aim error).
+    pub fn fire_control(&self) -> FireControlDef {
+        let none =
+            |v: f64| Stat { value: v, source: "not fitted".into(), confidence: crate::Confidence::High, notes: None };
+        FireControlDef {
+            laser_rangefinder: false,
+            laser_range_error_m: none(0.0),
+            estimated_range_error_fraction: self.estimated_range_error_fraction.clone(),
+            ballistic_error_mrad: self.ballistic_error_mrad.clone(),
+            aim_error_mrad: self.aim_error_mrad.clone(),
+            moving_error_mrad: self.aim_error_mrad.clone(),
+            lead_error_fraction: self.lead_error_fraction.clone(),
+            lay_time_s: none(0.0),
+            lase_time_s: none(0.0),
+        }
+    }
+}
+
+/// An anti-armour weapon carried by a squad (plan M8B-AT-TEAMS §2.1): `count` launchers, each
+/// with the rounds in `load`; the rounds are ordinary `AmmoDef` rows.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AntiArmourDef {
+    pub name: String,
+    #[serde(default)]
+    pub in_service: Option<ServiceDates>,
+    pub class: AntiArmourClass,
+    /// Launchers of this type in the squad (disposables: one per round).
+    pub count: u8,
+    /// Rounds per launcher, in the order the gunner prefers them.
+    pub load: Vec<AmmoLoad>,
+    pub sight: LauncherSightDef,
+    /// From halting to the launcher ready to fire (tripod, sight, seeker cool-down) (s).
+    pub setup_s: Stat<f64>,
+    /// Time between shots of this weapon type in the squad (s).
+    pub reload_s: Stat<f64>,
+    /// Backblast and launch signature: multiplies the detection cue of a firing target.
+    pub signature_factor: Stat<f64>,
 }
 
 /// What the enemy sees and shoots at in one posture.
@@ -205,6 +278,21 @@ pub struct InfantryDoctrine {
     pub close_infantry_m: Stat<f64>,
     /// Squad spacing in a dismounted platoon line (m).
     pub squad_spacing_m: Stat<f64>,
+    /// Anti-armour ambush (plan M8B-AT-TEAMS §6).
+    pub ambush: AmbushDoctrine,
+}
+
+/// Anti-armour ambush rules: hold fire until a vehicle is inside the kill zone or the squad is
+/// fired on; then prefer a target showing its flank.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AmbushDoctrine {
+    /// Rockets open fire on a vehicle inside this range (m).
+    pub rocket_trigger_m: Stat<f64>,
+    /// Missiles open fire inside this range, or their own maximum if shorter (m).
+    pub missile_trigger_m: Stat<f64>,
+    /// Hold fire on a vehicle showing its front while its front cannot be penetrated, until the
+    /// squad is fired on.
+    pub prefer_flank: bool,
 }
 
 #[cfg(test)]
@@ -275,5 +363,55 @@ mod tests {
         let r = ds().squad("mr_squad").unwrap().clone();
         assert!(r.aiming_aid_in(2005).is_none());
         assert!(r.armour_in(2005).unwrap().fragment_factor.get() > b.armour_in(2005).unwrap().fragment_factor.get());
+    }
+
+    #[test]
+    fn anti_armour_weapons_follow_the_year() {
+        // Plan M8B-AT-TEAMS §6: the Red squad's RPG-7 loads newer rockets by period, disposables
+        // change in 1985 (Red) and 1987 (Blue); the AT teams change missile in 1988, 1991, 1996
+        // and 1998. Decision 3: the RPG gunner is one of the seven men.
+        let ds = ds();
+        let loads = |id: &str, y: i32| {
+            ds.squad(id)
+                .unwrap()
+                .anti_armour_in(y)
+                .flat_map(|w| w.load.iter().map(|l| l.ammo.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(loads("mr_squad", 1970), ["rkt_pg7v"]);
+        assert_eq!(loads("mr_squad", 1980), ["rkt_pg7v", "rkt_pg7vl", "rkt_64"]);
+        assert_eq!(loads("mr_squad", 1990), ["rkt_pg7v", "rkt_pg7vl", "rkt_pg7vr", "rkt_72"]);
+        assert_eq!(loads("rifle_squad_b", 1985), ["rkt_66"]);
+        assert_eq!(loads("rifle_squad_b", 1990), ["rkt_84"]);
+        assert_eq!(loads("at_team_b", 1985), ["atgm_dragon"]);
+        assert_eq!(loads("at_team_b", 1990), ["atgm_dragon2"]);
+        assert_eq!(loads("at_team_b", 2000), ["atgm_javelin"]);
+        assert_eq!(loads("at_team_r", 1985), ["atgm_fagot"]);
+        assert_eq!(loads("at_team_r", 1995), ["atgm_fagot_m"]);
+        assert_eq!(loads("at_team_r", 2005), ["atgm_kornet"]);
+        let mr = ds.squad("mr_squad").unwrap();
+        let men: u8 = mr.weapons_in(1990).map(|w| w.count).sum::<u8>() + 1;
+        assert_eq!(men, mr.men, "one rifle swapped for the RPG");
+        for id in ["at_team_b", "at_team_r"] {
+            let t = ds.squad(id).unwrap();
+            assert!(t.men <= 3 && t.anti_armour.iter().all(|w| w.class == AntiArmourClass::Missile), "{id}");
+        }
+    }
+
+    #[test]
+    fn rounds_carry_the_new_warhead_flags() {
+        // Plan M8B-AT-TEAMS §2.3-§2.4 and §3: tandem charges, the behind-armour factor of light
+        // rockets, the Javelin's top attack; existing rounds keep the defaults.
+        let ds = ds();
+        let a = |id: &str| ds.ammo(id).unwrap().clone();
+        assert!(a("rkt_pg7vr").tandem && a("atgm_kornet").tandem && a("atgm_javelin").tandem);
+        assert!(!a("rkt_pg7v").tandem && !a("rkt_pg7vl").tandem);
+        assert!(a("rkt_pg7v").behind_armour_factor() < 0.5);
+        assert_eq!(a("apfsds_120a").behind_armour_factor(), 1.0);
+        assert_eq!(a("atgm_fagot").behind_armour_factor(), 1.0);
+        let jv = a("atgm_javelin");
+        assert!(jv.fire_and_forget && jv.guided && jv.top_attack_deg.is_some());
+        assert!(!a("atgm_dragon").fire_and_forget);
+        assert!(ds.vehicles.iter().all(|v| v.armour.top.get() > 0.0 && v.armour.top.get() <= 50.0));
     }
 }

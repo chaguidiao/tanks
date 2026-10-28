@@ -396,6 +396,7 @@ fn vehicle_sheet(ds: &DataSet, v: &VehicleDef) -> Sheet {
         stat("HULL FRONT", &v.armour.hull_front, mm),
         stat("HULL SIDE", &v.armour.hull_side, mm),
         stat("HULL REAR", &v.armour.hull_rear, mm),
+        stat("TOP (ROOF AND ENGINE DECK)", &v.armour.top, mm),
     ]);
     if let Some(e) = &v.armour.era {
         l.push(section("EXPLOSIVE REACTIVE ARMOUR (FRONT AND SIDES)"));
@@ -504,6 +505,30 @@ fn small_arm_lines(head: &str, w: &SmallArmDef) -> Vec<Line> {
     l
 }
 
+/// Rows for one anti-armour weapon of a squad (plan M8B-AT-TEAMS §2.1).
+fn anti_armour_lines(w: &sim_data::AntiArmourDef) -> Vec<Line> {
+    let class = match w.class {
+        sim_data::AntiArmourClass::Rocket => "ROCKET",
+        sim_data::AntiArmourClass::Missile => "MISSILE",
+    };
+    let mut l = vec![section(&format!("ANTI-ARMOUR: {} ({class})", w.name))];
+    if let Some(d) = &w.in_service {
+        l.push(fact("IN SERVICE", years(d)));
+    }
+    let load: Vec<String> = w.load.iter().map(|x| format!("{} × {}", x.count, x.ammo.to_uppercase())).collect();
+    l.extend([
+        fact("LAUNCHERS", format!("{}", w.count)),
+        fact("ROUNDS PER LAUNCHER", load.join(", ")),
+        stat("AIM ERROR", &w.sight.aim_error_mrad, mrad),
+        stat("RANGE ESTIMATION ERROR", &w.sight.estimated_range_error_fraction, pct),
+        stat("BALLISTIC ERROR", &w.sight.ballistic_error_mrad, mrad),
+        stat("SET-UP TIME", &w.setup_s, secs),
+        stat("TIME BETWEEN SHOTS", &w.reload_s, secs),
+        stat("LAUNCH SIGNATURE", &w.signature_factor, |x| format!("× {x:.1} FIRING CUE")),
+    ]);
+    l
+}
+
 fn posture_lines(head: &str, p: &PostureSignature) -> Vec<Line> {
     vec![
         section(head),
@@ -529,6 +554,9 @@ fn squad_sheet(ds: &DataSet, s: &SquadDef) -> Sheet {
     ];
     for w in &s.weapons {
         l.extend(small_arm_lines("WEAPON", w));
+    }
+    for w in &s.anti_armour {
+        l.extend(anti_armour_lines(w));
     }
     l.push(section("SENSORS"));
     for se in &s.sensors {
@@ -619,6 +647,24 @@ fn ammo_sheet(ds: &DataSet, a: &AmmoDef) -> Sheet {
     if let Some(r) = &a.max_range_m {
         l.push(stat("MAXIMUM RANGE", r, |x| format!("{x:.0} M")));
     }
+    if let Some(r) = &a.min_range_m {
+        l.push(stat("MINIMUM RANGE", r, |x| format!("{x:.0} M")));
+    }
+    if a.guided {
+        l.push(fact(
+            "GUIDANCE",
+            if a.fire_and_forget { "FIRE AND FORGET" } else { "COMMAND (GUNNER TRACKS TO IMPACT)" },
+        ));
+    }
+    if a.tandem {
+        l.push(fact("WARHEAD", "TANDEM (PRECURSOR FIRES REACTIVE ARMOUR)"));
+    }
+    if let Some(t) = &a.top_attack_deg {
+        l.push(stat("TOP ATTACK DIVE", t, |x| format!("{x:.0}° BELOW HORIZONTAL")));
+    }
+    if let Some(b) = &a.behind_armour {
+        l.push(stat("BEHIND-ARMOUR EFFECT", b, |x| format!("× {x:.2} KILL OUTCOMES")));
+    }
     if let Some(p) = &a.reference_penetration_2km_mm {
         l.push(stat("PUBLISHED PENETRATION, 2 KM", p, |x| format!("{x:.0} MM RHA (VALIDATION ONLY)")));
     }
@@ -644,6 +690,13 @@ fn ammo_sheet(ds: &DataSet, a: &AmmoDef) -> Sheet {
     for v in ds.vehicles.iter().filter(|v| v.armament.load.iter().any(|x| x.ammo == a.id)) {
         let n: u32 = v.armament.load.iter().filter(|x| x.ammo == a.id).map(|x| x.count).sum();
         l.push(fact(&v.name, format!("{n} ROUNDS · {}", v.armament.gun)));
+    }
+    for s in &ds.squads {
+        for w in s.anti_armour.iter().filter(|w| w.load.iter().any(|x| x.ammo == a.id)) {
+            let n: u32 = w.load.iter().filter(|x| x.ammo == a.id).map(|x| x.count * w.count as u32).sum();
+            let when = w.in_service.as_ref().map_or(String::new(), |d| format!(" ({})", years(d)));
+            l.push(fact(&s.name, format!("{n} ROUNDS · {}{when}", w.name)));
+        }
     }
     let kind = a.kind.label();
     Sheet {

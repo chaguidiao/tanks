@@ -1,7 +1,7 @@
 // Red motorised rifle squad as carried by one BMP (plan M8B-INFANTRY §1). The squad leader,
 // driver and gunner of a BMP squad stay with the vehicle or lead it; about seven men dismount
 // (FM 100-2-3 (1991) gives eight seats in the BMP-1 and seven in the BMP-2). One PK machine gun
-// and one RPK light machine gun per squad; the RPG gunner comes with the anti-tank teams (M8b-b).
+// and one RPK light machine gun per squad; one man carries the RPG-7 (anti_armour, M8b-b).
 (
     id: "mr_squad",
     name: "MR SQUAD",
@@ -9,7 +9,7 @@
     in_service: (from: 1966),
     men: 7,
     weapons: [
-        (name: "ASSAULT RIFLES", count: 5,
+        (name: "ASSAULT RIFLES", count: 4,
             rounds_per_burst: (value: 3.0, source: "FM 100-2-3 (1991); estimate as for Blue rifles", confidence: low),
             burst_interval_s: (value: 10.0, source: "estimate as for Blue rifles", confidence: estimate),
             max_range_m: (value: 500.0, source: "FM 100-2-3 (1991): AK-74/AKM effective range about 500 m", confidence: low),
@@ -70,5 +70,62 @@
             bullet_factor: (value: 1.0, source: "calibration notes §3", confidence: low, notes: "Fragment protection only."),
             fragment_factor: (value: 0.95, source: "estimate (calibration notes §3)", confidence: estimate,
                 notes: "6B2/6B3 in Afghanistan, 6B5 from 1985, issued only in part and still partial in 2005: a third of the Blue effect.")),
+    ],
+    anti_armour: [
+        // RPG-7 class launcher (decision 3: one of the seven men carries it instead of a rifle;
+        // FM 100-2-3 (1991) lists the RPG-7 gunner inside the squad). Rounds per launcher with the
+        // assistant's; the gunner fires the first round that defeats the target (cheapest first).
+        (name: "RPG-7 CLASS", in_service: (from: 1961, to: 1976), class: rocket, count: 1,
+            load: [(ammo: "rkt_pg7v", count: 4)],
+            sight: (
+            estimated_range_error_fraction: (value: 0.12, source: "US Army tests via Isby (1988) and plan M8B-AT-TEAMS §2.2", confidence: low, notes: "Trained gunners were 10-15 % off in range; through the rocket's drop this becomes a vertical miss growing with range."),
+            ballistic_error_mrad: (value: 1.5, source: "estimate", confidence: estimate, notes: "Launch jitter and crosswind (decision 10: wind folded in here)."),
+            aim_error_mrad: (value: 7.0, source: "fitted to Isby (1988) and the 1976 US Army evaluation (Wikipedia, RPG-7)", confidence: low, notes: "Fit on a 5 x 2.5 m panel: 0.92 / 0.55 / 0.31 / 0.11 at 100 / 200 / 300 / 500 m stationary (table 0.91 / 0.52 / 0.27 / 0.05), 0.91 / 0.51 / 0.27 / 0.09 crossing at 4 m/s (table 0.96 / 0.51 / 0.22 / 0.04)."),
+            lead_error_fraction: (value: 0.3, source: "estimate", confidence: estimate)),
+            setup_s: (value: 5.0, source: "estimate", confidence: estimate, notes: "Shoulder, sight and fire from a halt."),
+            reload_s: (value: 12.0, source: "estimate", confidence: estimate, notes: "Load the next rocket and re-aim."),
+            signature_factor: (value: 1.5, source: "estimate", confidence: estimate, notes: "Backblast flash and dust on top of the firing cue.")),
+        (name: "RPG-7 CLASS", in_service: (from: 1977, to: 1987), class: rocket, count: 1,
+            load: [(ammo: "rkt_pg7v", count: 1), (ammo: "rkt_pg7vl", count: 3)],
+            sight: (
+            estimated_range_error_fraction: (value: 0.12, source: "US Army tests via Isby (1988) and plan M8B-AT-TEAMS §2.2", confidence: low, notes: "Trained gunners were 10-15 % off in range; through the rocket's drop this becomes a vertical miss growing with range."),
+            ballistic_error_mrad: (value: 1.5, source: "estimate", confidence: estimate, notes: "Launch jitter and crosswind (decision 10: wind folded in here)."),
+            aim_error_mrad: (value: 7.0, source: "fitted to Isby (1988) and the 1976 US Army evaluation (Wikipedia, RPG-7)", confidence: low, notes: "Fit on a 5 x 2.5 m panel: 0.92 / 0.55 / 0.31 / 0.11 at 100 / 200 / 300 / 500 m stationary (table 0.91 / 0.52 / 0.27 / 0.05), 0.91 / 0.51 / 0.27 / 0.09 crossing at 4 m/s (table 0.96 / 0.51 / 0.22 / 0.04)."),
+            lead_error_fraction: (value: 0.3, source: "estimate", confidence: estimate)),
+            setup_s: (value: 5.0, source: "estimate", confidence: estimate),
+            reload_s: (value: 12.0, source: "estimate", confidence: estimate),
+            signature_factor: (value: 1.5, source: "estimate", confidence: estimate)),
+        (name: "RPG-7 CLASS", in_service: (from: 1988), class: rocket, count: 1,
+            load: [(ammo: "rkt_pg7v", count: 1), (ammo: "rkt_pg7vl", count: 2), (ammo: "rkt_pg7vr", count: 1)],
+            sight: (
+            estimated_range_error_fraction: (value: 0.12, source: "US Army tests via Isby (1988) and plan M8B-AT-TEAMS §2.2", confidence: low, notes: "Trained gunners were 10-15 % off in range; through the rocket's drop this becomes a vertical miss growing with range."),
+            ballistic_error_mrad: (value: 1.5, source: "estimate", confidence: estimate, notes: "Launch jitter and crosswind (decision 10: wind folded in here)."),
+            aim_error_mrad: (value: 7.0, source: "fitted to Isby (1988) and the 1976 US Army evaluation (Wikipedia, RPG-7)", confidence: low, notes: "Fit on a 5 x 2.5 m panel: 0.92 / 0.55 / 0.31 / 0.11 at 100 / 200 / 300 / 500 m stationary (table 0.91 / 0.52 / 0.27 / 0.05), 0.91 / 0.51 / 0.27 / 0.09 crossing at 4 m/s (table 0.96 / 0.51 / 0.22 / 0.04)."),
+            lead_error_fraction: (value: 0.3, source: "estimate", confidence: estimate)),
+            setup_s: (value: 5.0, source: "estimate", confidence: estimate),
+            reload_s: (value: 12.0, source: "estimate", confidence: estimate),
+            signature_factor: (value: 1.5, source: "estimate", confidence: estimate,
+                notes: "Tandem rockets were issued only in part: one in the load.")),
+        // Light disposable launchers issued as rounds of ammunition (FM 100-2-3, 1991).
+        (name: "RPG-18 CLASS", in_service: (from: 1972, to: 1984), class: rocket, count: 1,
+            load: [(ammo: "rkt_64", count: 1)],
+            sight: (
+            estimated_range_error_fraction: (value: 0.12, source: "US Army tests via Isby (1988) and plan M8B-AT-TEAMS §2.2", confidence: low, notes: "Trained gunners were 10-15 % off in range; through the rocket's drop this becomes a vertical miss growing with range."),
+            ballistic_error_mrad: (value: 1.5, source: "estimate", confidence: estimate, notes: "Launch jitter and crosswind (decision 10: wind folded in here)."),
+            aim_error_mrad: (value: 5.7, source: "fitted to FM 3-23.25 (2001) via Wikipedia (M72 LAW): below one hit in two beyond the effective range", confidence: low, notes: "0.5 at 200 m on a stationary 5 x 2.5 m panel with the M72 rocket."),
+            lead_error_fraction: (value: 0.3, source: "estimate", confidence: estimate)),
+            setup_s: (value: 10.0, source: "estimate", confidence: estimate, notes: "Extend the tube, arm, aim."),
+            reload_s: (value: 5.0, source: "estimate", confidence: estimate, notes: "The next man fires his own launcher."),
+            signature_factor: (value: 1.5, source: "estimate", confidence: estimate)),
+        (name: "RPG-26 CLASS", in_service: (from: 1985), class: rocket, count: 1,
+            load: [(ammo: "rkt_72", count: 1)],
+            sight: (
+            estimated_range_error_fraction: (value: 0.12, source: "US Army tests via Isby (1988) and plan M8B-AT-TEAMS §2.2", confidence: low, notes: "Trained gunners were 10-15 % off in range; through the rocket's drop this becomes a vertical miss growing with range."),
+            ballistic_error_mrad: (value: 1.5, source: "estimate", confidence: estimate, notes: "Launch jitter and crosswind (decision 10: wind folded in here)."),
+            aim_error_mrad: (value: 5.7, source: "fitted to FM 3-23.25 (2001) via Wikipedia (M72 LAW): below one hit in two beyond the effective range", confidence: low, notes: "0.5 at 200 m on a stationary 5 x 2.5 m panel with the M72 rocket."),
+            lead_error_fraction: (value: 0.3, source: "estimate", confidence: estimate)),
+            setup_s: (value: 10.0, source: "estimate", confidence: estimate, notes: "Extend the tube, arm, aim."),
+            reload_s: (value: 5.0, source: "estimate", confidence: estimate, notes: "The next man fires his own launcher."),
+            signature_factor: (value: 1.5, source: "estimate", confidence: estimate)),
     ],
 )
