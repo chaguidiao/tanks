@@ -1040,7 +1040,7 @@ impl Database {
         let mut x = 40.0;
         for (k, t) in Tab::ALL.into_iter().enumerate() {
             let w = hud::text_w(t.label(), style::FONT_S) + 36.0;
-            let key = ["1", "2", "3", "4", "5"][k];
+            let key = ["1", "2", "3", "4", "5", "6"][k];
             out.push(
                 Button::new(Rect::new(x, 108.0, w, 28.0), Look::Bar, t.label(), DbAction::Tab(t))
                     .key(key)
