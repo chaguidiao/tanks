@@ -971,7 +971,7 @@ fn bench(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), String> {
     // Maps are taken from the scenarios that use them, so the bench loads exactly what the game
     // loads (generated on first use, like every other subcommand).
     let mut maps = Vec::new();
-    for sc_id in ["m5-hold-the-village", "cw-village-defence"] {
+    for sc_id in ["m5-hold-the-village", "cw-village-defence", "m8h-town"] {
         let sc = DataSet::load_scenario(data, sc_id).map_err(|e| e.to_string())?;
         let map = workflow::ensure_map(data, ds, &sc.map, |s| eprintln!("{s}")).map_err(|e| e.to_string())?;
         maps.push((sc, Arc::new(map)));

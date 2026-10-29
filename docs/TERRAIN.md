@@ -225,6 +225,7 @@ At tank scale, buildings matter as **LOS blockers, mobility obstacles and ambush
 - **Display**: building footprints as thin outlines with light fill (dense centres merge into blocks when zoomed out); built-up area outline at low zoom.
 - **AI**: urban = severely restricted terrain for tanks; prefer bypass; if ordered in, move in column with sections overwatching intersections; engagements happen at very short range.
 - **Generation**: settlement polygon + type + density + era style → streets → parcels → footprints. Villages and small towns in v1; larger towns are possible but performance-capped.
+- **Towns (implemented, M8h1b)**: `terragen::town`, when the recipe has `roads.town` (`market-town`): a rotated street lattice, bent and jittered in the old core and regular outside, zoned after FM 3-06 App. B into a market square with a church, closed perimeter blocks of terraced masonry round courtyards, residential houses with gardens, a concrete high-rise estate and an industrial sector. Streets are `street` road features (paved, 7–9 m); the town ground is land cover `town` (built-up). The routed network ends at the town's edge on the nearest street node. Courtyards are closed to vehicles; squads reach them through the houses' entrances. Not yet: settlement polygons as authoring input (the generator writes streets and footprints directly), parcels, era styles, the 1 m surface layer.
 
 ### 5.5 Roads, tracks and rail
 - **Vector features**: class (`motorway | main | secondary | track | forest track`), surface (`paved | gravel | dirt`), width, embankment/cutting profile.
@@ -292,7 +293,7 @@ Pipeline: `headless import --dem … --osm … --bbox … → maps/<id>/` (autho
 ---
 
 ## 9. Implementation order
-Done: 1, 2, 3 (implicit bridges only, no fords/lakes), 4 partly (land cover, soil, moisture, forest stands, field parcels; no hedgerows), 5 (roads and villages, no rail), 6 not started (micro-relief exists as `terrain::micro::h_micro` but is not tuned), 7 not started.
+Done: 1, 2, 3 (implicit bridges only, no fords/lakes), 4 partly (land cover, soil, moisture, forest stands, field parcels; no hedgerows), 5 (roads and villages, no rail), 7 partly (one generated market town with streets and zoned blocks; no 1 m surface layer, no settlement polygons), 6 not started (micro-relief exists as `terrain::micro::h_micro` but is not tuned).
 
 1. Map format + heightfield + bake skeleton + contours/heatmap rendering (M0).
 2. Stages 1–2 (landform, erosion/hydrology) + height brushes + analysis views.

@@ -146,6 +146,8 @@ The top bar always shows the light, the preset and the visibility.
 | **DELAY IN DEPTH** | 2005 | Delay with M1A2s against an advance guard led by reconnaissance, then hold the village; M2A2 reserve | Don't let the forward platoons be fixed; move on the trigger. Forested slopes are your best cover |
 | **DUSK ATTACK** | 2005 | Seize a village on open farmland held by T-90As and T-72Bs with missiles to 5 km | No cover on the approach. Use smoke to break the missile engagement, move in bounds, aim for the sides of the T-90A |
 | **FOG MEETING** (2005) | 2005 | Hold the crossroads in fog with an M1A2 platoon and an M2A2 platoon | Thermals don't see through fog. Overlapping fields of fire; the T-90A front is hard, so aim for its sides |
+| **CLEARING THE VILLAGE** | 1987 | Clear a village held by RPG squads and a missile team | Dismount the Bradleys short of the village and send the squads in first (OCCUPY BUILDINGS FACING...). Bring the tanks in behind them; alone, they drive into the rockets |
+| **THE MARKET TOWN** | 1987 | Hold the north edge of a town against a motor-rifle attack through the woods | Squads in the edge blocks see the approach; tanks in the streets don't. Keep the tanks on the flanks of the town where they see the wood line, and expect the BMP squads to come in on foot
 
 # A primer on armoured doctrine
 

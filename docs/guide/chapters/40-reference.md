@@ -199,6 +199,8 @@ All vehicles are fictional names for designs that mirror real ones. Numbers are 
 | DELAY IN DEPTH | `mod-delay-in-depth` | 2005, 10:00, haze | uplands | 2 M1A2 platoons, M2A2 reserve | 24 vehicles, recon, 152 mm artillery |
 | DUSK ATTACK | `mod-dusk-attack` | 2005, 17:30 | demo | 2 M1A2 platoons, 1 M2A2 platoon, 155 mm battery | T-90A, T-72B, IFVs, T-90A reserve |
 | FOG MEETING | `mod-fog-meeting` | 2005, 06:30, fog | demo | 1 M1A2 platoon, 1 M2A2 platoon | T-90A, T-72B, IFVs |
+| CLEARING THE VILLAGE | `m8f-ambush` | 1987, 10:00 | demo | 4 BULWARK A1, 3 WARD M2 with rifle squads | Infantry with RPGs and a missile team in the houses |
+| THE MARKET TOWN | `m8h-town` | 1987, 09:00 | town | 4 BULWARK A1, 3 WARD M2 with rifle squads | 9 KURGAN-B, 6 SKIF M1 with squads |
 
 # Troubleshooting
 
