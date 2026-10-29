@@ -51,8 +51,13 @@ rm -rf "${out}/${pkg}/data/maps"
 
 cd "${out}"
 case "$name" in
-    windows*) tar -a -cf "${pkg}.zip" "${pkg}"; archive="${pkg}.zip" ;;
-    *) tar -czf "${pkg}.tar.gz" "${pkg}"; archive="${pkg}.tar.gz" ;;
+    # Not tar: Git Bash's GNU tar ignores -a and writes an uncompressed tar named .zip.
+    windows*)
+        archive="${pkg}.zip"
+        powershell.exe -NoProfile -Command "Compress-Archive -Path '${pkg}' -DestinationPath '${archive}' -Force"
+        ;;
+    # COPYFILE_DISABLE: no AppleDouble (._) entries from macOS tar.
+    *) archive="${pkg}.tar.gz"; COPYFILE_DISABLE=1 tar -czf "${archive}" "${pkg}" ;;
 esac
 if command -v sha256sum >/dev/null; then sha256sum "${archive}" >"${archive}.sha256"; else shasum -a 256 "${archive}" >"${archive}.sha256"; fi
 echo "packaged ${out}/${archive}"
