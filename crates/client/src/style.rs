@@ -27,6 +27,8 @@ pub const GRID_LABEL: Rgba = Rgba(140, 170, 150, 200);
 pub const WATER: Rgba = Rgba(90, 130, 160, 230);
 pub const ROAD: Rgba = Rgba(186, 176, 150, 220);
 pub const ROAD_FILL: Rgba = Rgba(40, 40, 36, 255);
+/// Town streets: thinner and dimmer than roads so blocks stay readable.
+pub const STREET: Rgba = Rgba(150, 144, 126, 170);
 pub const TRACK: Rgba = Rgba(150, 140, 116, 200);
 pub const BUILDING: Rgba = Rgba(58, 58, 56, 255);
 pub const BUILDING_EDGE: Rgba = Rgba(150, 146, 132, 220);

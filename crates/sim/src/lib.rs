@@ -1937,7 +1937,7 @@ impl Sim {
 /// Behaviour version of the simulation. A replay records it and is only played back by a build
 /// with the same version: bump it whenever a change makes an old command log play out
 /// differently (plan M8B-INFANTRY §8, DESIGN.md §14 #29). Replays from before versioning read as 0.
-pub const SIM_VERSION: u32 = 6;
+pub const SIM_VERSION: u32 = 7;
 
 /// A recorded game: scenario id plus the external command log. Re-simulating it reproduces the
 /// game exactly (determinism), which is what the after-action review and replays rely on.

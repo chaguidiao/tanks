@@ -331,6 +331,7 @@ fn draw_features(f: &mut Frame, cam: &Camera, baked: &BakedMap) {
                 polyline(f, cam, &r.points, w_px.max(1.0), style::ROAD_FILL);
             }
             RoadClass::Secondary => polyline(f, cam, &r.points, w_px.max(1.5), style::ROAD),
+            RoadClass::Street => polyline(f, cam, &r.points, w_px.max(1.0), style::STREET),
             RoadClass::Track => {
                 // Dashed.
                 for (k, w) in r.points.windows(2).enumerate() {

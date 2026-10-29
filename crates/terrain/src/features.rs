@@ -53,6 +53,8 @@ pub enum RoadClass {
     Main,
     Secondary,
     Track,
+    /// A town street (M8h1b): paved, drawn as a street, not part of the routed network.
+    Street,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

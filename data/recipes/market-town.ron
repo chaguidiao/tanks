@@ -1,0 +1,14 @@
+// North European plain with one market town (M8h1b, docs/plans/M8H1B-TOWNS.md): the
+// rolling-farmland landform, cover and villages, plus a town of about 1.2 km across near the map
+// centre, at a river crossing where the ground allows.
+(
+    preset: "market-town",
+    landform: (relief_m: 60.0, wavelength_m: 2600.0, octaves: 7, ridge_mix: 0.15, warp_m: 500.0,
+               tilt_m: 25.0, tilt_azimuth_deg: 30.0, base_m: 60.0),
+    erosion: (iterations: 5, k: 0.0012, m: 0.5, talus: 0.6, thermal_iterations: 6),
+    rivers: (min_area_m2: 3000000.0, width_coef: 3.0, width_exp: 0.5, depth_coef: 0.5, depth_exp: 0.4, min_length_m: 600.0),
+    cover: (forest_fraction: 0.22, forest_wavelength_m: 1400.0, marsh_moisture: 228, field_size_m: 260.0),
+    roads: (village_spacing_m: 2800.0, village_radius_m: 220.0, edge_exits: 4,
+            town: Some((radius_m: 600.0, core_radius_m: 230.0, block_m: 85.0, core_jitter_m: 12.0,
+                        core_street_m: 7.0, street_m: 9.0, highrise_sector_deg: 70.0, industrial_sector_deg: 60.0))),
+)

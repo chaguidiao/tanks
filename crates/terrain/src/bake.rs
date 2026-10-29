@@ -21,7 +21,7 @@ use crate::raster;
 use crate::{AuthoringPackage, Features, Grid, Heightfield, MapManifest, Result, TerrainError, Vec2};
 
 /// Bump when baker output changes for the same input.
-pub const BAKER_VERSION: u32 = 3;
+pub const BAKER_VERSION: u32 = 4;
 
 /// Elevation quantisation step (m) in the baked package.
 pub const ELEVATION_STEP: f64 = 0.02;
@@ -354,6 +354,7 @@ pub fn bake(pkg: &AuthoringPackage, td: &TerrainData, classes: &[MobilityClass])
             RoadClass::Main => (lc("road"), Some(soil_id("paved"))),
             RoadClass::Secondary => (lc("road"), Some(soil_id("gravel"))),
             RoadClass::Track => (lc("track"), None),
+            RoadClass::Street => (lc("road"), Some(soil_id("paved"))),
         };
         raster::near_polyline(&r.points, half + shoulder, cell, w, h, |i, j, d, s| near.visit(w, i, j, d, s));
         for (k, d, s) in near.drain() {

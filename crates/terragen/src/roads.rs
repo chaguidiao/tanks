@@ -24,6 +24,7 @@ fn dist(a: Vec2, b: Vec2) -> f64 {
     libm::sqrt((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2))
 }
 
+/// `town`: centre and radius of a town already placed; villages keep their spacing from its edge.
 pub fn place_villages(
     hf: &Heightfield,
     flow: &Flow,
@@ -31,6 +32,7 @@ pub fn place_villages(
     p: &RoadParams,
     td: &TerrainData,
     seed: u64,
+    town: Option<(Vec2, f64)>,
 ) -> Vec<Village> {
     let (w, h) = (hf.z.w, hf.z.h);
     let cell = hf.cell;
@@ -60,6 +62,9 @@ pub fn place_villages(
     for (_, i, j, pos) in cands {
         if out.len() >= target {
             break;
+        }
+        if town.is_some_and(|(c, r)| dist(c, pos) < r + p.village_spacing_m * 0.6) {
+            continue;
         }
         if out.iter().all(|v| dist(v.pos, pos) >= p.village_spacing_m * 0.7) {
             let r = p.village_radius_m * (0.7 + 0.6 * noise::hash01(i as i64, j as i64, seed ^ 1));
@@ -95,6 +100,9 @@ pub fn stamp_villages(landcover: &mut Grid<u8>, villages: &[Village], cell: f64,
 
 const COARSE: usize = 4;
 
+/// `town`: the town centre, a hub of the network: it joins the spanning tree like a village and
+/// every edge exit runs to it. Town ground is expensive, so roads between villages go round it.
+#[allow(clippy::too_many_arguments)]
 pub fn build_network(
     hf: &Heightfield,
     landcover: &Grid<u8>,
@@ -103,7 +111,13 @@ pub fn build_network(
     p: &RoadParams,
     td: &TerrainData,
     first_id: u32,
+    town: Option<Vec2>,
 ) -> Vec<Road> {
+    let mut nodes = villages.to_vec();
+    if let Some(c) = town {
+        nodes.push(Village { pos: c, radius: 0.0 });
+    }
+    let villages = &nodes[..];
     let cell = hf.cell * COARSE as f64;
     let (w, h) = (hf.z.w / COARSE, hf.z.h / COARSE);
     let size = hf.z.w as f64 * hf.cell;
@@ -131,6 +145,9 @@ pub fn build_network(
             }
             if lc.name == "village" {
                 v = v.max(60.0);
+            }
+            if lc.name == "town" {
+                v = 6.0;
             }
             if river.get(i, j) {
                 v *= 0.12; // bridges are expensive: cross rarely, and where it is cheapest
@@ -201,7 +218,11 @@ pub fn build_network(
         };
         let idx = ends.len();
         ends.push(pos);
-        let target = (0..n).min_by(|&a, &b| dist(pos, villages[a].pos).total_cmp(&dist(pos, villages[b].pos)));
+        let target = if town.is_some() {
+            Some(n - 1)
+        } else {
+            (0..n).min_by(|&a, &b| dist(pos, villages[a].pos).total_cmp(&dist(pos, villages[b].pos)))
+        };
         match target {
             Some(v) => links.push((idx, v, RoadClass::Main)),
             None if idx > 0 => links.push((idx, idx - 1, RoadClass::Main)),
@@ -222,6 +243,7 @@ pub fn build_network(
             RoadClass::Main => 7.0,
             RoadClass::Secondary => 5.0,
             RoadClass::Track => 3.5,
+            RoadClass::Street => 7.0,
         };
         roads.push(Road { id: first_id + roads.len() as u32, points: pts, props: RoadProps { class, width_m: width } });
     }

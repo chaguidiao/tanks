@@ -85,6 +85,8 @@ pub struct BuildingTypeDef {
     pub protection: BuildingProtection,
     /// Squads that can occupy and fight from 100 m² of floor area.
     pub squads_per_100m2: Stat<f64>,
+    /// Most squads one building holds, however large (plan M8H1B-TOWNS §7 #5).
+    pub max_squads: Stat<f64>,
 }
 
 /// Foot movement for dismounted infantry planning (`data/terrain/foot.ron`, TODO H9).
@@ -138,11 +140,13 @@ impl TerrainData {
         ((height_m / fh).floor() as u32).max(1)
     }
 
-    /// Squads that fit in a building (at least one): floor area over all floors times the
-    /// class's density.
+    /// Squads that fit in a building (at least one, at most the class's cap): floor area over
+    /// all floors times the class's density.
     pub fn squad_capacity(&self, class: BuildingClass, footprint_m2: f64, height_m: f64) -> u32 {
+        let def = self.building(class);
         let area = footprint_m2 * self.floors(class, height_m) as f64;
-        ((area / 100.0 * self.building(class).squads_per_100m2.get()).floor() as u32).max(1)
+        let n = (area / 100.0 * def.squads_per_100m2.get()).floor() as u32;
+        n.min(def.max_squads.get() as u32).max(1)
     }
 
     /// Casualty multiplier for occupants of a building of this class against a threat.
@@ -198,6 +202,8 @@ mod tests {
         assert_eq!(td.squad_capacity(BuildingClass::Wood, 20.0, 3.0), 1);
         // Industrial halls: one tall floor at half the density.
         assert_eq!(td.squad_capacity(BuildingClass::Industrial, 800.0, 8.0), 4);
+        // A 60 x 12 m five-storey slab block: 3600 m² of floor, capped at four squads.
+        assert_eq!(td.squad_capacity(BuildingClass::Concrete, 720.0, 16.0), 4);
     }
 
     #[test]

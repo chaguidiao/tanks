@@ -73,6 +73,29 @@ pub struct RoadParams {
     pub village_radius_m: f64,
     /// Number of roads leaving the map edge.
     pub edge_exits: u32,
+    /// One market town near the map centre (M8h1b); none when absent.
+    #[serde(default)]
+    pub town: Option<TownParams>,
+}
+
+/// Town layout (`terragen::town`; plan M8H1B-TOWNS §2). Generator tuning, not sim data.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TownParams {
+    /// Outer radius of the built area (m).
+    pub radius_m: f64,
+    /// Radius of the old core: closed blocks, bent streets (m).
+    pub core_radius_m: f64,
+    /// Street lattice spacing: one core block (m). Residential blocks are two, high-rise and
+    /// industrial blocks four.
+    pub block_m: f64,
+    /// Street node jitter in the core (m).
+    pub core_jitter_m: f64,
+    /// Street widths in the core and outside it (m).
+    pub core_street_m: f64,
+    pub street_m: f64,
+    /// Angular width of the high-rise estate and of the industrial sector opposite it (deg).
+    pub highrise_sector_deg: f64,
+    pub industrial_sector_deg: f64,
 }
 
 impl Recipe {

@@ -41,6 +41,7 @@ rm -rf "${out}/${pkg}/data/maps"
     cd "${out}/${pkg}"
     ./tanks-headless gen --recipe rolling-farmland --seed 42 --id demo
     ./tanks-headless gen --recipe wooded-uplands --seed 7 --id uplands
+    ./tanks-headless gen --recipe market-town --seed 42 --id town
     # Every scenario must load from the package: a missing file or bad reference fails here.
     for f in data/scenarios/*.ron; do
         id="$(basename "$f" .ron)"

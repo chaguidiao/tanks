@@ -181,7 +181,7 @@ pub fn tactical(
                 if i % 3 == 0 && j % 3 == 0 {
                     c = [c[0] * 0.45, c[1] * 0.6, c[2] * 0.45];
                 }
-            } else if def.name == "village" {
+            } else if def.built_up {
                 c = [c[0] * 0.6 + 40.0, c[1] * 0.6 + 38.0, c[2] * 0.6 + 36.0];
             } else if def.name == "marsh" && (i + j) % 4 == 0 {
                 c = [c[0] * 0.8, c[1] * 0.9, c[2] * 1.05];

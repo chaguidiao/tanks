@@ -634,6 +634,7 @@ fn infantry_model_sheet(ds: &DataSet) -> Sheet {
             stat(&format!("{n} VS FRAGMENTS"), &b.protection.fragments, pct),
             stat(&format!("{n} VS BLAST"), &b.protection.blast, pct),
             stat(&format!("{n} SQUADS PER 100 M²"), &b.squads_per_100m2, plain),
+            stat(&format!("{n} MOST SQUADS"), &b.max_squads, |x| format!("{x:.0}")),
         ]);
     }
     Sheet { title: "INFANTRY COMBAT MODEL".into(), sub: "DATA/COMBAT/INFANTRY.RON".into(), lines: l }
