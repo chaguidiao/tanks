@@ -251,6 +251,8 @@ pub struct World {
     pub carrier: Vec<Option<CarrierState>>,
     /// Coaxial machine gun.
     pub coax: Vec<Option<SmallArmState>>,
+    /// What a supply truck carries (M8c tailgate resupply); `Some` marks a supply vehicle.
+    pub cargo: Vec<Option<crate::logistics::Stock>>,
 }
 
 impl World {
@@ -285,6 +287,8 @@ impl World {
     pub fn fighting(&self, k: usize) -> bool {
         match &self.squad[k] {
             Some(s) => self.alive(k) && !s.ineffective,
+            // Supply trucks never count as fighting vehicles (plan M8C-TAILGATE-TRUCKS §8 #3).
+            None if self.cargo[k].is_some() => false,
             None => matches!(self.condition[k], Condition::Operational | Condition::MobilityKill),
         }
     }
@@ -368,6 +372,7 @@ impl World {
         }));
         self.carrier.push(None);
         self.coax.push(None);
+        self.cargo.push(None);
         let k = self.len() - 1;
         if let Some(c) = carrier
             && let Some(cs) = self.carrier[c].as_mut()
@@ -423,6 +428,8 @@ impl World {
             dismounting: None,
         }));
         self.coax.push(def.coax.as_ref().map(|c| SmallArmState::new(0, c)));
+        // Filled once every unit is placed (the default cargo depends on the side's vehicles).
+        self.cargo.push(def.cargo.as_ref().map(|_| crate::logistics::Stock::default()));
         id
     }
 
@@ -510,6 +517,9 @@ impl World {
             }
             if let Some(g) = &self.gun[k] {
                 g.hash_into(h);
+            }
+            if let Some(c) = &self.cargo[k] {
+                c.hash_into(h);
             }
             let sm = &self.smoke[k];
             h.u32(sm.salvos);

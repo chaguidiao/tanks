@@ -11,6 +11,6 @@
     flat_penetration_mm: (value: 20.0, source: "estimate", confidence: estimate, notes: "Defeats only the thinnest armour (light reconnaissance vehicles, rear and roof of IFVs)."),
     dispersion_mrad: (value: 1.0, source: "estimate", confidence: estimate),
     max_range_m: (value: 2000.0, source: "estimate", confidence: estimate),
-    preferred_vs: [ifv, recon, infantry],
+    preferred_vs: [ifv, recon, infantry, support],
     lethal_radius_m: (value: 5.0, source: "estimate: 30 mm HE-FRAG, slightly larger burst than 25 mm", confidence: estimate, notes: "Small burst; effective against men in the open near the point of impact."),
 )

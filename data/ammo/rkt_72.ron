@@ -12,6 +12,6 @@
         notes: "The RPG-22 of the same year gives about 390-400 mm (secondary sources)."),
     dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate),
     max_range_m: (value: 250.0, source: "Wikipedia (RPG-26): effective range 250 m", confidence: low),
-    preferred_vs: [ifv, recon, mbt],
+    preferred_vs: [ifv, recon, mbt, support],
     behind_armour: (value: 0.4, source: "estimate (plan M8B-AT-TEAMS §2.3)", confidence: estimate),
 )

@@ -15,5 +15,5 @@
         notes: "Muzzle figure back-calculated from 32 mm at 500 m with the (v/v0)^2 rule and the velocity loss above: v(500 m) ~ 900 m/s, 32 x (976/900)^2 ~ 38 mm."),
     dispersion_mrad: (value: 1.2, source: "estimate", confidence: estimate, notes: "Burst dispersion of an unstabilised heavy machine gun, folded into one sampled error."),
     max_range_m: (value: 1500.0, source: "estimate", confidence: estimate, notes: "Effective range against light armour; the gun's quoted effective range (3 km) is against area targets."),
-    preferred_vs: [ifv, recon],
+    preferred_vs: [ifv, recon, support],
 )

@@ -22,6 +22,8 @@ pub struct UnitSnap {
     pub condition: Condition,
     /// Squads: (men fit, establishment) and whether it rides in a carrier.
     pub squad: Option<((u8, u8), bool)>,
+    /// A supply truck (M8c).
+    pub supply: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +161,7 @@ impl Recorder {
                         heading: w.transform[k].heading,
                         condition: w.condition[k],
                         squad: w.squad[k].as_ref().map(|s| ((s.strength, s.men), s.mounted_in.is_some())),
+                        supply: w.cargo[k].is_some(),
                     })
                     .collect(),
             });
@@ -234,6 +237,8 @@ impl AarView {
                 (_, Some((_, true))) => continue, // riding in its carrier
                 (true, Some(_)) => symbols::friendly_infantry(f, p, style::FRIENDLY, symbols::SQUAD_SCALE),
                 (false, Some(_)) => symbols::hostile_infantry(f, p, style::HOSTILE, symbols::SQUAD_SCALE),
+                (true, None) if u.supply => symbols::friendly_supply(f, p, style::FRIENDLY),
+                (false, None) if u.supply => symbols::hostile_supply(f, p, style::HOSTILE),
                 (true, None) => symbols::friendly_armour(f, p, style::FRIENDLY),
                 (false, None) => symbols::hostile_armour(f, p, style::HOSTILE),
             }

@@ -11,7 +11,7 @@
     flat_penetration_mm: (value: 500.0, source: "Wikipedia (RPG-7): more than 500 mm RHA", confidence: low),
     dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate),
     max_range_m: (value: 300.0, source: "estimate as for the PG-7V", confidence: estimate),
-    preferred_vs: [mbt, ifv, recon],
+    preferred_vs: [mbt, ifv, recon, support],
     behind_armour: (value: 0.45, source: "estimate (plan M8B-AT-TEAMS §2.3)", confidence: estimate,
         notes: "Larger charge than the PG-7V, still a light warhead."),
 )

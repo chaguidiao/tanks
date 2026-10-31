@@ -53,6 +53,9 @@ pub struct GunState {
     /// Infantry target the gunner engages with the coax this tick (set by `step`, read by
     /// `smallarms::step`).
     pub coax_target: Option<usize>,
+    /// The crew is stowing main-gun rounds from a resupply until this tick: the main gun does not
+    /// fire (plan M8C-TAILGATE-TRUCKS §8 #6). 0 = never.
+    pub loading_until: u64,
 }
 
 /// A smoke fire mission (point target), FM 3-11.50.
@@ -77,6 +80,7 @@ impl GunState {
             bias: (0.0, 0.0),
             crew_loss: 0,
             coax_target: None,
+            loading_until: 0,
         }
     }
 
@@ -103,6 +107,10 @@ impl GunState {
         h.u32(self.rounds_at_target);
         h.f64(self.bias.0);
         h.f64(self.bias.1);
+        // Only once a vehicle has been resupplied, so older states hash as before.
+        if self.loading_until > 0 {
+            h.u64(self.loading_until);
+        }
     }
 }
 
@@ -600,10 +608,13 @@ fn choose_target(
             .min_by(|a, b| a.range_m.total_cmp(&b.range_m).then(a.target.cmp(&b.target)))
             .map(|tr| tr.target)
     };
+    // Supply trucks come last: they do not shoot back (plan M8C-TAILGATE-TRUCKS §5).
+    let truck = |tr: &crate::world::LocalTrack| world.cargo[tr.target].is_some();
     nearest(&anti_tank)
         .or_else(|| nearest(&|tr| squad(tr) && tr.range_m <= close_infantry))
-        .or_else(|| nearest(&|tr| !squad(tr)))
+        .or_else(|| nearest(&|tr| !squad(tr) && !truck(tr)))
         .or_else(|| nearest(&squad))
+        .or_else(|| nearest(&truck))
 }
 
 /// Main-gun round for infantry: the commander's choice if it bursts, else the first stocked round
@@ -746,7 +757,7 @@ pub fn step(
             Phase::Reloading { .. } => Phase::Laying { left: 1.0 * slow }, // re-lay / adjust
             Phase::Lasing { .. } | Phase::Ready => Phase::Ready,
         };
-        if g.phase != Phase::Ready || g.rounds() == 0 || g.coax_target.is_some() {
+        if g.phase != Phase::Ready || g.rounds() == 0 || g.coax_target.is_some() || tick < g.loading_until {
             continue;
         }
         // Fire.

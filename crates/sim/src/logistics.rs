@@ -11,12 +11,9 @@ use terrain::hash::StableHasher;
 use crate::Vec2;
 use crate::world::World;
 
-/// A side's supply point (a scenario item, not an entity).
-#[derive(Debug, Clone, PartialEq)]
-pub struct SupplyPoint {
-    pub side: SideId,
-    pub callsign: String,
-    pub pos: Vec2,
+/// Fuel, rounds and smoke salvos held by a supply point or carried by a supply truck.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Stock {
     pub unlimited: bool,
     pub fuel_l: f64,
     /// Rounds per index of the sim's ammo table.
@@ -24,7 +21,7 @@ pub struct SupplyPoint {
     pub smoke_salvos: u32,
 }
 
-impl SupplyPoint {
+impl Stock {
     fn has_rounds(&self, ammo: usize) -> bool {
         self.unlimited || self.rounds.get(ammo).is_some_and(|&n| n > 0)
     }
@@ -35,6 +32,10 @@ impl SupplyPoint {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        !self.unlimited && self.fuel_l <= 1e-6 && self.smoke_salvos == 0 && self.rounds.iter().all(|&n| n == 0)
+    }
+
     pub(crate) fn hash_into(&self, h: &mut StableHasher) {
         h.f64(self.fuel_l);
         h.u32(self.smoke_salvos);
@@ -42,6 +43,53 @@ impl SupplyPoint {
             h.u32(n);
         }
     }
+}
+
+/// A side's supply point (a scenario item, not an entity).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SupplyPoint {
+    pub side: SideId,
+    pub callsign: String,
+    pub pos: Vec2,
+    pub stock: Stock,
+}
+
+impl SupplyPoint {
+    pub(crate) fn hash_into(&self, h: &mut StableHasher) {
+        self.stock.hash_into(h);
+    }
+}
+
+/// Default cargo of a supply truck (plan M8C-TAILGATE-TRUCKS §3): the fuel and smoke salvos of
+/// its type, and for each stow class its round capacity shared out over the rounds of that class
+/// the side's vehicles carry, in proportion to how many they carry. Whole rounds; what rounding
+/// leaves over goes to the most carried round. `carried` is rounds per ammo index; `n_ammo` the
+/// length of the ammo table.
+pub fn default_cargo(c: &sim_data::CargoDef, carried: &[u32], ammo: &[AmmoDef]) -> Stock {
+    let mut rounds = vec![0u32; ammo.len()];
+    for (class, cap) in [
+        (StowClass::MainGun, c.main_gun_rounds),
+        (StowClass::Autocannon, c.autocannon_rounds),
+        (StowClass::Missile, c.missiles),
+    ] {
+        let idx: Vec<usize> = (0..ammo.len())
+            .filter(|&i| carried.get(i).is_some_and(|&n| n > 0) && ammo[i].stow_class() == class)
+            .collect();
+        let total: u64 = idx.iter().map(|&i| carried[i] as u64).sum();
+        if total == 0 || cap == 0 {
+            continue;
+        }
+        let mut given = 0;
+        for &i in &idx {
+            let n = (cap as u64 * carried[i] as u64 / total) as u32;
+            rounds[i] = n;
+            given += n;
+        }
+        // Ties go to the lower ammo index (stable, deterministic).
+        let top = *idx.iter().max_by(|&&a, &&b| carried[a].cmp(&carried[b]).then(b.cmp(&a))).expect("non-empty");
+        rounds[top] += cap - given;
+    }
+    Stock { unlimited: false, fuel_l: c.fuel_l.get(), rounds, smoke_salvos: c.smoke_salvos }
 }
 
 /// Transfer credit classes: rounds by stow class, then smoke salvos.
@@ -99,15 +147,18 @@ pub struct Tables<'a> {
     pub model: &'a LogisticsModel,
 }
 
-/// Serve vehicle `k` at `point` for `dt` seconds. Returns true when it is done: full in every
-/// item, or the point has nothing more of what it lacks.
+/// Serve vehicle `k` from `point` (a supply point's or a truck's stock) for `dt` seconds, at tick
+/// `tick`. Returns true when it is done: full in every item, or the stock has nothing more of
+/// what it lacks. While main-gun rounds go in, the main gun does not fire (`loading_until`).
+#[allow(clippy::too_many_arguments)]
 pub fn transfer(
     world: &mut World,
     k: usize,
-    point: &mut SupplyPoint,
+    point: &mut Stock,
     st: &mut ServiceState,
     t: &Tables,
     dt: f64,
+    tick: u64,
 ) -> bool {
     let Some(vi) = world.vehicle[k] else { return true };
     let def = &t.vehicles[vi];
@@ -132,7 +183,7 @@ pub fn transfer(
         let lo = &t.loadouts[vi];
         for class in [StowClass::MainGun, StowClass::Autocannon, StowClass::Missile] {
             let c = class_index(class);
-            let open = |g: &crate::gunnery::GunState, point: &SupplyPoint, i: usize| {
+            let open = |g: &crate::gunnery::GunState, point: &Stock, i: usize| {
                 g.stock[i] < g.capacity[i] && t.ammo[lo[i]].stow_class() == class && point.has_rounds(lo[i])
             };
             if !(0..lo.len()).any(|i| open(g, point, i)) {
@@ -148,6 +199,10 @@ pub fn transfer(
             }
             if (0..lo.len()).any(|i| open(g, point, i)) {
                 wants = true;
+                if class == StowClass::MainGun {
+                    // Until the next service step (1 Hz) and a little beyond.
+                    g.loading_until = tick + ((dt + 0.5) / crate::DT).ceil() as u64;
+                }
             } else {
                 st.credit[c] = 0.0;
             }
@@ -157,7 +212,7 @@ pub fn transfer(
     // Smoke grenade salvos.
     let cap = def.smoke_launcher.as_ref().map_or(0, |l| l.salvos);
     let sm = &mut world.smoke[k];
-    let has = |p: &SupplyPoint| p.unlimited || p.smoke_salvos > 0;
+    let has = |p: &Stock| p.unlimited || p.smoke_salvos > 0;
     if sm.salvos < cap && has(point) {
         st.credit[SMOKE] += t.model.smoke_salvos_per_min.get() / 60.0 * dt;
         while st.credit[SMOKE] >= 1.0 && sm.salvos < cap && has(point) {
@@ -173,6 +228,32 @@ pub fn transfer(
         st.credit[SMOKE] = 0.0;
     }
     !wants
+}
+
+/// Fuel a vehicle must lack before a truck stops to fill it (l): an idling engine is never quite
+/// full, and a truck should not stand behind a tank topping it up by the litre.
+const FUEL_WORTH_L: f64 = 10.0;
+
+/// Whether `stock` has anything vehicle `k` lacks worth stopping for (what `transfer` would hand
+/// over).
+pub fn can_give(world: &World, k: usize, stock: &Stock, t: &Tables) -> bool {
+    let Some(vi) = world.vehicle[k] else { return false };
+    let def = &t.vehicles[vi];
+    let fuel = world.mobility[k].as_ref().is_some_and(|m| m.fuel_l < def.mobility.fuel_capacity_l.get() - FUEL_WORTH_L)
+        && (stock.unlimited || stock.fuel_l > 1e-6);
+    let rounds = world.gun[k]
+        .as_ref()
+        .is_some_and(|g| (0..g.stock.len()).any(|i| g.stock[i] < g.capacity[i] && stock.has_rounds(t.loadouts[vi][i])));
+    let cap = def.smoke_launcher.as_ref().map_or(0, |l| l.salvos);
+    let smoke = world.smoke[k].salvos < cap && (stock.unlimited || stock.smoke_salvos > 0);
+    fuel || rounds || smoke
+}
+
+/// Whether vehicle `k` lacks anything a truck would stop for: as `needs_anything`, but fuel only
+/// when it is at least `FUEL_WORTH_L` short (tailgate resupply).
+pub fn needs_worth(world: &World, k: usize, t: &Tables) -> bool {
+    let full = Stock { unlimited: true, ..Stock::default() };
+    can_give(world, k, &full, t)
 }
 
 /// Whether vehicle `k` lacks anything (fuel, a carried round type, smoke salvos).
@@ -234,18 +315,29 @@ mod tests {
         (w, vec![def], vec![lo], ammo)
     }
 
-    fn point(n_ammo: usize, sabot: u32) -> SupplyPoint {
+    fn point(n_ammo: usize, sabot: u32) -> Stock {
         let mut rounds = vec![0; n_ammo];
         rounds[1] = sabot;
-        SupplyPoint {
-            side: SideId(0),
-            callsign: "SP 1".into(),
-            pos: [0.0, 0.0],
-            unlimited: false,
-            fuel_l: 10_000.0,
-            rounds,
-            smoke_salvos: 1,
-        }
+        Stock { unlimited: false, fuel_l: 10_000.0, rounds, smoke_salvos: 1 }
+    }
+
+    /// Plan M8C-TAILGATE-TRUCKS §3: a truck's round capacity is shared over the rounds its side
+    /// carries, by stow class and in proportion, in whole rounds that add up to the capacity.
+    #[test]
+    fn default_cargo_shares_the_capacity_over_the_sides_rounds() {
+        let ds = data();
+        let (_, _, _, ammo) = depleted(&ds);
+        let c = ds.vehicle("carter_c").unwrap().cargo.clone().unwrap();
+        // The tank's 1990 load: 24 of one main-gun round, 12 of another, 4 of a third (index 3).
+        let carried = vec![0, 24, 12, 4];
+        let st = default_cargo(&c, &carried, &ammo);
+        let main: u32 =
+            (0..ammo.len()).filter(|&i| ammo[i].stow_class() == StowClass::MainGun).map(|i| st.rounds[i]).sum();
+        assert_eq!(main, c.main_gun_rounds, "the whole main-gun capacity is used");
+        assert_eq!(st.rounds[0], 0, "a round nobody carries is not loaded");
+        assert!(st.rounds[1] > st.rounds[2] && st.rounds[2] >= st.rounds[3], "{:?}", st.rounds);
+        assert_eq!((st.fuel_l, st.smoke_salvos), (c.fuel_l.get(), c.smoke_salvos));
+        assert!(default_cargo(&c, &[0, 0, 0, 0], &ammo).rounds.iter().all(|&n| n == 0));
     }
 
     #[test]
@@ -258,7 +350,7 @@ mod tests {
         let rate = ds.logistics.main_gun_rounds_per_min.get();
         let mut done_at = None;
         for s in 1..=900 {
-            if transfer(&mut w, 0, &mut sp, &mut st, &t, 1.0) && done_at.is_none() {
+            if transfer(&mut w, 0, &mut sp, &mut st, &t, 1.0, s as u64 * 20) && done_at.is_none() {
                 done_at = Some(s);
             }
             if s == 60 {
@@ -289,7 +381,7 @@ mod tests {
         let mut st = ServiceState::new();
         let mut done = false;
         for _ in 0..600 {
-            done = transfer(&mut w, 0, &mut sp, &mut st, &t, 1.0);
+            done = transfer(&mut w, 0, &mut sp, &mut st, &t, 1.0, 0);
             if done {
                 break;
             }

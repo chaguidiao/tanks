@@ -25,6 +25,27 @@ pub fn hostile_armour(f: &mut Frame, p: P2, c: Rgba) {
     f.ellipse_lines(p, r * 0.45, r * 0.28, c);
 }
 
+/// Friendly supply vehicle (APP-6D sustainment, supply: a bar across the lower part of the frame).
+pub fn friendly_supply(f: &mut Frame, p: P2, c: Rgba) {
+    let (x0, y0) = (p[0] - W / 2.0, p[1] - H / 2.0);
+    f.rect(x0, y0, W, H, Rgba(10, 18, 24, 200));
+    f.rect_lines(x0, y0, W, H, c);
+    f.rect_lines(x0 + 1.0, y0 + 1.0, W - 2.0, H - 2.0, c);
+    f.line([x0, y0 + H * 0.68], [x0 + W, y0 + H * 0.68], 1.5, c);
+}
+
+/// Hostile supply vehicle: diamond with the supply bar.
+pub fn hostile_supply(f: &mut Frame, p: P2, c: Rgba) {
+    let r = H * 0.9;
+    let pts = [[p[0], p[1] - r], [p[0] + r, p[1]], [p[0], p[1] + r], [p[0] - r, p[1]]];
+    for k in 0..4 {
+        f.line(pts[k], pts[(k + 1) % 4], 2.0, c);
+    }
+    let y = p[1] + r * 0.35;
+    let half = r * 0.65;
+    f.line([p[0] - half, y], [p[0] + half, y], 1.5, c);
+}
+
 /// Friendly infantry (APP-6D: rectangle with crossed diagonals), drawn at `scale` of the armour
 /// frame (squads are smaller than vehicles on the map).
 pub fn friendly_infantry(f: &mut Frame, p: P2, c: Rgba, scale: f32) {

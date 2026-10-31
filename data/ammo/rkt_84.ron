@@ -11,6 +11,6 @@
     dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate),
     max_range_m: (value: 400.0, source: "FM 3-23.25 (2001): effective 300 m stationary, 150 m moving; estimate", confidence: low,
         notes: "Flatter trajectory than the M72: still about one hit in three at 400 m."),
-    preferred_vs: [ifv, recon, mbt],
+    preferred_vs: [ifv, recon, mbt, support],
     behind_armour: (value: 0.4, source: "estimate (plan M8B-AT-TEAMS §2.3)", confidence: estimate),
 )

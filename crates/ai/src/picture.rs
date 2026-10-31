@@ -68,6 +68,8 @@ pub struct OwnUnit {
     pub full_load: u32,
     /// Stage in a service-station resupply, when its platoon has that order (M8c).
     pub service: Option<ServiceStage>,
+    /// What a supply truck carries (M8c tailgate resupply); None for every other unit.
+    pub cargo: Option<CargoView>,
     /// Rounds left per type: (type label, count), in loadout order.
     pub rounds: Vec<(String, u32)>,
     /// Round type the commander ordered; None = crew's choice.
@@ -180,6 +182,8 @@ pub enum ContactLevel {
 pub enum ContactKind {
     Vehicle,
     Infantry,
+    /// An unarmed supply vehicle (truck), recognised as such (M8c tailgate resupply).
+    Supply,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -240,6 +244,8 @@ pub struct PlatoonView {
     pub queued: u8,
     /// Supply point (id in `supply_points`) of a service-station resupply in progress.
     pub resupply_at: Option<u32>,
+    /// Supply-truck platoon of a tailgate resupply in progress.
+    pub resupply_by: Option<PlatoonId>,
 }
 
 /// Control measures (DESIGN.md §8.4; MIL-STD-2525D tactical graphics).
@@ -524,6 +530,15 @@ pub enum BatteryStatus {
     Displacing {
         ready_in_s: f64,
     },
+}
+
+/// A supply truck's load, for the cards.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CargoView {
+    pub fuel_l: f64,
+    /// Rounds by type: (type label, count), only types it holds.
+    pub rounds: Vec<(String, u32)>,
+    pub smoke_salvos: u32,
 }
 
 /// A battery available to the side (called fire support).

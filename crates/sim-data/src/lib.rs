@@ -162,6 +162,14 @@ impl DataSet {
             }
         }
         for v in &ds.vehicles {
+            // Supply trucks carry cargo and nothing to shoot; fighting vehicles carry no cargo.
+            let support = v.class == VehicleClass::Support;
+            if support != v.cargo.is_some() || (support && !v.armament.load.is_empty()) {
+                return Err(DataError {
+                    path: root.join("vehicles"),
+                    message: format!("{}: a support vehicle has cargo and an empty load, others no cargo", v.id),
+                });
+            }
             for l in &v.armament.load {
                 if ds.ammo(&l.ammo).is_none() {
                     return Err(DataError {
@@ -267,6 +275,22 @@ mod tests {
         std::fs::create_dir_all(&empty).unwrap();
         // Unless a parent of the temp dir happens to hold a data/ folder with vehicles/.
         assert!(find_data_from(&empty).is_none_or(|d| d.join("vehicles").is_dir()));
+    }
+
+    /// M8c slice 6: each side has a cargo and a fuel truck in service from the 1980s, unarmed.
+    #[test]
+    fn supply_trucks_load_with_cargo_and_no_weapons() {
+        let ds = DataSet::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data")).unwrap();
+        for (id, ammo, fuel) in
+            [("carter_c", true, false), ("carter_f", false, true), ("volok_c", true, false), ("volok_f", false, true)]
+        {
+            let v = ds.vehicle(id).expect(id);
+            let c = v.cargo.as_ref().unwrap();
+            assert_eq!(v.class, VehicleClass::Support);
+            assert!(v.armament.load.is_empty() && v.coax.is_none(), "{id} is unarmed");
+            assert_eq!((c.main_gun_rounds > 0, c.fuel_l.get() > 0.0), (ammo, fuel), "{id}");
+            assert!(v.in_service.contains(1985), "{id} in service for the Cold War scenarios");
+        }
     }
 
     #[test]

@@ -17,4 +17,7 @@
         notes: "Service-station resupply runs vehicles through fuel and ammunition points in turn; a platoon point serves about two at a time."),
     point_radius_m: (value: 40.0, source: "estimate", confidence: estimate,
         notes: "Vehicles pull up next to the trucks; 40 m allows for the dispersion of a resupply point."),
+    release_m: (value: 300.0, source: "estimate: FM 17-15 (1996) / ATP 3-20.15 (2025) bring the LOGPAC to a release point behind the platoon; a few hundred metres keeps it out of direct-fire range of the line", confidence: estimate),
+    tailgate_m: (value: 12.0, source: "estimate: the truck backs up close behind the vehicle so rounds and the fuel hose can be handed over", confidence: estimate),
+    withdraw_burst_m: (value: 150.0, source: "estimate: unarmoured trucks do not stay under fire; the same radius as the platoon's react-to-indirect-fire drill", confidence: estimate),
 )

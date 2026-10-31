@@ -76,6 +76,13 @@ pub enum Command {
         platoon: PlatoonId,
         point: u32,
     },
+    /// Tailgate resupply (docs/plans/M8C-TAILGATE-TRUCKS.md): the supply trucks of platoon
+    /// `trucks` drive to `platoon`, which holds in its positions, and serve its vehicles one by
+    /// one, then drive back.
+    Tailgate {
+        platoon: PlatoonId,
+        trucks: PlatoonId,
+    },
     /// Occupy a battle position (ATP 3-20.15 ch. 5): circle area, threat direction (compass rad).
     OccupyPosition {
         platoon: PlatoonId,
@@ -492,10 +499,17 @@ pub enum PlatoonReport {
         to: u16,
     },
     PlanComplete,
-    /// Resupply finished: `complete` = every vehicle full, else the point ran short.
+    /// Resupply finished: `complete` = every vehicle full, else the point or the trucks ran short.
     Resupplied {
         complete: bool,
     },
+    /// Supply trucks done with a tailgate resupply, driving back with what they have left.
+    TrucksReturning {
+        fuel_l: f64,
+        rounds: u32,
+    },
+    /// Supply trucks under fire: they stop serving and withdraw to the release point.
+    TrucksWithdrawing,
     /// An off-map LOGPAC arrived: `refuel` = fuel, else ammunition.
     LogpacReceived {
         refuel: bool,

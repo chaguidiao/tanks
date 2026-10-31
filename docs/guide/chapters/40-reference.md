@@ -100,6 +100,7 @@
 <dt>Thermal imager / thermal sight</dt><dd>A sight that sees heat; works in darkness, dust and most smoke, but not in fog.</dd>
 <dt>Thermal crossover</dt><dd>The time around sunrise and sunset when targets and background have similar temperatures and thermal sights lose contrast.</dd>
 <dt>Trains</dt><dd>The supply and maintenance vehicles behind a unit, where ammunition and fuel come from.</dd>
+<dt>Tailgate resupply</dt><dd>Supply trucks drive to the vehicles in their positions and hand over fuel and ammunition there (the opposite of the service station, where the vehicles drive to the supply point).</dd>
 <dt>TRP (target reference point)</dt><dd>A recognisable point used to describe targets and trigger actions.</dd>
 <dt>Turret-down</dt><dd>Only the commander's sight looks over the cover; the tank can watch but not fire.</dd>
 <dt>Weapons control status</dt><dd>FREE / TIGHT / HOLD: what crews may fire at.</dd>

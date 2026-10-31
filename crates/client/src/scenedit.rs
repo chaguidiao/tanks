@@ -330,6 +330,7 @@ impl ScenarioEditor {
             platoon: Some(platoon.clone()),
             squad: None,
             mounted_in: None,
+            cargo: None,
         });
         self.platoon[side] = Some(platoon);
         self.sel = Some(Sel::Unit(side, self.def.sides[side].units.len() - 1));
@@ -387,6 +388,7 @@ impl ScenarioEditor {
                 platoon: None,
                 squad: Some(def.id.clone()),
                 mounted_in: Some(c.callsign.clone()),
+                cargo: None,
             }
         } else {
             let platoon = match self.squad_platoon[side].clone() {
@@ -406,6 +408,7 @@ impl ScenarioEditor {
                 platoon: Some(platoon),
                 squad: Some(def.id.clone()),
                 mounted_in: None,
+                cargo: None,
             }
         };
         self.status = match &unit.mounted_in {
@@ -1103,7 +1106,10 @@ impl ScenarioEditor {
             let c = if si == 0 { style::FRIENDLY } else { style::HOSTILE };
             for (ui, u) in side.units.iter().enumerate().filter(|(_, u)| u.mounted_in.is_none()) {
                 let p = cam.to_screen(u.position);
+                let truck = ds.vehicle(&u.vehicle).is_some_and(|v| v.cargo.is_some());
                 match (si == 0, u.squad.is_some()) {
+                    (true, false) if truck => symbols::friendly_supply(f, p, c),
+                    (false, false) if truck => symbols::hostile_supply(f, p, c),
                     (true, false) => symbols::friendly_armour(f, p, c),
                     (false, false) => symbols::hostile_armour(f, p, c),
                     (true, true) => symbols::friendly_infantry(f, p, c, symbols::SQUAD_SCALE),

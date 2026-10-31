@@ -10,6 +10,6 @@
     flat_penetration_mm: (value: 300.0, source: "Wikipedia (RPG-18): up to 300 mm RHA", confidence: low),
     dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate),
     max_range_m: (value: 150.0, source: "Wikipedia (RPG-18): effective 100-150 m, maximum 200 m", confidence: low),
-    preferred_vs: [ifv, recon, mbt],
+    preferred_vs: [ifv, recon, mbt, support],
     behind_armour: (value: 0.4, source: "estimate (plan M8B-AT-TEAMS §2.3)", confidence: estimate),
 )

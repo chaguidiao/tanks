@@ -304,6 +304,25 @@ impl Game {
         self.menu_world = [0.0, 0.0];
     }
 
+    pub(super) fn open_resupply_menu(&mut self, inp: &Input) {
+        if !std::mem::take(&mut self.resupply_request) {
+            return;
+        }
+        let Some(p) = self.sel_platoon else { return };
+        let items = self
+            .resupply_sources(p)
+            .into_iter()
+            .map(|(src, label, ok)| {
+                let mut it = MenuItem::new(label, MenuAct::Resupply(src));
+                it.enabled = ok;
+                it
+            })
+            .collect();
+        let r = hud::card_cell(inp.screen, 23);
+        self.menu = Some(PopupMenu::new([r.x, r.y], "RESUPPLY · SOURCE", items));
+        self.menu_world = [0.0, 0.0];
+    }
+
     pub(super) fn open_graphics_menu(&mut self, inp: &Input) {
         if !std::mem::take(&mut self.graphics_request) {
             return;

@@ -273,6 +273,8 @@ impl Sim {
         let mut platoons: Vec<platoon::Platoon> = Vec::new();
         let mut squads: Vec<SquadDef> = Vec::new();
         let mut sides = Vec::new();
+        // Supply trucks and their scenario cargo, filled once every unit is placed.
+        let mut trucks: Vec<(usize, Option<sim_data::CargoAssign>)> = Vec::new();
         let g = Ground::new(&map, &data.terrain);
         for (si, side) in scenario.sides.iter().enumerate() {
             let year = side.tech_year.unwrap_or(scenario.date.0);
@@ -334,6 +336,11 @@ impl Sim {
                     );
                     world.len() - 1
                 };
+                if world.cargo[k].is_some() {
+                    trucks.push((k, u.cargo.clone()));
+                } else if u.cargo.is_some() {
+                    return Err(format!("{}: only a supply truck carries cargo", u.callsign));
+                }
                 // A mounted squad joins its carrier platoon's dismount platoon unless named.
                 let carrier_pc = world.squad[k]
                     .as_ref()
@@ -481,12 +488,61 @@ impl Sim {
                     side: SideId(si as u8),
                     callsign: d.callsign.clone(),
                     pos: d.position,
-                    unlimited: d.unlimited,
-                    fuel_l: d.fuel_l,
-                    rounds,
-                    smoke_salvos: d.smoke_salvos,
+                    stock: logistics::Stock {
+                        unlimited: d.unlimited,
+                        fuel_l: d.fuel_l,
+                        rounds,
+                        smoke_salvos: d.smoke_salvos,
+                    },
                 });
             }
+        }
+        // Supply trucks: the scenario's cargo, else the type's capacity filled with the rounds
+        // the side's vehicles carry (plan M8C-TAILGATE-TRUCKS §3).
+        for p in &platoons {
+            let support = p.members.iter().filter(|&&k| world.cargo[k].is_some()).count();
+            if support > 0 && support < p.members.len() {
+                return Err(format!("{}: supply trucks form a platoon of their own", p.callsign));
+            }
+        }
+        for (k, assign) in &trucks {
+            let stock = match assign {
+                Some(a) => {
+                    let mut rounds = vec![0; ammo.len()];
+                    for (id, n) in &a.rounds {
+                        let round =
+                            data.ammo(id).ok_or_else(|| format!("{}: unknown ammo '{id}'", world.callsign[*k]))?;
+                        let i = match ammo.iter().position(|x| x.id == round.id) {
+                            Some(i) => i,
+                            None => {
+                                ammo.push(round.clone());
+                                rounds.push(0);
+                                ammo.len() - 1
+                            }
+                        };
+                        rounds[i] += n;
+                    }
+                    logistics::Stock { unlimited: false, fuel_l: a.fuel_l, rounds, smoke_salvos: a.smoke_salvos }
+                }
+                None => {
+                    let side = world.side[*k];
+                    let mut carried = vec![0u32; ammo.len()];
+                    for j in (0..world.len()).filter(|&j| world.side[j] == side) {
+                        if let (Some(vi), Some(gs)) = (world.vehicle[j], world.gun[j].as_ref()) {
+                            for (li, &n) in gs.stock.iter().enumerate() {
+                                carried[loadouts[vi][li]] += n;
+                            }
+                        }
+                    }
+                    let cargo = vehicles[world.vehicle[*k].expect("a truck is a vehicle")].cargo.as_ref();
+                    logistics::default_cargo(cargo.expect("support vehicles have cargo"), &carried, &ammo)
+                }
+            };
+            world.cargo[*k] = Some(stock);
+        }
+        // Every stock indexes the final ammo table.
+        for st in world.cargo.iter_mut().flatten().chain(supply.iter_mut().map(|s| &mut s.stock)) {
+            st.rounds.resize(ammo.len(), 0);
         }
         let logpacs = logpacs(scenario, &platoons, &batteries)?;
         let avoid = {
@@ -657,6 +713,16 @@ impl Sim {
     }
 
     /// Ground truth. Only for AAR, tests and the client's `debug-truth` feature.
+    /// The sim's ammunition table (truth-side: tests and tools index world stocks with it).
+    pub fn ammo_table(&self) -> &[AmmoDef] {
+        &self.ammo
+    }
+
+    /// Ammo-table index of each loadout entry of entity `k`'s vehicle type (empty for squads).
+    pub fn loadout(&self, k: usize) -> &[usize] {
+        self.world.vehicle[k].map_or(&[], |vi| &self.loadouts[vi])
+    }
+
     pub fn truth(&self) -> &World {
         &self.world
     }
@@ -1234,6 +1300,7 @@ impl Sim {
             Command::PlatoonMove { platoon, .. }
             | Command::OccupyPosition { platoon, .. }
             | Command::Resupply { platoon, .. }
+            | Command::Tailgate { platoon, .. }
             | Command::SetPlan { platoon, .. }
             | Command::BreakContact { platoon } => Some(*platoon),
             Command::Reverse { to: Addressee::Platoon(p), .. } => Some(*p),
@@ -1705,6 +1772,63 @@ impl Sim {
                 p.withdraw = false;
                 events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
             }
+            Command::Tailgate { platoon, trucks } => {
+                let own = |p: &&platoon::Platoon, id: PlatoonId| p.side == c.side && p.id == id;
+                let world = &self.world;
+                let is_trucks = |p: &platoon::Platoon| p.members.iter().any(|&k| world.cargo[k].is_some());
+                let (Some(served), Some(supply)) = (
+                    self.platoons.iter().find(|p| own(p, *platoon) && !p.dismount && !is_trucks(p)),
+                    self.platoons.iter().find(|p| own(p, *trucks) && is_trucks(p)),
+                ) else {
+                    return;
+                };
+                // Release point: behind the platoon, away from where it faces.
+                let alive: Vec<usize> = served.members.iter().copied().filter(|&k| world.alive(k)).collect();
+                if alive.is_empty() {
+                    return;
+                }
+                let n = alive.len() as f64;
+                let cx = alive.iter().map(|&k| world.transform[k].pos[0]).sum::<f64>() / n;
+                let cy = alive.iter().map(|&k| world.transform[k].pos[1]).sum::<f64>() / n;
+                let (h, back) = (served.heading, self.data.logistics.release_m.get());
+                let release = [cx - libm::sin(h) * back, cy - libm::cos(h) * back];
+                let targets = served.members.clone();
+                let home: Vec<Vec2> = supply.members.iter().map(|&k| world.transform[k].pos).collect();
+                let jobs = vec![
+                    platoon::TruckJob {
+                        serving: None,
+                        at_vehicle: false,
+                        st: logistics::ServiceState::new(),
+                        finished: Vec::new(),
+                    };
+                    supply.members.len()
+                ];
+                let served_members = served.members.clone();
+                for k in served_members {
+                    self.world.halt(k);
+                }
+                let p = self.platoons.iter_mut().find(|p| p.side == c.side && p.id == *platoon).expect("found above");
+                p.order = platoon::PlatoonOrder::Tailgate {
+                    trucks: *trucks,
+                    members: vec![logistics::ServiceState::new(); targets.len()],
+                };
+                p.plan = None;
+                p.held = None;
+                p.withdraw = false;
+                let q = self.platoons.iter_mut().find(|p| p.side == c.side && p.id == *trucks).expect("found above");
+                q.order = platoon::PlatoonOrder::Deliver {
+                    to: *platoon,
+                    targets,
+                    release,
+                    home,
+                    phase: platoon::DeliverPhase::Gather,
+                    jobs,
+                };
+                q.plan = None;
+                q.held = None;
+                events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
+                events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*trucks) });
+            }
             Command::Dismount { platoon } | Command::Mount { platoon } => {
                 let Some(p) = self.platoons.iter().find(|p| p.id == *platoon && p.side == c.side) else { return };
                 // Either platoon of the pair can be addressed.
@@ -1835,26 +1959,43 @@ impl Sim {
                     id: i as u32,
                     callsign: sp.callsign.clone(),
                     pos: sp.pos,
-                    unlimited: sp.unlimited,
-                    fuel_l: sp.fuel_l,
+                    unlimited: sp.stock.unlimited,
+                    fuel_l: sp.stock.fuel_l,
                     rounds: sp
+                        .stock
                         .rounds
                         .iter()
                         .enumerate()
                         .filter(|&(_, &n)| n > 0)
                         .map(|(a, &n)| (self.ammo[a].name.clone(), n))
                         .collect(),
-                    smoke_salvos: sp.smoke_salvos,
+                    smoke_salvos: sp.stock.smoke_salvos,
                 })
                 .collect();
             for p in self.platoons.iter().filter(|p| p.side == dst.side) {
-                if let platoon::PlatoonOrder::Resupply { members, .. } = &p.order {
+                if let platoon::PlatoonOrder::Resupply { members, .. }
+                | platoon::PlatoonOrder::Tailgate { members, .. } = &p.order
+                {
                     for (&k, st) in p.members.iter().zip(members) {
                         if let Some(u) = dst.own.iter_mut().find(|u| u.id == self.world.id[k]) {
                             u.service = Some(st.stage);
                         }
                     }
                 }
+            }
+            for u in dst.own.iter_mut() {
+                let Some(c) = self.world.index_of(u.id).and_then(|k| self.world.cargo[k].as_ref()) else { continue };
+                u.cargo = Some(ai::picture::CargoView {
+                    fuel_l: c.fuel_l,
+                    rounds: c
+                        .rounds
+                        .iter()
+                        .enumerate()
+                        .filter(|&(_, &n)| n > 0)
+                        .map(|(a, &n)| (self.ammo[a].name.clone(), n))
+                        .collect(),
+                    smoke_salvos: c.smoke_salvos,
+                });
             }
             if !self.smoke.is_empty() {
                 let near = |p: Vec2| {
@@ -1917,6 +2058,30 @@ impl Sim {
                     m.hash_into(&mut h);
                 }
             }
+            if let platoon::PlatoonOrder::Tailgate { trucks, members } = &p.order {
+                h.u32(p.id.0);
+                h.u32(trucks.0);
+                for m in members {
+                    m.hash_into(&mut h);
+                }
+            }
+            if let platoon::PlatoonOrder::Deliver { to, phase, jobs, .. } = &p.order {
+                h.u32(p.id.0);
+                h.u32(to.0);
+                h.u8(match phase {
+                    platoon::DeliverPhase::Gather => 0,
+                    platoon::DeliverPhase::Serve => 1,
+                    platoon::DeliverPhase::Return { withdraw } => 2 + *withdraw as u8,
+                });
+                for j in jobs {
+                    h.u64(j.serving.map_or(u64::MAX, |v| v as u64));
+                    h.u8(j.at_vehicle as u8);
+                    j.st.hash_into(&mut h);
+                    for &v in &j.finished {
+                        h.u64(v as u64);
+                    }
+                }
+            }
         }
         for r in [
             &self.rngs.mobility,
@@ -1935,7 +2100,7 @@ impl Sim {
 /// Behaviour version of the simulation. A replay records it and is only played back by a build
 /// with the same version: bump it whenever a change makes an old command log play out
 /// differently (plan M8B-INFANTRY §8, DESIGN.md §14 #29). Replays from before versioning read as 0.
-pub const SIM_VERSION: u32 = 7;
+pub const SIM_VERSION: u32 = 8;
 
 /// A recorded game: scenario id plus the external command log. Re-simulating it reproduces the
 /// game exactly (determinism), which is what the after-action review and replays rely on.

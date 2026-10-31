@@ -145,6 +145,18 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
             crate::plan::step(p, ctx);
             continue;
         }
+        // Supply trucks fight nothing: no plans, no fire distribution, no contact drills.
+        if p.members.iter().any(|&k| ctx.world.cargo[k].is_some()) {
+            match p.order.clone() {
+                PlatoonOrder::Move { .. } => {
+                    let doctrine = ctx.doctrines[p.side.0 as usize].clone();
+                    move_step(p, ctx, &doctrine)
+                }
+                PlatoonOrder::Deliver { .. } => deliver_step(p, ctx),
+                _ => {}
+            }
+            continue;
+        }
         let doctrine = ctx.doctrines[p.side.0 as usize].clone();
         if !matches!(p.order, PlatoonOrder::Move { .. }) {
             p.withdraw = false;
@@ -159,9 +171,10 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
             PlatoonOrder::Occupy { .. } => occupy_step(p, ctx, &doctrine),
             PlatoonOrder::Contact => contact_step(p, ctx),
             PlatoonOrder::Resupply { .. } => resupply_step(p, ctx),
-            PlatoonOrder::None => {}
+            PlatoonOrder::Tailgate { .. } | PlatoonOrder::Deliver { .. } | PlatoonOrder::None => {}
         }
     }
+    tailgate_link(platoons, ctx);
     for pid in std::mem::take(&mut ctx.recalled) {
         for d in platoons.iter_mut().filter(|d| d.dismount && d.carrier_platoon == Some(pid)) {
             d.order = PlatoonOrder::None;
@@ -198,6 +211,15 @@ fn fresh_contacts(pic: &PerceivedWorld) -> Vec<Vec2> {
     pic.live_contacts().filter(|c| pic.time_s - c.last_report_s < CONTACT_FRESH_S).map(|c| c.pos).collect()
 }
 
+/// Fresh contacts to hand out as targets: recognised supply trucks only when nothing else is in
+/// view, as they do not shoot back (plan M8C-TAILGATE-TRUCKS §5).
+fn fire_targets(pic: &PerceivedWorld) -> Vec<Vec2> {
+    let fresh: Vec<_> = pic.live_contacts().filter(|c| pic.time_s - c.last_report_s < CONTACT_FRESH_S).collect();
+    let truck = |c: &&ai::picture::Contact| c.kind == Some(ai::picture::ContactKind::Supply);
+    let threats: Vec<Vec2> = fresh.iter().filter(|c| !truck(c)).map(|c| c.pos).collect();
+    if threats.is_empty() { fresh.iter().map(|c| c.pos).collect() } else { threats }
+}
+
 pub(crate) fn centroid(world: &World, members: &[usize]) -> Vec2 {
     let n = members.len().max(1) as f64;
     [
@@ -225,7 +247,7 @@ fn fire_distribution(p: &Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
         .collect();
     let c = centroid(ctx.world, &shooters);
     let range = d.engagement_range_m.get();
-    let targets: Vec<Vec2> = fresh_contacts(pic).into_iter().filter(|t| dist(*t, c) < range).collect();
+    let targets: Vec<Vec2> = fire_targets(pic).into_iter().filter(|t| dist(*t, c) < range).collect();
     if shooters.is_empty() {
         return;
     }
@@ -534,6 +556,213 @@ fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
     }
 }
 
+/// Tailgate resupply, truck side (plan M8C-TAILGATE-TRUCKS §3; FM 17-15 (1996), ATP 3-20.15
+/// (2025): in the tailgate method the LOGPAC moves to the vehicles in their positions). The trucks
+/// gather at a release point behind the platoon, then each takes in platoon order the next vehicle
+/// it has something for that no other truck is serving, parks `tailgate_m` behind it and hands
+/// over at the data rates; when no truck can give anything more they drive back. Fired on, they
+/// withdraw to the release point (convoy react-to-fire drill: leave the kill zone).
+fn deliver_step(p: &mut Platoon, ctx: &mut Ctx) {
+    use crate::logistics::{Tables, can_give, transfer};
+    use crate::platoon::DeliverPhase;
+    let PlatoonOrder::Deliver { to, targets, release, home, mut phase, mut jobs } = p.order.clone() else { return };
+    let m = ctx.logistics;
+    let dt = crate::PLATOON_AI_EVERY as f64 * DT;
+    let trucks: Vec<usize> = p.members.clone();
+    let slot = |i: usize| -> Vec2 {
+        // Trucks wait side by side at the release point.
+        let off = (i as f64 - (trucks.len() as f64 - 1.0) / 2.0) * 15.0;
+        [release[0] + off, release[1]]
+    };
+    let drive = |ctx: &mut Ctx, k: usize, st: &mut crate::logistics::ServiceState, goal: Vec2, arrive: f64| {
+        let pos = ctx.world.transform[k].pos;
+        let idle = ctx.world.ai[k].as_ref().is_some_and(|a| matches!(a.order, Order::Idle | Order::Face { .. }));
+        let moved = st.goal[0].is_nan() || dist(st.goal, goal) > 2.0;
+        if dist(pos, goal) > arrive && (moved || idle) {
+            if let Some(r) = ctx.route(k, goal, false) {
+                ctx.world.set_route(k, r, None, None, true, arrive);
+            }
+            st.goal = goal;
+        }
+        dist(pos, goal) <= arrive.max(8.0)
+    };
+
+    // React to fire: a burst close by, a shot at a truck (suppression) or a truck lost.
+    if !matches!(phase, DeliverPhase::Return { .. }) {
+        let window = ctx.fires.react_window_s.get();
+        let burst = ctx.impacts.iter().any(|i| {
+            !i.smoke
+                && (ctx.tick - i.tick) as f64 * DT <= window
+                && trucks.iter().any(|&k| dist(ctx.world.transform[k].pos, i.pos) <= m.withdraw_burst_m.get())
+        });
+        let fired_on = trucks.iter().any(|&k| ctx.world.suppression[k] > 0.0 || !ctx.world.can_move(k));
+        if burst || fired_on {
+            phase = DeliverPhase::Return { withdraw: true };
+            for j in jobs.iter_mut() {
+                j.serving = None;
+                j.at_vehicle = false;
+                j.st.goal = [f64::NAN, f64::NAN];
+            }
+            ctx.report(p, PlatoonReport::TrucksWithdrawing);
+        }
+    }
+
+    match phase {
+        DeliverPhase::Gather => {
+            let mut all = true;
+            for (i, &k) in trucks.iter().enumerate() {
+                if ctx.world.can_move(k) {
+                    all &= drive(ctx, k, &mut jobs[i].st, slot(i), 10.0);
+                }
+            }
+            if all {
+                phase = DeliverPhase::Serve;
+            }
+        }
+        DeliverPhase::Serve => {
+            let t = Tables { vehicles: ctx.vehicles, loadouts: ctx.loadouts, ammo: ctx.ammo, model: ctx.logistics };
+            let mut busy = false;
+            for (i, &k) in trucks.iter().enumerate() {
+                if !ctx.world.can_move(k) {
+                    jobs[i].serving = None;
+                    continue;
+                }
+                // Drop a vehicle that is gone or has nothing more to take from this truck.
+                if let Some(v) = jobs[i].serving {
+                    let tk = targets[v];
+                    let stock = ctx.world.cargo[k].as_ref().expect("a truck");
+                    if !ctx.world.alive(tk) || !can_give(ctx.world, tk, stock, &t) {
+                        jobs[i].finished.push(v);
+                        jobs[i].serving = None;
+                        jobs[i].at_vehicle = false;
+                    }
+                }
+                if jobs[i].serving.is_none() {
+                    let taken: Vec<usize> = jobs.iter().filter_map(|j| j.serving).collect();
+                    let stock = ctx.world.cargo[k].as_ref().expect("a truck");
+                    let fin = &jobs[i].finished;
+                    jobs[i].serving = (0..targets.len()).find(|&v| {
+                        !taken.contains(&v)
+                            && !fin.contains(&v)
+                            && ctx.world.alive(targets[v])
+                            && can_give(ctx.world, targets[v], stock, &t)
+                    });
+                    jobs[i].st.credit = [0.0; 4];
+                }
+                let Some(v) = jobs[i].serving else {
+                    drive(ctx, k, &mut jobs[i].st, slot(i), 10.0);
+                    continue;
+                };
+                busy = true;
+                let tk = targets[v];
+                let (tp, h) = (ctx.world.transform[tk].pos, ctx.world.transform[tk].heading);
+                let spot = [tp[0] - libm::sin(h) * m.tailgate_m.get(), tp[1] - libm::cos(h) * m.tailgate_m.get()];
+                let there = drive(ctx, k, &mut jobs[i].st, spot, 4.0);
+                let still = |w: &World, q: usize| w.mobility[q].as_ref().is_some_and(|mm| mm.speed.abs() < 0.5);
+                jobs[i].at_vehicle = there && still(ctx.world, k) && still(ctx.world, tk);
+                if jobs[i].at_vehicle {
+                    ctx.world.halt(k);
+                    let mut stock = ctx.world.cargo[k].take().expect("a truck");
+                    let mut st = jobs[i].st.clone();
+                    let done = transfer(ctx.world, tk, &mut stock, &mut st, &t, dt, ctx.tick);
+                    jobs[i].st.credit = st.credit;
+                    ctx.world.cargo[k] = Some(stock);
+                    if done {
+                        jobs[i].finished.push(v);
+                        jobs[i].serving = None;
+                        jobs[i].at_vehicle = false;
+                    }
+                }
+            }
+            if !busy {
+                phase = DeliverPhase::Return { withdraw: false };
+                for j in jobs.iter_mut() {
+                    j.st.goal = [f64::NAN, f64::NAN];
+                }
+                let left: Vec<&crate::logistics::Stock> = trucks
+                    .iter()
+                    .filter(|&&k| ctx.world.alive(k))
+                    .filter_map(|&k| ctx.world.cargo[k].as_ref())
+                    .collect();
+                let fuel_l = left.iter().map(|s| s.fuel_l).sum();
+                let rounds = left.iter().map(|s| s.rounds.iter().sum::<u32>()).sum();
+                ctx.report(p, PlatoonReport::TrucksReturning { fuel_l, rounds });
+            }
+        }
+        DeliverPhase::Return { withdraw } => {
+            let mut all = true;
+            for (i, &k) in trucks.iter().enumerate() {
+                jobs[i].serving = None;
+                jobs[i].at_vehicle = false;
+                if ctx.world.can_move(k) {
+                    let goal = if withdraw { slot(i) } else { home[i] };
+                    all &= drive(ctx, k, &mut jobs[i].st, goal, 10.0);
+                }
+            }
+            if all {
+                p.order = PlatoonOrder::None;
+                return;
+            }
+        }
+    }
+    p.order = PlatoonOrder::Deliver { to, targets, release, home, phase, jobs };
+}
+
+/// Tailgate resupply, platoon side: the served platoon's per-vehicle stage follows the trucks;
+/// when the trucks leave (done or withdrawing) it reports and its order ends. Trucks whose
+/// platoon was given another order go home.
+fn tailgate_link(platoons: &mut [Platoon], ctx: &mut Ctx) {
+    use crate::logistics::{Tables, can_give, needs_worth};
+    use crate::platoon::DeliverPhase;
+    use ai::picture::ServiceStage;
+    let t = Tables { vehicles: ctx.vehicles, loadouts: ctx.loadouts, ammo: ctx.ammo, model: ctx.logistics };
+    for ti in 0..platoons.len() {
+        let PlatoonOrder::Deliver { to, targets, phase, jobs, .. } = platoons[ti].order.clone() else { continue };
+        let trucks_id = platoons[ti].id;
+        let Some(si) = platoons.iter().position(|q| q.id == to) else { continue };
+        let served = matches!(&platoons[si].order, PlatoonOrder::Tailgate { trucks, .. } if *trucks == trucks_id);
+        if !served {
+            if !matches!(phase, DeliverPhase::Return { .. })
+                && let PlatoonOrder::Deliver { phase, jobs, .. } = &mut platoons[ti].order
+            {
+                *phase = DeliverPhase::Return { withdraw: false };
+                for j in jobs.iter_mut() {
+                    j.serving = None;
+                    j.st.goal = [f64::NAN, f64::NAN];
+                }
+            }
+            continue;
+        }
+        let live: Vec<(usize, usize)> =
+            platoons[ti].members.iter().copied().enumerate().filter(|&(_, k)| ctx.world.can_move(k)).collect();
+        let w = &*ctx.world;
+        let PlatoonOrder::Tailgate { members, .. } = &mut platoons[si].order else { continue };
+        for (v, st) in members.iter_mut().enumerate() {
+            let k = targets[v];
+            let any_truck = live.iter().any(|&(i, q)| {
+                !jobs[i].finished.contains(&v) && w.cargo[q].as_ref().is_some_and(|s| can_give(w, k, s, &t))
+            });
+            st.done = !w.alive(k) || !any_truck;
+            // Short: it still lacks something no live truck carries any more.
+            let stocked = live.iter().any(|&(_, q)| w.cargo[q].as_ref().is_some_and(|s| can_give(w, k, s, &t)));
+            st.short = w.alive(k) && st.done && needs_worth(w, k, &t) && !stocked;
+            st.stage = if st.done {
+                ServiceStage::Done
+            } else if jobs.iter().any(|j| j.serving == Some(v) && j.at_vehicle) {
+                ServiceStage::Served
+            } else {
+                ServiceStage::Waiting
+            };
+        }
+        if let DeliverPhase::Return { withdraw } = phase {
+            // Withdrawn trucks leave vehicles unserved: partial.
+            let complete = !members.iter().any(|m| m.short || (withdraw && !m.done));
+            platoons[si].order = PlatoonOrder::None;
+            ctx.report(&platoons[si], PlatoonReport::Resupplied { complete });
+        }
+    }
+}
+
 /// Service-station resupply (FM 17-15 (1996), ATP 3-20.15 (2025) sustainment): the first
 /// `stations` members that still need anything drive into the supply point and are served there;
 /// the rest wait in a holding line on the approach side. When every member is done the platoon
@@ -573,7 +802,7 @@ fn resupply_step(p: &mut Platoon, ctx: &mut Ctx) {
         if active && at_point && slow {
             ctx.world.halt(k);
             let t = Tables { vehicles: ctx.vehicles, loadouts: ctx.loadouts, ammo: ctx.ammo, model: ctx.logistics };
-            st.done = transfer(ctx.world, k, &mut ctx.supply[point], st, &t, dt);
+            st.done = transfer(ctx.world, k, &mut ctx.supply[point].stock, st, &t, dt, ctx.tick);
             st.short = st.done && crate::logistics::needs_anything(ctx.world, k, &t);
             st.stage = if st.done { ServiceStage::Done } else { ServiceStage::Served };
             continue;

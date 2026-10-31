@@ -85,6 +85,7 @@ pub fn squad(cs: &str, squad: &str, pos: [f64; 2], platoon: Option<&str>, carrie
         platoon: platoon.map(str::to_owned),
         squad: Some(squad.into()),
         mounted_in: carrier.map(str::to_owned),
+        cargo: None,
     }
 }
 
@@ -97,6 +98,7 @@ pub fn unit(cs: &str, vehicle: &str, pos: [f64; 2], heading_deg: f64, platoon: O
         platoon: platoon.map(str::to_owned),
         squad: None,
         mounted_in: None,
+        cargo: None,
     }
 }
 
