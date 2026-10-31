@@ -58,6 +58,8 @@ pub enum MenuAct {
     Posture(Scope, PostureVal),
     /// Edit a graphic or a contingency after placement.
     Gfx(GfxEdit),
+    /// Resupply the selected platoon from this source.
+    Resupply(super::ResupplySource),
 }
 
 pub(super) fn reaction_name(r: ContactReaction) -> &'static str {
@@ -337,6 +339,11 @@ impl Game {
             }
             MenuAct::NextOrder(m) => self.order_mode = m,
             MenuAct::Cmd(c) => self.command(c, fx),
+            MenuAct::Resupply(src) => {
+                if let Some(p) = self.sel_platoon {
+                    self.send_resupply(p, src);
+                }
+            }
             MenuAct::SelectPlatoon(p) => self.act(GameAction::SelectPlatoon(p), fx),
             MenuAct::SelectUnit(u) => self.act(GameAction::SelectUnit(u), fx),
             MenuAct::VehicleData => {

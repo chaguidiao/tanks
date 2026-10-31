@@ -1983,6 +1983,20 @@ impl Sim {
                     }
                 }
             }
+            for u in dst.own.iter_mut() {
+                let Some(c) = self.world.index_of(u.id).and_then(|k| self.world.cargo[k].as_ref()) else { continue };
+                u.cargo = Some(ai::picture::CargoView {
+                    fuel_l: c.fuel_l,
+                    rounds: c
+                        .rounds
+                        .iter()
+                        .enumerate()
+                        .filter(|&(_, &n)| n > 0)
+                        .map(|(a, &n)| (self.ammo[a].name.clone(), n))
+                        .collect(),
+                    smoke_salvos: c.smoke_salvos,
+                });
+            }
             if !self.smoke.is_empty() {
                 let near = |p: Vec2| {
                     dst.own.iter().any(|u| u.condition != Condition::Destroyed && dist(u.pos, p) < SMOKE_VIEW_M)

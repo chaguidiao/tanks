@@ -1106,7 +1106,10 @@ impl ScenarioEditor {
             let c = if si == 0 { style::FRIENDLY } else { style::HOSTILE };
             for (ui, u) in side.units.iter().enumerate().filter(|(_, u)| u.mounted_in.is_none()) {
                 let p = cam.to_screen(u.position);
+                let truck = ds.vehicle(&u.vehicle).is_some_and(|v| v.cargo.is_some());
                 match (si == 0, u.squad.is_some()) {
+                    (true, false) if truck => symbols::friendly_supply(f, p, c),
+                    (false, false) if truck => symbols::hostile_supply(f, p, c),
                     (true, false) => symbols::friendly_armour(f, p, c),
                     (false, false) => symbols::hostile_armour(f, p, c),
                     (true, true) => symbols::friendly_infantry(f, p, c, symbols::SQUAD_SCALE),

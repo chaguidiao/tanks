@@ -280,6 +280,10 @@ impl Platoon {
                 PlatoonOrder::Resupply { point, .. } => Some(*point as u32),
                 _ => None,
             },
+            resupply_by: match &self.order {
+                PlatoonOrder::Tailgate { trucks, .. } => Some(*trucks),
+                _ => None,
+            },
         }
     }
 

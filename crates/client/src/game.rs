@@ -224,6 +224,15 @@ pub struct GameFx {
     pub vehicle_data: Option<String>,
 }
 
+/// Where a platoon resupplies (M8c).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ResupplySource {
+    /// A supply point, by id (service station).
+    Point(u32),
+    /// A supply-truck platoon (tailgate).
+    Trucks(PlatoonId),
+}
+
 pub struct Game {
     pub sim: Sim,
     pub scenario: ScenarioDef,
@@ -293,6 +302,8 @@ pub struct Game {
     /// A posture list asked for by a card button or hotkey; opened once the screen is known.
     posture_request: Option<Posture>,
     graphics_request: bool,
+    /// The RESUPPLY source list, asked for while several sources exist.
+    resupply_request: bool,
     /// HALT (true) / RESUME (false) sent but not yet received.
     pending_held: Vec<(Addressee, bool, f64)>,
     /// Plan being edited (sent with SEND; drawn dashed until then).
@@ -365,6 +376,7 @@ impl Game {
             pending_speed: Vec::new(),
             posture_request: None,
             graphics_request: false,
+            resupply_request: false,
             pending_held: Vec::new(),
             plan: None,
             parked: BTreeMap::new(),
@@ -913,6 +925,7 @@ impl Game {
         self.open_requested_menu(cam, inp);
         self.open_posture_menu(inp);
         self.open_graphics_menu(inp);
+        self.open_resupply_menu(inp);
         let world = cam.to_world(inp.mouse);
         let swallowed = self.rmb_update(inp, cam, over_ui, &mut fx) || menu_was_open;
         let over_ui = over_ui || swallowed;
@@ -1241,13 +1254,16 @@ impl Game {
                 }
             }
             Cmd::Resupply => {
-                if let Some(p) = self.sel_platoon
-                    && let Some((id, sp)) = self.resupply_point(p).map(|sp| (sp.id, sp.callsign.clone()))
-                {
-                    let cs = self.platoon_cs(p);
-                    self.remember_replaced(p);
-                    self.order(Command::Resupply { platoon: p, point: id });
-                    self.radio(format!("TO {cs}: RESUPPLY AT {sp}."));
+                if let Some(p) = self.sel_platoon {
+                    let sources = self.resupply_sources(p);
+                    match sources.iter().filter(|s| s.2).count() {
+                        0 => {}
+                        1 => {
+                            let s = sources.into_iter().find(|s| s.2).expect("one");
+                            self.send_resupply(p, s.0);
+                        }
+                        _ => self.resupply_request = true,
+                    }
                 }
             }
             Cmd::Contingency => {
@@ -1579,6 +1595,63 @@ impl Game {
 
     /// The supply point a RESUPPLY order sends platoon `p` to: the one it is already going to,
     /// else the nearest to the platoon.
+    /// Where platoon `p` can resupply (M8c): supply points, nearest first (service station), then
+    /// the side's supply-truck platoons (tailgate). (source, label, available).
+    pub(crate) fn resupply_sources(&self, p: PlatoonId) -> Vec<(ResupplySource, String, bool)> {
+        let pic = self.picture();
+        let mut out = Vec::new();
+        if self.is_truck_platoon(p) {
+            return out;
+        }
+        if let Some(at) = self.platoon_centre(p) {
+            let d = |q: [f64; 2]| (q[0] - at[0]).powi(2) + (q[1] - at[1]).powi(2);
+            let mut points: Vec<&sim::view::SupplyPointView> = pic.supply_points.iter().collect();
+            points.sort_by(|a, b| d(a.pos).total_cmp(&d(b.pos)));
+            for sp in points {
+                out.push((ResupplySource::Point(sp.id), format!("AT {} (SERVICE STATION)", sp.callsign), true));
+            }
+        }
+        for pv in pic.platoons.iter().filter(|pv| self.is_truck_platoon(pv.id)) {
+            let loaded = pv.members.iter().filter_map(|m| pic.unit(*m)).any(|u| {
+                u.condition != Condition::Destroyed
+                    && u.cargo.as_ref().is_some_and(|c| c.fuel_l > 0.0 || c.smoke_salvos > 0 || !c.rounds.is_empty())
+            });
+            let idle = pv.task == "HALTED";
+            let why = if !loaded {
+                " (EMPTY)"
+            } else if !idle {
+                " (BUSY)"
+            } else {
+                ""
+            };
+            out.push((ResupplySource::Trucks(pv.id), format!("BY {} (TAILGATE){why}", pv.callsign), loaded && idle));
+        }
+        out
+    }
+
+    /// A platoon of supply trucks.
+    pub(crate) fn is_truck_platoon(&self, p: PlatoonId) -> bool {
+        let pic = self.picture();
+        pic.platoon(p).is_some_and(|pv| pv.members.iter().filter_map(|m| pic.unit(*m)).any(|u| u.cargo.is_some()))
+    }
+
+    pub(crate) fn send_resupply(&mut self, p: PlatoonId, src: ResupplySource) {
+        let cs = self.platoon_cs(p);
+        self.remember_replaced(p);
+        match src {
+            ResupplySource::Point(id) => {
+                let sp = self.picture().supply_points.iter().find(|s| s.id == id).map(|s| s.callsign.clone());
+                self.order(Command::Resupply { platoon: p, point: id });
+                self.radio(format!("TO {cs}: RESUPPLY AT {}.", sp.unwrap_or_default()));
+            }
+            ResupplySource::Trucks(t) => {
+                let tcs = self.platoon_cs(t);
+                self.order(Command::Tailgate { platoon: p, trucks: t });
+                self.radio(format!("TO {cs}, {tcs}: TAILGATE RESUPPLY, {tcs} TO {cs}."));
+            }
+        }
+    }
+
     fn resupply_point(&self, p: PlatoonId) -> Option<&sim::view::SupplyPointView> {
         let pic = self.picture();
         if let Some(id) = pic.platoon(p).and_then(|v| v.resupply_at) {
@@ -2032,9 +2105,11 @@ impl Game {
             let age = pic.time_s - c.last_report_s;
             let fade = if age > 60.0 { 110 } else { 255 };
             let infantry = c.kind == Some(sim::view::ContactKind::Infantry);
+            let truck = c.kind == Some(sim::view::ContactKind::Supply);
             let label = match (&c.type_name, c.level) {
                 (Some(t), _) => t.clone(),
                 (None, ContactLevel::Recognised) if infantry => "INF".into(),
+                (None, ContactLevel::Recognised) if truck => "TRUCK".into(),
                 (None, ContactLevel::Recognised) => "TANK".into(),
                 (None, _) => "UNK".into(),
             };
@@ -2042,6 +2117,7 @@ impl Game {
             match c.level {
                 ContactLevel::Detected => symbols::unknown_frame(f, p, Rgba(214, 196, 110, fade)),
                 _ if infantry => symbols::hostile_infantry(f, p, hostile, symbols::SQUAD_SCALE),
+                _ if truck => symbols::hostile_supply(f, p, hostile),
                 _ => symbols::hostile_armour(f, p, hostile),
             }
             if c.anti_armour && c.level > ContactLevel::Detected {
@@ -2081,7 +2157,11 @@ impl Game {
                 let cx = members.iter().map(|m| m.pos[0]).sum::<f64>() / members.len() as f64;
                 let cy = members.iter().map(|m| m.pos[1]).sum::<f64>() / members.len() as f64;
                 let p = cam.to_screen([cx, cy]);
-                symbols::friendly_armour(f, p, style::FRIENDLY);
+                if members.iter().any(|m| m.cargo.is_some()) {
+                    symbols::friendly_supply(f, p, style::FRIENDLY);
+                } else {
+                    symbols::friendly_armour(f, p, style::FRIENDLY);
+                }
                 symbols::echelon_platoon(f, p, style::FRIENDLY);
                 f.text(
                     &format!("{} ({})", pv.callsign, members.len()),
@@ -2123,7 +2203,11 @@ impl Game {
                 if cam.mpp < 0.6 {
                     symbols::hull(f, cam, pos, hdg, u.turret, 7.9, 3.7, style::FRIENDLY);
                 }
-                symbols::friendly_armour(f, p, style::FRIENDLY);
+                if u.cargo.is_some() {
+                    symbols::friendly_supply(f, p, style::FRIENDLY);
+                } else {
+                    symbols::friendly_armour(f, p, style::FRIENDLY);
+                }
             }
             match u.condition {
                 Condition::Destroyed => symbols::destroyed(f, p, style::FRIENDLY),
@@ -2691,11 +2775,22 @@ impl Game {
             ),
             (23, {
                 let sp = self.sel_platoon.and_then(|p| self.resupply_point(p));
+                let sources = self.sel_platoon.map_or(Vec::new(), |p| self.resupply_sources(p));
+                let open = sources.iter().filter(|s| s.2).count();
+                let trucks = sources.iter().any(|s| matches!(s.0, ResupplySource::Trucks(_)));
                 b("RESUPPLY", Cmd::Resupply)
                     .key("R")
-                    .value(sp.map_or(String::new(), |sp| sp.callsign.clone()))
-                    .enabled(sp.is_some())
+                    .value(match open {
+                        0 => String::new(),
+                        1 => match sources.iter().find(|s| s.2).map(|s| s.0) {
+                            Some(ResupplySource::Trucks(t)) => self.platoon_cs(t),
+                            _ => sp.map_or(String::new(), |sp| sp.callsign.clone()),
+                        },
+                        _ => "CHOOSE".into(),
+                    })
+                    .enabled(open > 0)
                     .tip(match sp {
+                        _ if trucks => "RESUPPLY AT A SUPPLY POINT (SERVICE STATION: THE PLATOON DRIVES THERE) OR BY THE SUPPLY TRUCKS (TAILGATE: THE TRUCKS COME TO THE PLATOON, WHICH HOLDS IN ITS POSITIONS)".into(),
                         Some(sp) => format!(
                             "SERVICE-STATION RESUPPLY AT THE NEAREST SUPPLY POINT: THE PLATOON DRIVES THERE, IS SERVED A FEW VEHICLES AT A TIME, REPORTS AND HOLDS ({}: {})",
                             sp.callsign,
@@ -2804,7 +2899,36 @@ impl Game {
                 .fold(f64::INFINITY, f64::min);
             let fuel = if fuel.is_finite() { format!("{:.0} %", fuel * 100.0) } else { "-".into() };
             let full: u32 = members.iter().filter(|u| u.condition != Condition::Destroyed).map(|u| u.full_load).sum();
-            if squads.is_empty() {
+            // Supply trucks: cargo instead of guns (M8c tailgate resupply).
+            let cargo: Vec<&sim::view::CargoView> = members
+                .iter()
+                .filter(|u| u.condition != Condition::Destroyed)
+                .filter_map(|u| u.cargo.as_ref())
+                .collect();
+            let trucks = members.iter().any(|u| u.cargo.is_some());
+            if trucks {
+                let rds: u32 = cargo.iter().flat_map(|c| &c.rounds).map(|r| r.1).sum();
+                let litres: f64 = cargo.iter().map(|c| c.fuel_l).sum();
+                let smoke: u32 = cargo.iter().map(|c| c.smoke_salvos).sum();
+                head.push((
+                    format!("UP {up}/{}   CARGO {rds} RDS   {litres:.0} L   SMOKE SALVOS {smoke}", members.len()),
+                    if up < members.len() { style::AMBER } else { style::TEXT },
+                ));
+            }
+            if let Some(by) = pv.resupply_by {
+                let n = |s: ServiceStage| members.iter().filter(|u| u.service == Some(s)).count();
+                head.push((
+                    format!(
+                        "RESUPPLY BY {}: {} SERVED, {} WAITING, {} DONE",
+                        self.platoon_cs(by),
+                        n(ServiceStage::Served),
+                        n(ServiceStage::Waiting) + n(ServiceStage::ToPoint),
+                        n(ServiceStage::Done)
+                    ),
+                    style::AMBER,
+                ));
+            }
+            if squads.is_empty() && !trucks {
                 head.push((
                     format!("UP {up}/{}   MAIN GUN {rounds}/{full} RDS   FUEL LOW {fuel}", members.len()),
                     if up < members.len() { style::AMBER } else { style::TEXT },
@@ -2861,7 +2985,16 @@ impl Game {
         for m in members {
             let label = match &m.squad {
                 Some(s) => format!("{:<5} {}/{} MEN {}", m.callsign, s.strength.0, s.strength.1, s.posture.label()),
-                None => format!("{:<5} {:>3} KM/H {:>3} RDS", m.callsign, format::kmh(m.speed), m.ammo),
+                None => match &m.cargo {
+                    Some(c) => format!(
+                        "{:<5} {:>3} KM/H CARGO {} RDS {:.0} L",
+                        m.callsign,
+                        format::kmh(m.speed),
+                        c.rounds.iter().map(|r| r.1).sum::<u32>(),
+                        c.fuel_l
+                    ),
+                    None => format!("{:<5} {:>3} KM/H {:>3} RDS", m.callsign, format::kmh(m.speed), m.ammo),
+                },
             };
             rows.push(
                 Button::new(Rect::new(x + 6.0, cy, W - 12.0, 20.0), Look::Row, label, GameAction::SelectUnit(m.id))
@@ -3002,7 +3135,16 @@ impl Game {
         };
         let ammo_c = if load > 0 && u.ammo * 4 < load { style::AMBER } else { style::TEXT };
         let held = u.ammo_selected.as_deref().map_or("AUTO".to_owned(), |k| format!("HOLD {k}"));
-        out.push((row("MAIN GUN", format!("{}/{load} RDS   {gun}", u.ammo)), ammo_c));
+        if let Some(c) = &u.cargo {
+            out.push((row("CARGO FUEL", format!("{:.0} L   SMOKE SALVOS {}", c.fuel_l, c.smoke_salvos)), style::TEXT));
+            let list: Vec<String> = c.rounds.iter().map(|(l, n)| format!("{} {n}", l.to_uppercase())).collect();
+            out.push((
+                row("CARGO ROUNDS", if list.is_empty() { "NONE".into() } else { list.join(" · ") }),
+                style::TEXT,
+            ));
+        } else {
+            out.push((row("MAIN GUN", format!("{}/{load} RDS   {gun}", u.ammo)), ammo_c));
+        }
         if !u.rounds.is_empty() {
             let list: Vec<String> = u.rounds.iter().map(|(l, n)| format!("{l} {n}")).collect();
             out.push((row("ROUNDS", list.join(" · ")), style::TEXT));
