@@ -1,6 +1,6 @@
 # M8c slice 6: tailgate resupply by supply trucks
 
-Status: **2026-10-31, draft for review** (TODO C1, plan `M8C-LOGISTICS.md` §2 "Tailgate method", §5 step 6). Decisions in §8 need an answer before code; the recommendation is what gets built if accepted.
+Status: **2026-10-31, agreed** (TODO C1, plan `M8C-LOGISTICS.md` §2 "Tailgate method", §5 step 6). All six recommendations in §8 accepted by the user on 2026-10-31.
 
 Goal: resupply without leaving the position. Supply trucks are vehicles that drive to a platoon, go from vehicle to vehicle and hand over fuel and rounds, so resupply costs exposure instead of the platoon's absence. Trucks can be seen and killed, and losing them is losing the stock they carry.
 
