@@ -193,6 +193,40 @@ Select several platoons with <kbd>Shift</kbd>+click or a box ({{ch:Selecting uni
 
 Store a selection with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>1</kbd>–<kbd>9</kbd> and recall it with <kbd>Shift</kbd>+<kbd>1</kbd>–<kbd>9</kbd>. Plans and engage orders are per platoon or vehicle.
 
+# Infantry
+
+Infantry is in the game to support and threaten tanks, not as a war of its own. A dismounted **squad** is one element on the map with a strength in men, a posture and its weapons. Squads riding in their carriers are simply part of the carrier: they are not seen, do not see, and share its fate (a penetration costs about a third of the men, a catastrophic kill all of them; survivors bail out).
+
+## Squads and their carriers
+
+IFVs (WARD M2, SKIF M1) carry squads; the roster lists the men aboard. The squads of a carrier platoon form a **dismount platoon** with the callsign `<platoon>-D` (for example `2-D`), which you select and order like any platoon.
+
+- **DISMOUNT** (<kbd>U</kbd>, on the carrier platoon or its dismount platoon): the carriers halt for the ramp drill, and the squads get out and take security behind them. Order it short of the danger, not in it: the drill is counted only while the carriers stand still.
+- **MOUNT** (<kbd>U</kbd> again): the squads walk back and board.
+- A move or plan given to the dismount platoon while its squads still ride starts once they are out.
+
+Squads move on foot: slowly, through woods and over ground no vehicle can cross, and into buildings only through their doors. A dismount platoon moves on line.
+
+## Buildings
+
+Select squads and press **OCCUPY BLDG** (<kbd>B</kbd>), then click a house, or simply right-click a house. The squads go in by its doors, as many as its floor area holds, at most four. Inside, they are seen and engaged only through the wall facing the enemy, from the upper floor, and they are protected by the building's class: a timber house stops little, a masonry house stops machine-gun fire and needs HE to clear. The plan action **OCCUPY BUILDINGS FACING...** lets the squads pick the houses that cover a direction themselves: masonry, upper floors and the forward houses first, one squad per house.
+
+## Postures and fire
+
+A squad is **moving**, **halted** or **dug in** (after a few minutes in place, or at once in a building). Each posture is smaller and harder to find than the last; tall crops in summer hide a halted squad too. Under fire a squad runs the **react to contact** drill: it stops, takes cover and continues once it is quiet.
+
+Small arms rarely kill, but they **suppress**: a pinned squad stops moving and fires slower and worse. Your tanks use the coaxial machine gun on squads in the open and HE on squads behind walls. The squad card shows strength, posture, suppression and weapons.
+
+## Anti-tank teams and ambushes
+
+Enemy squads carry rocket launchers (RPG class), and missile teams carry guided missiles. A set-up squad waits until a vehicle comes inside its trigger range and prefers a flank shot. A **launch gives the shooter away**: a launch cloud shows for 3 s, and your crews treat a squad seen launching as their first target. A guided missile misses if its gunner is pinned during the flight, so firing back at once saves tanks.
+
+A rocket or missile from a squad within 400 m is an **ambush**. The platoon's **ON AMBUSH** setting decides the drill (card under ON CONTACT, or per leg in a plan): **REVERSE OUT** (the default: smoke, reverse 150 m, then fight), **DRIVE THROUGH** (smoke and full speed out of the kill zone) or **HALT**. The plan condition **AMBUSHED** branches a plan when it happens.
+
+## Built-up ground
+
+Tank platoons on their own route round villages and towns, as doctrine says they should: the streets are where infantry kills tanks. A leg set to **BUILT-UP ENTER**, a carrier platoon in the group or friendly squads on the ground within 300 m lift the rule. To take a village, dismount the infantry short of it, let the squads clear the houses, and bring the tanks in behind them as a fire base.
+
 # Fire support
 
 Some scenarios give you an artillery battery, shown in the **FIRE SUPPORT** box (for example `ARTY 1 155 MM SP BATTERY · HE 72 SMK 16 READY`). The guns are kilometres away and not on the map; you call for fire over the radio like a real company commander.
@@ -212,7 +246,7 @@ The mission then runs like a real one:
 | `ARTY 1: SPLASH, OVER.` | Five seconds before each volley lands |
 | `ARTY 1: ROUNDS COMPLETE, END OF MISSION.` | Done. An HE mission is three volleys from four guns, 15 s apart; a smoke mission is one volley |
 
-A mission can be refused: `UNABLE. OUT OF RANGE` / `BELOW MINIMUM RANGE` (155 mm: 2–22 km) / `NO AMMUNITION` / `MISSION IN PROGRESS`.
+A mission can be refused: `UNABLE. OUT OF RANGE` / `BELOW MINIMUM RANGE` (155 mm: 2–22 km) / `NO AMMUNITION` / `MISSION IN PROGRESS` / `DISPLACING`.
 
 ::fig x-fire-impact | crop=700,240,500,200 | w=70 | The mission marker (`ARTY 1 HE`) with the first burst rings next to it, 1.2 km from your tanks.
 
@@ -225,6 +259,12 @@ To correct it, watch where the bursts land, then press **ADJUST** (<kbd>J</kbd>)
 <div class="warn" markdown="1">
 **You only see bursts near your own troops.** Impacts appear on your map only within 1.5 km of one of your vehicles. ADJUST stays greyed until a burst has been observed, so a mission fired far beyond your front can't be adjusted.
 </div>
+
+## Ammunition and moves
+
+A battery's rounds run out. When its HE drops below a quarter of what it started with, its ammunition vehicles drive back to the trains (`ARTY 1: AMMUNITION LOW. RESUPPLY IN 25 MINUTES.`) and return with a full load (`RESUPPLIED. 54 HE, 4 SMOKE.`); the guns keep firing what is left meanwhile. The trains hold two loads, then that is it. The FIRE SUPPORT box shows `RESUPPLY IN … MIN, … LEFT` while they are away.
+
+After three missions from one position (the 152 mm battery: four) a battery moves to avoid counter-battery fire: `DISPLACING. READY IN 5 MINUTES.` It refuses calls until `IN POSITION, READY TO FIRE.` Plan your fires around it: spend missions on what matters, and don't call the third one just before the attack.
 
 ## What artillery does
 
@@ -253,6 +293,20 @@ Smoke drifts with the scenario wind and thins out. On the map it appears as grey
 - Thermal sights see through most smoke. Against a modern enemy with thermals, ordinary smoke hides you only from the enemy's eyes and day optics.
 - Smoke draws attention and artillery. Move as soon as it builds up.
 - **BREAK CONTACT** automatically fires smoke before withdrawing.
+
+# Logistics
+
+Tanks carry about forty main-gun rounds and fuel for a day; in a long fight both run out. The status card of a vehicle shows what is left (`MAIN GUN 12/40 RDS`), and an empty tank still fights with what else it has, or not at all.
+
+## Supply points
+
+Some scenarios give a side **supply points** (the `SP` pin on the map, with a dashed circle for the serving area when zoomed in). Select a platoon and press **RESUPPLY** (<kbd>R</kbd>): it drives to the nearest point, waits nearby, and its vehicles are served two at a time. Main-gun rounds go in at about three a minute and fuel at 200 litres a minute, so a platoon is out of the fight for a good quarter of an hour. The platoon card shows the progress (`RESUPPLY AT SP 1: 1 SERVED, 2 QUEUED, 1 DONE`), and the platoon reports `RESUPPLY COMPLETE.` and holds, or `RESUPPLY PARTIAL. SUPPLY POINT SHORT.` if the stock ran out. A new order interrupts it; what was already loaded stays loaded.
+
+Resupply one platoon at a time, behind cover, while the others hold.
+
+## LOGPACs
+
+A scenario can also bring a **LOGPAC** (logistics package) at a set time: `LOGPAC RECEIVED. REARMED.` or `REFUELLED.` The rounds and fuel arrive at once, wherever the platoon is. The scenario editor's supply points (<kbd>S</kbd>) and the RON file's `logistics` list set both up.
 
 # Terrain analysis
 

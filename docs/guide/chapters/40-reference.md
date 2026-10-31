@@ -34,6 +34,7 @@
 <dt>Defilade</dt><dd>Protection from enemy fire or observation by terrain.</dd>
 <dt>Delay</dt><dd>Trading space for time: fighting from successive positions and falling back before being fixed.</dd>
 <dt>Detection, recognition, identification</dt><dd>The levels of seeing a target: <i>something is there</i>, <i>it is a tank</i>, <i>it is a KURGAN-B</i>.</dd>
+<dt>Dismount</dt><dd>Infantry getting out of its carrier to fight on foot; mount is the reverse.</dd>
 <dt>Displace</dt><dd>Move from one position to another, usually to an alternate.</dd>
 <dt>Echelon</dt><dd>(1) A level of command (platoon, company …). (2) A diagonal formation (echelon left/right). (3) In Soviet-style doctrine, successive waves of an attack.</dd>
 <dt>ENDEX</dt><dd>End of exercise: the scenario is over.</dd>
@@ -62,6 +63,7 @@
 <dt>KE (kinetic energy)</dt><dd>Penetration by mass and velocity (sabot rounds).</dd>
 <dt>LKP (last known position)</dt><dd>Where a contact was last reported; shown with its age in seconds.</dd>
 <dt>Loader</dt><dd>The crew member who loads the main gun in Western tanks. Red tanks use an autoloader and have 3 crew.</dd>
+<dt>LOGPAC (logistics package)</dt><dd>A convoy that brings a unit ammunition, fuel and other supplies; in the game an instant refill at a set time.</dd>
 <dt>LOS (line of sight)</dt><dd>Whether two points can see each other.</dd>
 <dt>Masked</dt><dd>Here: a position where the hull is visible but the view towards the threat is blocked.</dd>
 <dt>MBT (main battle tank)</dt><dd>A tank designed for all combat roles: BULWARK, KURGAN.</dd>
@@ -81,6 +83,7 @@
 <dt>Reserve</dt><dd>A force held back to react to events.</dd>
 <dt>Reverse slope</dt><dd>The side of a hill away from the enemy.</dd>
 <dt>RHA</dt><dd>Rolled homogeneous armour: the steel used as the yardstick for penetration and protection (mm RHA).</dd>
+<dt>RPG</dt><dd>A shoulder-fired anti-tank rocket launcher carried by an infantry squad. Short range, deadly to a tank from the side.</dd>
 <dt>ROGER, OUT</dt><dd>"Received and understood; end of transmission."</dd>
 <dt>Sabot</dt><dd>See APFSDS.</dd>
 <dt>Section</dt><dd>Two vehicles: a leader and a wingman.</dd>
@@ -89,11 +92,14 @@
 <dt>Shaped charge</dt><dd>An explosive that forms a metal jet to penetrate armour (HEAT, missiles).</dd>
 <dt>SHOT / SPLASH</dt><dd>Artillery calls: the guns have fired / impact in five seconds.</dd>
 <dt>Spot report</dt><dd>A short report of an enemy sighting: who, what, where, direction, distance.</dd>
+<dt>Squad</dt><dd>Six to nine infantrymen, the crew of one IFV; one element on the map.</dd>
+<dt>Supply point (SP)</dt><dd>A place where platoons drive to be resupplied with ammunition and fuel.</dd>
 <dt>Support by fire / attack by fire</dt><dd>Engaging the enemy from a position so that another element can move (support) or to destroy it from there (attack by fire).</dd>
 <dt>Suppression</dt><dd>The effect of fire that makes a crew less effective even when it is not hit.</dd>
 <dt>TC (tank commander)</dt><dd>The crew member in charge of a vehicle.</dd>
 <dt>Thermal imager / thermal sight</dt><dd>A sight that sees heat; works in darkness, dust and most smoke, but not in fog.</dd>
 <dt>Thermal crossover</dt><dd>The time around sunrise and sunset when targets and background have similar temperatures and thermal sights lose contrast.</dd>
+<dt>Trains</dt><dd>The supply and maintenance vehicles behind a unit, where ammunition and fuel come from.</dd>
 <dt>TRP (target reference point)</dt><dd>A recognisable point used to describe targets and trigger actions.</dd>
 <dt>Turret-down</dt><dd>Only the commander's sight looks over the cover; the tank can watch but not fire.</dd>
 <dt>Weapons control status</dt><dd>FREE / TIGHT / HOLD: what crews may fire at.</dd>
@@ -134,6 +140,9 @@
 | <kbd>[</kbd> <kbd>]</kbd> | Battle-position radius |
 | <kbd>F</kbd> <kbd>T</kbd> <kbd>S</kbd> <kbd>W</kbd> <kbd>C</kbd> <kbd>Q</kbd> <kbd>E</kbd> | Formation, technique, speed, weapons, on contact, ammunition, engine smoke (lists: <kbd>1</kbd>–<kbd>9</kbd> or arrows + <kbd>Enter</kbd>) |
 | <kbd>N</kbd> <kbd>Y</kbd> <kbd>J</kbd> | Smoke rounds, call for fire (again: HE/smoke), adjust fire |
+| <kbd>U</kbd> | Dismount / mount the carriers' squads |
+| <kbd>B</kbd> (squads), RMB on a house | Occupy a building |
+| <kbd>R</kbd> | Resupply at the nearest supply point |
 | <kbd>K</kbd> | Timing of the next order: now / on crossing / +5 min |
 | <kbd>G</kbd> | Graphics: phase line, objective, TRP |
 | <kbd>V</kbd> <kbd>L</kbd> | Viewshed, line of sight |
@@ -154,7 +163,7 @@
 | Input | Action |
 |---|---|
 | <kbd>↑</kbd> <kbd>↓</kbd> <kbd>Enter</kbd> <kbd>Esc</kbd> | Select, open, back |
-| <kbd>←</kbd> <kbd>→</kbd> or <kbd>1</kbd>–<kbd>5</kbd> | Database tab |
+| <kbd>←</kbd> <kbd>→</kbd> or <kbd>1</kbd>–<kbd>6</kbd> | Database tab |
 | Wheel, <kbd>PgUp</kbd>/<kbd>PgDn</kbd> | Scroll |
 | Hover a value | Source, confidence and notes |
 
@@ -199,6 +208,8 @@ All vehicles are fictional names for designs that mirror real ones. Numbers are 
 | DELAY IN DEPTH | `mod-delay-in-depth` | 2005, 10:00, haze | uplands | 2 M1A2 platoons, M2A2 reserve | 24 vehicles, recon, 152 mm artillery |
 | DUSK ATTACK | `mod-dusk-attack` | 2005, 17:30 | demo | 2 M1A2 platoons, 1 M2A2 platoon, 155 mm battery | T-90A, T-72B, IFVs, T-90A reserve |
 | FOG MEETING | `mod-fog-meeting` | 2005, 06:30, fog | demo | 1 M1A2 platoon, 1 M2A2 platoon | T-90A, T-72B, IFVs |
+| DISMOUNTS IN THE VILLAGE | `m8b-dismounts` | 1985, 10:00 | demo | 3 WARD M2 with rifle squads | 3 KURGAN A, 3 SKIF M0 with squads |
+| AMBUSH IN THE VILLAGE | `m8b-ambush` | 1987, 10:00 | demo | 4 BULWARK A1 | RPG squads and a missile team in the houses |
 | CLEARING THE VILLAGE | `m8f-ambush` | 1987, 10:00 | demo | 4 BULWARK A1, 3 WARD M2 with rifle squads | Infantry with RPGs and a missile team in the houses |
 | THE MARKET TOWN | `m8h-town` | 1987, 09:00 | town | 4 BULWARK A1, 3 WARD M2 with rifle squads | 9 KURGAN-B, 6 SKIF M1 with squads |
 

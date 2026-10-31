@@ -210,6 +210,7 @@ Run alongside the capability phases: each phase ends with at least one scenario 
 ## M8k — Release and platform
 - K1 first tag and K3 version string: tracked as Z3.
 - [ ] K2 Code signing and notarisation; installer; Intel macOS; Linux AppImage — §13.1 packaging
+- K4 Release checkpoints (agreed 2026-10-31): a patch release `0.1.x` at the end of each M8 sub-phase (never mid-phase), `0.2.0` when the M8 capability phases are done (through M8f2); each release runs the checklist in `docs/DEVELOPMENT.md` Releases (balance batch, screenshots, docs pass, version bump, tag on `main`). `0.1.2` (2026-10-31) is the catch-up release for M8b, M8f1, M8g1, M8h1b and M8c C3; the next is at the end of M8c.
 
 ## ENG — Engine, performance, fidelity (pick up when touched)
 - [x] N1 Thermal crossover — §13.1 M2. Already built in M7c (`weather::thermal_factor`, `detection.ron` `thermal_crossover`, test `thermal_contrast_dips_at_crossover`); ticked 2026-10-21
