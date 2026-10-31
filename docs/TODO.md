@@ -8,6 +8,7 @@ Rules for every item (CLAUDE.md): data in `data/**/*.ron` with source and confid
 
 ## Waiting on the user (decisions; check here first)
 Added 2026-10-21. Remove a line when it is decided, and record the decision on the item it belongs to.
+- (2026-10-31, housekeeping) Delete the merged remote branches on GitHub: `m8c-tailgate-plan`, `m8c-tailgate-trucks`, `release-docs-in-package` (the session's token cannot delete or force-push).
 
 ## Phase map (v1.x = M8, v1.5 = M9, then v2+)
 
@@ -119,6 +120,7 @@ Plan: `docs/plans/M8B-AT-TEAMS.md`. Agreed 2026-10-24, with all 12 recommendatio
   - [ ] B34 Target hand-off: a contact already in the side's picture could be searched for without the D2 penalty by other crews (TC 3-20.31 fire commands, platoon fire distribution); today each crew searches on its own
 
 ## M8c — Logistics
+**Where we stopped (2026-10-31):** slices 1–6 of `docs/plans/M8C-LOGISTICS.md` §5 are done and merged (PR #5: tailgate supply trucks, plan `M8C-TAILGATE-TRUCKS.md`). Remaining, in order: **slice 7 C2 recovery** (start with a short plan for review, like the trucks), slice 8 commander AI resupply threshold (doctrine data; also uses trucks), slice 9 the exit scenario (a long defence where ammunition decides; first shipped scenario with supply points and trucks; add the guide's Logistics/Infantry screenshots then). Then cut **0.1.3** with the K4 checklist (M8c is the sub-phase that ends there).
 - [ ] C1 Vehicle ammunition and fuel resupply; supply point or trucks — §11, §13.1 M7b. Plan: `docs/plans/M8C-LOGISTICS.md`. **In progress 2026-10-21**: slices 1–4 done (data `logistics.ron`, scenario `supply_points`, `Command::Resupply` service-station resupply with stock accounting, re-arm events (C4), tests `m8c.rs`; client 2026-10-24: supply point symbol, RESUPPLY card button (R), resupply stage on the platoon/vehicle cards, supply point placement in the scenario editor); still open in the client: radio `AT SUPPLY POINT`, roster ammo/fuel warnings, choosing a point other than the nearest, re-arm events in the editor; tailgate trucks (slice 6) **done 2026-10-31** (`docs/plans/M8C-TAILGATE-TRUCKS.md`: support class, four trucks, cargo, `Command::Tailgate`, trucks last as targets and outside victory, withdraw under fire, client source choice and cards; tests `m8c.rs`); next: C2 recovery (slice 7)
 - [ ] C2 Recovery of immobilised vehicles — §11, §13.2
 - [x] C3 Battery ammunition resupply, reload and relocation — §13.1 M7d. (Done 2026-10-31: restock from the trains below a threshold of the basic load, survivability moves after a number of missions, data in `fires.ron`; plan M8C §2, tests `m7d.rs`. Battery fields in the scenario editor (`resupplies`) not done: plain RON)
