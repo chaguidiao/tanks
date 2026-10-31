@@ -49,11 +49,15 @@ tools/dev/devbox.sh run cargo run --release -p headless -- render --map demo --l
 tools/dev/devbox.sh run cargo run --release -p headless -- run --scenario m1-move --seconds 600 --move 6000,5200
 ```
 
+`tanks-headless` also has `info`, `probe`, `replay` (check a saved replay), `duel` and `firefight`
+(validation harnesses, CSV), `detect` (time to detect, CSV) and `bench` (LOS, viewshed and sim speed);
+run it without arguments for the full usage.
+
 Client: starts at the title screen → main menu (play scenario, scenario editor, terrain editor, database,
 options). Every control is a button that shows its hotkey; hover for a tooltip, F7 for the key list of
 the current screen, Esc for the screen menu. Game: LMB select (a single vehicle shows its status card; I opens its data), RMB move, Shift+RMB add route checkpoints
 (release Shift to send), hold RMB (or RMB on a unit, contact, graphic or plan CP) for the context menu, P plan
-(LMB adds CPs, C CP menu, Enter send), Ctrl+1–9 code words, H halt, Space pause, 1–4 speed. Terrain editor: 1–4 brushes, 5 river, 6 road,
+(LMB adds CPs, C CP menu, Enter send), Ctrl+1–9 code words, H halt, U dismount/mount, R resupply, Space pause, 1–4 speed. Terrain editor: 1–4 brushes, 5 river, 6 road,
 7 forest, 8 building, Ctrl+S save. Scenario editor: F9 play test (and back). Options are stored in
 `~/.config/tanks/settings.cfg` (override with `TANKS_CONFIG`).
 
@@ -82,10 +86,17 @@ the container's PID 1, where it can miss Xvfb's ready signal and hang forever.
 - **Software renderer**: `LIBGL_ALWAYS_SOFTWARE=1` (Mesa llvmpipe), or raylib's own software backend.
 - **Fake an older GL version on Mesa**: `MESA_GL_VERSION_OVERRIDE=2.1 MESA_GLSL_VERSION_OVERRIDE=120`. This is a smoke test, not a guarantee; real old hardware is still the final check.
 
-## Releases (M7e)
+## Releases
 - **Local package** (current OS): `tools/dev/devbox.sh run tools/package.sh linux-x86_64 dist` builds the GL 3.3 game (`tanks`), the GL 2.1 game (`tanks-gl21`) and `tanks-headless`, copies `data/` with the maps pre-generated (`demo` = `rolling-farmland` seed 42, `uplands` = `wooded-uplands` seed 7), checks that every scenario in `data/scenarios` loads from the package, and writes `dist/tanks-<version>-<platform>.tar.gz` (`.zip` on Windows) with a `.sha256`. The package finds `data/` next to the executable, so it can be started from any directory; `TANKS_DATA` overrides.
-- **All three OSes**: `.github/workflows/release.yml` runs the script on Linux (Ubuntu 22.04, for glibc compatibility), Windows and macOS (arm64) for a `v*` tag or a manual run, and a tag also publishes a GitHub release with the archives. Not run from this container: the first tag is the first real test of the Windows and macOS legs; Intel macOS is not built.
-- **Version**: the Cargo workspace version is the release version; tag `v<version>` (the workflow fails on a mismatch). `package.sh` passes `git describe` as `TANKS_BUILD`, so the title footer shows `0.1.0` for the tagged build, `0.1.0-3-G1A2B3C4` for later commits and `0.1.0 DEV` for a plain `cargo build`.
+- **All three OSes**: `.github/workflows/release.yml` runs the script on Linux (Ubuntu 22.04, for glibc compatibility), Windows and macOS (arm64) for a `v*` tag or a manual run, and a tag also publishes a GitHub release with the archives. All three legs have run since `v0.1.1`; Intel macOS is not built.
+- **Version**: the Cargo workspace version is the release version; tag `v<version>` (the workflow fails on a mismatch). `package.sh` passes `git describe` as `TANKS_BUILD`, so the title footer shows `0.1.2` for the tagged build, `0.1.2-3-G1A2B3C4` for later commits and `0.1.2 DEV` for a plain `cargo build`.
+- **When to release** (agreed 2026-10-31, TODO K4): a patch release (`0.1.x`) at the end of each M8 sub-phase in the TODO order (M8c, M8d, M8e, …), never in the middle of one; `0.2.0` when the M8 capability phases are done (through M8f2). Work in progress stays on `main` between releases.
+- **Release checklist**, on a `release-<version>` branch:
+  1. Balance batch: every scenario in `data/scenarios`, seeds 1–4, `tanks-headless run --scenario <id> --seed <n> --summary`; compare with the last release and note the result in DESIGN.md §13.1.
+  2. Screenshot check of the screens changed since the last release (`--screen`, `--keys`, `--scenario …`), and of the title footer.
+  3. Docs pass: README status, this file, the player guide (`docs/guide/chapters`: new features, keyboard reference, scenario table, glossary; retake the screenshots with `docs/guide/build.sh --shots` if screens changed), the status line in `CLAUDE.md`, DESIGN.md §13.1.
+  4. Bump `version` in the workspace `Cargo.toml` (and `Cargo.lock`), `just check`.
+  5. Merge to `main`, then tag on `main`: `git tag v<version> && git push origin v<version>`. The workflow builds and publishes; download one package and start it.
 - Packages are unsigned (macOS Gatekeeper and Windows SmartScreen will warn). Add a map or scenario to the script's `gen` lines when a scenario uses a new map.
 - raylib quirk: `--screenshot` with an absolute path prepends the working directory; use a relative path.
 

@@ -20,15 +20,15 @@ If you came here expecting a finished, validated, professionally engineered warg
 
 ## Status
 
-Early development. Core simulation, terrain generation and editing, doctrine-driven AI, smoke, weather, fire support and six example scenarios are in. The next milestone is planned but not started. Open work lives in [`docs/TODO.md`](docs/TODO.md) and the design and decision log in [`docs/DESIGN.md`](docs/DESIGN.md). Those documents are more honest about what works than this README is.
+Early development, version 0.1.2. In so far: the core simulation (detection, gunnery, armour and damage), generated and editable terrain including a market town, doctrine-driven platoon and commander AI, checkpoint plans and code words, smoke, weather and night, called artillery, infantry squads with their carriers, anti-tank teams and ambushes, and the first pieces of logistics (supply points, LOGPACs, battery resupply). Sixteen scenarios from 1985 to 2005, a scenario and terrain editor, an after-action review and a database of every number with its source. Open work lives in [`docs/TODO.md`](docs/TODO.md) and the design and decision log in [`docs/DESIGN.md`](docs/DESIGN.md). Those documents are more honest about what works than this README is.
 
-Known things that are definitely not finished: the Windows and macOS release packages have not been run on a real tag yet, and the AI sometimes does things an actual platoon commander would find hilarious.
+Known things that are definitely not finished: logistics is half built (no supply trucks or vehicle recovery yet), nothing shoots back at artillery, engineers and obstacles do not exist, and the AI sometimes does things an actual platoon commander would find hilarious.
 
 ## Building
 
 The project is a Rust workspace (`crates/sim`, `terrain`, `terragen`, `ai`, `sim-data`, `client`, `headless`). All builds and tests run inside a podman development container, so your host stays clean and the author's laptop stays unexploded. See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
 
-Prebuilt packages for Linux, Windows and macOS are produced by the release workflow (see the Releases section of `docs/DEVELOPMENT.md`). The Windows and macOS builds are untested until the first tag, so if they fall over, that is on the schedule, not on you.
+Prebuilt packages for Linux, Windows and macOS (Apple silicon) are on the [Releases](https://github.com/chaguidiao/tanks/releases) page, built by the release workflow (see the Releases section of `docs/DEVELOPMENT.md`). They are unsigned, so Windows SmartScreen and macOS Gatekeeper will complain once. The player's guide is a PDF built from `docs/guide/`.
 
 ## Documentation
 
