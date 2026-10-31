@@ -11,14 +11,19 @@ Start tanks from this folder or from anywhere: it finds the data/ folder next to
 scenario for help. The maps are included in data/maps; they are generated from recipes and
 seeds and are rebuilt automatically if missing.
 
+User guide
+  USER-GUIDE.pdf if it is in this folder, otherwise download tanks-<version>-user-guide.pdf from
+  the release page: https://github.com/chaguidiao/tanks/releases
+
 Scenarios (data/scenarios)
   cw-village-defence, cw-night-delay, cw-hasty-attack     Cold War (1986-87), M1 / T-72 era
   mod-fog-meeting, mod-dusk-attack, mod-delay-in-depth    Modern (2005), M1A2 / T-90 era
-  m1-move ... m7d-fire-support                            short tutorials of single systems
+  m8f-ambush, m8h-town                                    infantry with the tanks: a village, a town
+  m1-move ... m7d-fire-support, m8b-*                     short tutorials of single systems
 
 Linux needs OpenGL drivers and the usual X11 or Wayland libraries. macOS: if Gatekeeper blocks
 the unsigned program, allow it in System Settings, Privacy and Security.
 
 All vehicle and ammunition data are public-source estimates with sources and confidence in the
-data files; vehicle names are fictional. Licence: MIT (LICENSE); third-party assets in
-THIRD_PARTY.md.
+data files; vehicle names are fictional. Not for any real-world use. Licence: MIT (LICENSE);
+disclaimers and attribution in NOTICE; third-party assets in THIRD_PARTY.md.

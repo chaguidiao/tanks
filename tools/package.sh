@@ -30,7 +30,13 @@ mkdir -p "${out}/${pkg}"
 cp "target/release/client${exe}" "${out}/${pkg}/tanks${exe}"
 cp "target/gl21/release/client${exe}" "${out}/${pkg}/tanks-gl21${exe}"
 cp "target/release/tanks-headless${exe}" "${out}/${pkg}/tanks-headless${exe}"
-cp LICENSE THIRD_PARTY.md "${out}/${pkg}/"
+cp LICENSE NOTICE THIRD_PARTY.md "${out}/${pkg}/"
+# The user guide is built outside this script (docs/guide/build.sh needs the game for its
+# screenshots); a local package includes it when it has been built, a CI release attaches it
+# to the GitHub release instead (docs/DEVELOPMENT.md Releases).
+if [ -f out/guide/tanks-user-guide.pdf ]; then
+    cp out/guide/tanks-user-guide.pdf "${out}/${pkg}/USER-GUIDE.pdf"
+fi
 cp tools/README-release.txt "${out}/${pkg}/README.txt"
 cp -r data "${out}/${pkg}/data"
 rm -rf "${out}/${pkg}/data/maps"
