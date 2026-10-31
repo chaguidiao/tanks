@@ -18,7 +18,15 @@
             range_bias_frac: (value: 0.004, source: "estimate: systematic error of unregistered fire (no met or registration) is comparable to the random error, FM 6-40 / ATP 3-09.42 on adjusting fire", confidence: estimate),
             deflection_bias_mrad: (value: 1.5, source: "estimate", confidence: estimate),
             adjust_delay_s: (value: 20, source: "estimate: the FDC applies a correction faster than it processes a new mission", confidence: estimate),
-            he_rounds: 72, smoke_rounds: 16, smoke_kind: "arty_wp"),
+            he_rounds: 72, smoke_rounds: 16, smoke_kind: "arty_wp",
+            resupply: (
+                threshold_frac: (value: 0.25, source: "estimate: ATP 3-09.50 ch. 4 has the ammunition section resupply before the howitzers run dry; a quarter of the load is taken as the call", confidence: estimate),
+                resupply_s: (value: 1500, source: "estimate: the ammunition carriers (M992 FAASV) drive to the brigade ammunition transfer point and back, a few kilometres each way, then transfer rounds", confidence: estimate, notes: "25 min round trip and transfer."),
+                loads: 2),
+            displace: (
+                after_missions: 3,
+                displace_s: (value: 300, source: "estimate: ATP 3-09.50 ch. 2 survivability moves; the M109A6 emplaces and lays itself in under a minute, the rest is march order and a move of a few hundred metres", confidence: estimate),
+            )),
         (id: "sph152_btry", name: "152 MM SP BATTERY", mirrors: "2S3 Akatsiya battery (6 guns)",
             in_service: (from: 1971),
             tubes: 6,
@@ -33,7 +41,15 @@
             range_bias_frac: (value: 0.006, source: "estimate: systematic error of unregistered fire (no met or registration) is comparable to the random error, FM 6-40 / ATP 3-09.42 on adjusting fire", confidence: estimate),
             deflection_bias_mrad: (value: 2.0, source: "estimate", confidence: estimate),
             adjust_delay_s: (value: 25, source: "estimate: the FDC applies a correction faster than it processes a new mission", confidence: estimate),
-            he_rounds: 96, smoke_rounds: 12, smoke_kind: "arty_wp"),
+            he_rounds: 96, smoke_rounds: 12, smoke_kind: "arty_wp",
+            resupply: (
+                threshold_frac: (value: 0.25, source: "estimate: as the 155 mm battery", confidence: estimate),
+                resupply_s: (value: 1800, source: "estimate: rounds come forward on cargo trucks and are hand-loaded into the guns' stowage", confidence: estimate, notes: "No dedicated ammunition carrier per gun, so slower than the 155 mm battery."),
+                loads: 2),
+            displace: (
+                after_missions: 4,
+                displace_s: (value: 600, source: "estimate: the 2S3 is laid conventionally (aiming circle and collimator), so emplacing takes several minutes", confidence: estimate),
+            )),
     ],
     effects: (
         direct_radius_m: (value: 6.0, source: "estimate: a 150 mm shell has to land within a few metres to hit a vehicle's roof or tracks", confidence: estimate),

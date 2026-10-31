@@ -398,6 +398,8 @@ pub enum DenyReason {
     Busy,
     /// Nothing to adjust: the battery has not fired a mission.
     NoMission,
+    /// The battery is moving to a new position (C3).
+    Displacing,
 }
 
 /// What took a squad's men out (AAR and the infantry validation harness).
@@ -425,11 +427,20 @@ pub enum FireReport {
     Splash,
     RoundsComplete,
     Ceased,
-    /// A LOGPAC delivered rounds (M8c re-arm event).
+    /// Rounds arrived: a LOGPAC (M8c re-arm event) or the battery's own resupply from the trains (C3).
     Resupplied {
         he: u32,
         smoke: u32,
     },
+    /// Ammunition low: the ammunition section has gone to the trains (C3).
+    Restocking {
+        ready_in_s: f64,
+    },
+    /// Survivability move after firing (C3): no missions until `InPosition`.
+    Displacing {
+        ready_in_s: f64,
+    },
+    InPosition,
 }
 
 /// Structured platoon reports; the client renders them as radio text.

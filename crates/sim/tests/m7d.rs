@@ -26,6 +26,7 @@ fn with_battery(mut sc: ScenarioDef, he: Option<u32>, smoke: Option<u32>) -> Sce
         position: BATTERY,
         he_rounds: he,
         smoke_rounds: smoke,
+        resupplies: None,
     }];
     sc
 }
@@ -452,4 +453,84 @@ fn the_commander_ai_screens_with_smoke_on_entering_battle() {
     let ev = run_events(&mut sim, 90.0);
     let smoke = ev.iter().any(|(_, e)| matches!(e, Event::FireSupport { report: FireReport::Accepted { .. }, .. }));
     assert!(smoke, "no smoke mission called on entering battle (battery has no HE)");
+}
+
+/// M8c C3: a battery low on HE sends its ammunition section to the trains and is back to its basic
+/// load after the data's resupply time; it keeps firing what is left meanwhile.
+#[test]
+fn a_battery_low_on_rounds_restocks_from_the_trains() {
+    let (ds, m) = world();
+    let target = [500.0, 4500.0];
+    let rs = ds.fires.battery("sph155_btry").unwrap().resupply.clone().unwrap();
+    let sc = with_battery(scenario(NOON, vec![unit("B1", "bulwark_a1", target, 0.0, None)], vec![]), Some(12), Some(2));
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    assert_eq!(sim.perceived(BLUE).fire_support[0].resupplies_left, rs.loads);
+    // Three volleys of four empty the battery, below a quarter of its basic load of 12.
+    call(&mut sim, target, FireKind::He, 3);
+    let rep = fire_reports(&run_events(&mut sim, 200.0));
+    let (t0, ready) = rep
+        .iter()
+        .find_map(|(t, r)| match r {
+            FireReport::Restocking { ready_in_s } => Some((*t, *ready_in_s)),
+            _ => None,
+        })
+        .expect("no resupply started");
+    assert_eq!(ready, rs.resupply_s.get());
+    let done = rep.iter().find(|(_, r)| *r == FireReport::RoundsComplete).unwrap().0;
+    assert!(t0 >= done, "the section leaves after the last rounds land");
+    let b = &sim.perceived(BLUE).fire_support[0];
+    assert_eq!((b.he_rounds, b.smoke_rounds, b.resupplies_left), (0, 2, rs.loads - 1));
+    assert!(b.restock_in_s.is_some());
+    // Smoke can still be fired while the HE is on its way.
+    call(&mut sim, target, FireKind::Smoke, 1);
+    let rep = fire_reports(&run_events(&mut sim, rs.resupply_s.get()));
+    assert!(rep.iter().any(|(_, r)| matches!(r, FireReport::Accepted { .. })), "{rep:?}");
+    assert!(
+        rep.iter().any(|(_, r)| *r == FireReport::Resupplied { he: 12, smoke: 2 }),
+        "back to the basic load: {rep:?}"
+    );
+    let b = &sim.perceived(BLUE).fire_support[0];
+    assert_eq!((b.he_rounds, b.smoke_rounds, b.restock_in_s), (12, 2, None));
+}
+
+#[test]
+fn a_battery_with_no_loads_in_the_trains_runs_dry() {
+    let (ds, m) = world();
+    let target = [500.0, 4500.0];
+    let mut sc =
+        with_battery(scenario(NOON, vec![unit("B1", "bulwark_a1", target, 0.0, None)], vec![]), Some(4), Some(0));
+    sc.sides[0].fire_support[0].resupplies = Some(0);
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    call(&mut sim, target, FireKind::He, 1);
+    let rep = fire_reports(&run_events(&mut sim, 2000.0));
+    assert!(!rep.iter().any(|(_, r)| matches!(r, FireReport::Restocking { .. } | FireReport::Resupplied { .. })));
+    assert_eq!(sim.perceived(BLUE).fire_support[0].he_rounds, 0);
+}
+
+/// M8c C3: after the data's number of missions the battery makes a survivability move and refuses
+/// calls until it is laid again.
+#[test]
+fn a_battery_displaces_after_its_missions() {
+    let (ds, m) = world();
+    let target = [500.0, 4500.0];
+    let dp = ds.fires.battery("sph155_btry").unwrap().displace.clone().unwrap();
+    let sc = with_battery(scenario(NOON, vec![unit("B1", "bulwark_a1", target, 0.0, None)], vec![]), None, None);
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    let mut rep = Vec::new();
+    for _ in 0..dp.after_missions {
+        call(&mut sim, target, FireKind::He, 1);
+        rep.extend(fire_reports(&run_events(&mut sim, 110.0)));
+    }
+    assert_eq!(rep.iter().filter(|(_, r)| *r == FireReport::RoundsComplete).count(), dp.after_missions as usize);
+    let moving = rep.iter().filter(|(_, r)| matches!(r, FireReport::Displacing { .. })).collect::<Vec<_>>();
+    assert_eq!(moving.len(), 1, "{rep:?}");
+    assert!(matches!(sim.perceived(BLUE).fire_support[0].status, sim::view::BatteryStatus::Displacing { .. }));
+    call(&mut sim, target, FireKind::He, 1);
+    let rep = fire_reports(&run_events(&mut sim, dp.displace_s.get()));
+    assert_eq!(rep.first().map(|r| r.1), Some(FireReport::Denied(DenyReason::Displacing)));
+    assert!(rep.iter().any(|(_, r)| *r == FireReport::InPosition), "{rep:?}");
+    assert!(sim.perceived(BLUE).fire_support[0].status == sim::view::BatteryStatus::Ready);
+    call(&mut sim, target, FireKind::He, 1);
+    let rep = fire_reports(&run_events(&mut sim, 5.0));
+    assert!(matches!(rep[0].1, FireReport::Accepted { .. }), "{rep:?}");
 }

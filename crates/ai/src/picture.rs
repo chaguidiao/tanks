@@ -520,6 +520,10 @@ pub enum BatteryStatus {
         volleys_left: u32,
         impact_in_s: Option<f64>,
     },
+    /// Moving to a new position after firing; ready again in `ready_in_s`.
+    Displacing {
+        ready_in_s: f64,
+    },
 }
 
 /// A battery available to the side (called fire support).
@@ -535,6 +539,10 @@ pub struct BatteryView {
     pub min_range_m: f64,
     pub max_range_m: f64,
     pub status: BatteryStatus,
+    /// Seconds until the ammunition section is back from the trains, if it is away (C3).
+    pub restock_in_s: Option<f64>,
+    /// Basic loads still held in the trains for this battery.
+    pub resupplies_left: u32,
 }
 
 /// A supply point of the side (M8c): where platoons are sent to resupply, with what is left.

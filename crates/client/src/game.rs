@@ -3086,8 +3086,17 @@ impl Game {
                     let eta = impact_in_s.map_or(String::new(), |s| format!(", IMPACT {:.0} S", s));
                     format!("MISSION {} {volleys_left} TO FIRE{eta}", if smoke { "SMOKE" } else { "HE" })
                 }
+                BatteryStatus::Displacing { ready_in_s } => {
+                    format!("DISPLACING, {:.0} MIN", (ready_in_s / 60.0).ceil())
+                }
             };
             out.push((format!("HE {}  SMK {}  {status}", b.he_rounds, b.smoke_rounds), style::TEXT_DIM));
+            if let Some(s) = b.restock_in_s {
+                out.push((
+                    format!("RESUPPLY IN {:.0} MIN, {} LEFT", (s / 60.0).ceil(), b.resupplies_left),
+                    style::TEXT_DIM,
+                ));
+            }
         }
         out
     }
@@ -3603,6 +3612,7 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                         DenyReason::NoAmmo => "NO AMMUNITION",
                         DenyReason::Busy => "MISSION IN PROGRESS",
                         DenyReason::NoMission => "NO MISSION TO ADJUST",
+                        DenyReason::Displacing => "DISPLACING",
                     }
                 ),
                 FireReport::Shot => format!("{cs}: SHOT, OVER."),
@@ -3610,6 +3620,13 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                 FireReport::RoundsComplete => format!("{cs}: ROUNDS COMPLETE, END OF MISSION."),
                 FireReport::Ceased => format!("{cs}: CEASE FIRE, END OF MISSION."),
                 FireReport::Resupplied { he, smoke } => format!("{cs}: RESUPPLIED. {he} HE, {smoke} SMOKE."),
+                FireReport::Restocking { ready_in_s } => {
+                    format!("{cs}: AMMUNITION LOW. RESUPPLY IN {:.0} MINUTES.", (ready_in_s / 60.0).ceil())
+                }
+                FireReport::Displacing { ready_in_s } => {
+                    format!("{cs}: DISPLACING. READY IN {:.0} MINUTES.", (ready_in_s / 60.0).ceil())
+                }
+                FireReport::InPosition => format!("{cs}: IN POSITION, READY TO FIRE."),
             }
         }
         Event::ScenarioEnd { winner, reason } => {

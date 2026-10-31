@@ -58,6 +58,16 @@ pub struct Battery {
     /// Aim point and kind of the last mission, the base for an adjustment.
     pub last_aim: Option<(Vec2, FireKind)>,
     flights: Vec<Flight>,
+    /// Basic load: the stock at the start, what a resupply from the trains brings it back to.
+    basic: (u32, u32),
+    /// Basic loads still held in the trains.
+    pub loads_left: u32,
+    /// Tick at which the ammunition section is back with a basic load.
+    restock_tick: Option<u64>,
+    /// Missions fired from the present position.
+    missions_here: u32,
+    /// Tick at which a survivability move ends and the battery can fire again.
+    displaced_until: Option<u64>,
 }
 
 impl Battery {
@@ -74,7 +84,18 @@ impl Battery {
             bias: None,
             last_aim: None,
             flights: Vec::new(),
+            basic: (d.he_rounds, d.smoke_rounds),
+            loads_left: d.resupply.as_ref().map_or(0, |r| r.loads),
+            restock_tick: None,
+            missions_here: 0,
+            displaced_until: None,
         }
+    }
+
+    /// Set the starting stock (scenario overrides); it becomes the basic load.
+    pub fn set_stock(&mut self, he: u32, smoke: u32) {
+        (self.he, self.smoke) = (he, smoke);
+        self.basic = (he, smoke);
     }
 
     pub fn busy(&self) -> bool {
@@ -97,6 +118,10 @@ impl Battery {
             h.u32(m.volleys_left);
             h.u64(m.next_volley_tick);
         }
+        h.u32(self.loads_left);
+        h.u64(self.restock_tick.unwrap_or(0));
+        h.u32(self.missions_here);
+        h.u64(self.displaced_until.unwrap_or(0));
     }
 
     pub fn view(&self, id: u32, d: &BatteryDef, tick: u64) -> BatteryView {
@@ -119,7 +144,10 @@ impl Battery {
                     volleys_left: 0,
                     impact_in_s: Some(f.impact_tick.saturating_sub(tick) as f64 * DT),
                 },
-                None => BatteryStatus::Ready,
+                None => match self.displaced_until {
+                    Some(t) => BatteryStatus::Displacing { ready_in_s: t.saturating_sub(tick) as f64 * DT },
+                    None => BatteryStatus::Ready,
+                },
             },
         };
         BatteryView {
@@ -133,6 +161,8 @@ impl Battery {
             min_range_m: d.min_range_m.get(),
             max_range_m: d.max_range_m.get(),
             status,
+            restock_in_s: self.restock_tick.map(|t| t.saturating_sub(tick) as f64 * DT),
+            resupplies_left: self.loads_left,
         }
     }
 
@@ -174,6 +204,9 @@ impl Battery {
         let r = dist(self.pos, at);
         if self.mission.is_some() {
             return Err(DenyReason::Busy);
+        }
+        if self.displaced_until.is_some() {
+            return Err(DenyReason::Displacing);
         }
         if r > d.max_range_m.get() {
             return Err(DenyReason::OutOfRange);
@@ -227,6 +260,7 @@ pub fn step(batteries: &mut [Battery], ctx: &mut Ctx) -> Vec<(SideId, Vec2)> {
     for (bi, b) in batteries.iter_mut().enumerate() {
         let d = &ctx.model.batteries[b.def];
         let id = bi as u32;
+        sustain(b, d, id, ctx);
         // Fire a volley.
         if let Some(m) = b.mission.as_mut()
             && ctx.tick >= m.next_volley_tick
@@ -251,6 +285,7 @@ pub fn step(batteries: &mut [Battery], ctx: &mut Ctx) -> Vec<(SideId, Vec2)> {
             let last_volley = m.volleys_left == 0 || *stock == 0;
             if !m.shot_called {
                 m.shot_called = true;
+                b.missions_here += 1;
                 ctx.events.push(Event::FireSupport { side: b.side, battery: id, at: m.at, report: FireReport::Shot });
             }
             let (bias_r, bias_d) = *b.bias.get_or_insert_with(|| {
@@ -322,6 +357,45 @@ pub fn step(batteries: &mut [Battery], ctx: &mut Ctx) -> Vec<(SideId, Vec2)> {
         }
     }
     destroyed
+}
+
+/// Resupply from the trains and survivability moves (M8c C3, ATP 3-09.50). Both start only
+/// between missions, once every round of the last one has landed.
+fn sustain(b: &mut Battery, d: &BatteryDef, id: u32, ctx: &mut Ctx) {
+    let tick = ctx.tick;
+    let report = |b: &Battery, report| Event::FireSupport { side: b.side, battery: id, at: b.pos, report };
+    if b.displaced_until.is_some_and(|t| tick >= t) {
+        b.displaced_until = None;
+        ctx.events.push(report(b, FireReport::InPosition));
+    }
+    if b.restock_tick.is_some_and(|t| tick >= t) {
+        b.restock_tick = None;
+        let (he, smoke) = (b.basic.0.saturating_sub(b.he), b.basic.1.saturating_sub(b.smoke));
+        b.he += he;
+        b.smoke += smoke;
+        ctx.events.push(report(b, FireReport::Resupplied { he, smoke }));
+    }
+    if b.busy() {
+        return;
+    }
+    if let Some(r) = &d.resupply
+        && b.restock_tick.is_none()
+        && b.loads_left > 0
+        && (b.he as f64) < r.threshold_frac.get() * b.basic.0 as f64
+    {
+        b.loads_left -= 1;
+        b.restock_tick = Some(tick + (r.resupply_s.get() / DT).ceil() as u64);
+        ctx.events.push(report(b, FireReport::Restocking { ready_in_s: r.resupply_s.get() }));
+    }
+    if let Some(m) = &d.displace
+        && b.displaced_until.is_none()
+        && m.after_missions > 0
+        && b.missions_here >= m.after_missions
+    {
+        b.missions_here = 0;
+        b.displaced_until = Some(tick + (m.displace_s.get() / DT).ceil() as u64);
+        ctx.events.push(report(b, FireReport::Displacing { ready_in_s: m.displace_s.get() }));
+    }
 }
 
 /// An HE burst: suppression and damage to every vehicle nearby, whatever its side, and

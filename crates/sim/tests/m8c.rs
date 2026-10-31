@@ -141,6 +141,7 @@ fn logpac_scenario(events: Vec<LogisticsEventDef>) -> ScenarioDef {
         position: [200.0, 200.0],
         he_rounds: Some(10),
         smoke_rounds: Some(0),
+        resupplies: None,
     }];
     sc.logistics = events;
     sc

@@ -982,7 +982,24 @@ fn combat_sheet(ds: &DataSet, k: usize) -> Option<Sheet> {
                         format!("{:.0} S", b.tof_base_s.value + b.tof_per_km_s.value * 10.0),
                         "tof_base + tof_per_km × range / 1000",
                     ),
-                ],
+                ]
+                .into_iter()
+                .chain(b.resupply.iter().flat_map(|r| {
+                    [
+                        section("RESUPPLY"),
+                        fact("BASIC LOADS IN THE TRAINS", r.loads.to_string()),
+                        stat("STARTS BELOW", &r.threshold_frac, |x| format!("{:.0} % OF THE HE LOAD", x * 100.0)),
+                        stat("TIME TO RESTOCK", &r.resupply_s, secs),
+                    ]
+                }))
+                .chain(b.displace.iter().flat_map(|m| {
+                    [
+                        section("SURVIVABILITY MOVES"),
+                        fact("DISPLACES AFTER", format!("{} MISSIONS", m.after_missions)),
+                        stat("OUT OF ACTION", &m.displace_s, secs),
+                    ]
+                }))
+                .collect(),
             }
         }
         _ => return None,
