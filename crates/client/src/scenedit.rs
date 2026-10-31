@@ -330,6 +330,7 @@ impl ScenarioEditor {
             platoon: Some(platoon.clone()),
             squad: None,
             mounted_in: None,
+            cargo: None,
         });
         self.platoon[side] = Some(platoon);
         self.sel = Some(Sel::Unit(side, self.def.sides[side].units.len() - 1));
@@ -387,6 +388,7 @@ impl ScenarioEditor {
                 platoon: None,
                 squad: Some(def.id.clone()),
                 mounted_in: Some(c.callsign.clone()),
+                cargo: None,
             }
         } else {
             let platoon = match self.squad_platoon[side].clone() {
@@ -406,6 +408,7 @@ impl ScenarioEditor {
                 platoon: Some(platoon),
                 squad: Some(def.id.clone()),
                 mounted_in: None,
+                cargo: None,
             }
         };
         self.status = match &unit.mounted_in {

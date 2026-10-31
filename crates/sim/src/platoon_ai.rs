@@ -198,6 +198,15 @@ fn fresh_contacts(pic: &PerceivedWorld) -> Vec<Vec2> {
     pic.live_contacts().filter(|c| pic.time_s - c.last_report_s < CONTACT_FRESH_S).map(|c| c.pos).collect()
 }
 
+/// Fresh contacts to hand out as targets: recognised supply trucks only when nothing else is in
+/// view, as they do not shoot back (plan M8C-TAILGATE-TRUCKS §5).
+fn fire_targets(pic: &PerceivedWorld) -> Vec<Vec2> {
+    let fresh: Vec<_> = pic.live_contacts().filter(|c| pic.time_s - c.last_report_s < CONTACT_FRESH_S).collect();
+    let truck = |c: &&ai::picture::Contact| c.kind == Some(ai::picture::ContactKind::Supply);
+    let threats: Vec<Vec2> = fresh.iter().filter(|c| !truck(c)).map(|c| c.pos).collect();
+    if threats.is_empty() { fresh.iter().map(|c| c.pos).collect() } else { threats }
+}
+
 pub(crate) fn centroid(world: &World, members: &[usize]) -> Vec2 {
     let n = members.len().max(1) as f64;
     [
@@ -225,7 +234,7 @@ fn fire_distribution(p: &Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
         .collect();
     let c = centroid(ctx.world, &shooters);
     let range = d.engagement_range_m.get();
-    let targets: Vec<Vec2> = fresh_contacts(pic).into_iter().filter(|t| dist(*t, c) < range).collect();
+    let targets: Vec<Vec2> = fire_targets(pic).into_iter().filter(|t| dist(*t, c) < range).collect();
     if shooters.is_empty() {
         return;
     }
@@ -573,7 +582,7 @@ fn resupply_step(p: &mut Platoon, ctx: &mut Ctx) {
         if active && at_point && slow {
             ctx.world.halt(k);
             let t = Tables { vehicles: ctx.vehicles, loadouts: ctx.loadouts, ammo: ctx.ammo, model: ctx.logistics };
-            st.done = transfer(ctx.world, k, &mut ctx.supply[point], st, &t, dt);
+            st.done = transfer(ctx.world, k, &mut ctx.supply[point].stock, st, &t, dt);
             st.short = st.done && crate::logistics::needs_anything(ctx.world, k, &t);
             st.stage = if st.done { ServiceStage::Done } else { ServiceStage::Served };
             continue;

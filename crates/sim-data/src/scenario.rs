@@ -268,4 +268,20 @@ pub struct UnitDef {
     /// Platoon callsign; units sharing it form a platoon in listed order (vehicle 1 leads).
     #[serde(default)]
     pub platoon: Option<String>,
+    /// A supply truck's cargo, instead of its type's default (M8c tailgate resupply).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cargo: Option<CargoAssign>,
+}
+
+/// Cargo listed for one supply truck in a scenario: replaces the default fill (rounds its side
+/// carries). Not capped by the type's capacity, like a supply point's stock.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CargoAssign {
+    #[serde(default)]
+    pub fuel_l: f64,
+    /// Rounds by ammo id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rounds: Vec<(String, u32)>,
+    #[serde(default)]
+    pub smoke_salvos: u32,
 }

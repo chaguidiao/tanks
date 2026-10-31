@@ -34,6 +34,7 @@ fn unit(cs: &str, vehicle: &str, at: [f64; 2], heading_deg: f64, platoon: &str) 
         platoon: Some(platoon.into()),
         squad: None,
         mounted_in: None,
+        cargo: None,
     }
 }
 
@@ -46,6 +47,7 @@ fn squad(cs: &str, at: [f64; 2], platoon: &str) -> UnitDef {
         platoon: Some(platoon.into()),
         squad: Some("rifle_squad_b".into()),
         mounted_in: None,
+        cargo: None,
     }
 }
 

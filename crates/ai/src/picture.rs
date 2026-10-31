@@ -180,6 +180,8 @@ pub enum ContactLevel {
 pub enum ContactKind {
     Vehicle,
     Infantry,
+    /// An unarmed supply vehicle (truck), recognised as such (M8c tailgate resupply).
+    Supply,
 }
 
 #[derive(Debug, Clone, PartialEq)]

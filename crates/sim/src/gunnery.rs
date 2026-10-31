@@ -600,10 +600,13 @@ fn choose_target(
             .min_by(|a, b| a.range_m.total_cmp(&b.range_m).then(a.target.cmp(&b.target)))
             .map(|tr| tr.target)
     };
+    // Supply trucks come last: they do not shoot back (plan M8C-TAILGATE-TRUCKS §5).
+    let truck = |tr: &crate::world::LocalTrack| world.cargo[tr.target].is_some();
     nearest(&anti_tank)
         .or_else(|| nearest(&|tr| squad(tr) && tr.range_m <= close_infantry))
-        .or_else(|| nearest(&|tr| !squad(tr)))
+        .or_else(|| nearest(&|tr| !squad(tr) && !truck(tr)))
         .or_else(|| nearest(&squad))
+        .or_else(|| nearest(&truck))
 }
 
 /// Main-gun round for infantry: the commander's choice if it bursts, else the first stocked round

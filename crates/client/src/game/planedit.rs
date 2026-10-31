@@ -1574,6 +1574,7 @@ mod tests {
             platoon: Some(platoon.into()),
             squad: None,
             mounted_in: None,
+            cargo: None,
         }
     }
 

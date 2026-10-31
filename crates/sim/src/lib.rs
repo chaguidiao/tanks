@@ -273,6 +273,8 @@ impl Sim {
         let mut platoons: Vec<platoon::Platoon> = Vec::new();
         let mut squads: Vec<SquadDef> = Vec::new();
         let mut sides = Vec::new();
+        // Supply trucks and their scenario cargo, filled once every unit is placed.
+        let mut trucks: Vec<(usize, Option<sim_data::CargoAssign>)> = Vec::new();
         let g = Ground::new(&map, &data.terrain);
         for (si, side) in scenario.sides.iter().enumerate() {
             let year = side.tech_year.unwrap_or(scenario.date.0);
@@ -334,6 +336,11 @@ impl Sim {
                     );
                     world.len() - 1
                 };
+                if world.cargo[k].is_some() {
+                    trucks.push((k, u.cargo.clone()));
+                } else if u.cargo.is_some() {
+                    return Err(format!("{}: only a supply truck carries cargo", u.callsign));
+                }
                 // A mounted squad joins its carrier platoon's dismount platoon unless named.
                 let carrier_pc = world.squad[k]
                     .as_ref()
@@ -481,12 +488,61 @@ impl Sim {
                     side: SideId(si as u8),
                     callsign: d.callsign.clone(),
                     pos: d.position,
-                    unlimited: d.unlimited,
-                    fuel_l: d.fuel_l,
-                    rounds,
-                    smoke_salvos: d.smoke_salvos,
+                    stock: logistics::Stock {
+                        unlimited: d.unlimited,
+                        fuel_l: d.fuel_l,
+                        rounds,
+                        smoke_salvos: d.smoke_salvos,
+                    },
                 });
             }
+        }
+        // Supply trucks: the scenario's cargo, else the type's capacity filled with the rounds
+        // the side's vehicles carry (plan M8C-TAILGATE-TRUCKS §3).
+        for p in &platoons {
+            let support = p.members.iter().filter(|&&k| world.cargo[k].is_some()).count();
+            if support > 0 && support < p.members.len() {
+                return Err(format!("{}: supply trucks form a platoon of their own", p.callsign));
+            }
+        }
+        for (k, assign) in &trucks {
+            let stock = match assign {
+                Some(a) => {
+                    let mut rounds = vec![0; ammo.len()];
+                    for (id, n) in &a.rounds {
+                        let round =
+                            data.ammo(id).ok_or_else(|| format!("{}: unknown ammo '{id}'", world.callsign[*k]))?;
+                        let i = match ammo.iter().position(|x| x.id == round.id) {
+                            Some(i) => i,
+                            None => {
+                                ammo.push(round.clone());
+                                rounds.push(0);
+                                ammo.len() - 1
+                            }
+                        };
+                        rounds[i] += n;
+                    }
+                    logistics::Stock { unlimited: false, fuel_l: a.fuel_l, rounds, smoke_salvos: a.smoke_salvos }
+                }
+                None => {
+                    let side = world.side[*k];
+                    let mut carried = vec![0u32; ammo.len()];
+                    for j in (0..world.len()).filter(|&j| world.side[j] == side) {
+                        if let (Some(vi), Some(gs)) = (world.vehicle[j], world.gun[j].as_ref()) {
+                            for (li, &n) in gs.stock.iter().enumerate() {
+                                carried[loadouts[vi][li]] += n;
+                            }
+                        }
+                    }
+                    let cargo = vehicles[world.vehicle[*k].expect("a truck is a vehicle")].cargo.as_ref();
+                    logistics::default_cargo(cargo.expect("support vehicles have cargo"), &carried, &ammo)
+                }
+            };
+            world.cargo[*k] = Some(stock);
+        }
+        // Every stock indexes the final ammo table.
+        for st in world.cargo.iter_mut().flatten().chain(supply.iter_mut().map(|s| &mut s.stock)) {
+            st.rounds.resize(ammo.len(), 0);
         }
         let logpacs = logpacs(scenario, &platoons, &batteries)?;
         let avoid = {
@@ -657,6 +713,16 @@ impl Sim {
     }
 
     /// Ground truth. Only for AAR, tests and the client's `debug-truth` feature.
+    /// The sim's ammunition table (truth-side: tests and tools index world stocks with it).
+    pub fn ammo_table(&self) -> &[AmmoDef] {
+        &self.ammo
+    }
+
+    /// Ammo-table index of each loadout entry of entity `k`'s vehicle type (empty for squads).
+    pub fn loadout(&self, k: usize) -> &[usize] {
+        self.world.vehicle[k].map_or(&[], |vi| &self.loadouts[vi])
+    }
+
     pub fn truth(&self) -> &World {
         &self.world
     }
@@ -1835,16 +1901,17 @@ impl Sim {
                     id: i as u32,
                     callsign: sp.callsign.clone(),
                     pos: sp.pos,
-                    unlimited: sp.unlimited,
-                    fuel_l: sp.fuel_l,
+                    unlimited: sp.stock.unlimited,
+                    fuel_l: sp.stock.fuel_l,
                     rounds: sp
+                        .stock
                         .rounds
                         .iter()
                         .enumerate()
                         .filter(|&(_, &n)| n > 0)
                         .map(|(a, &n)| (self.ammo[a].name.clone(), n))
                         .collect(),
-                    smoke_salvos: sp.smoke_salvos,
+                    smoke_salvos: sp.stock.smoke_salvos,
                 })
                 .collect();
             for p in self.platoons.iter().filter(|p| p.side == dst.side) {

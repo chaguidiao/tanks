@@ -433,6 +433,7 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                             platoon: None,
                             squad: squad_shooter.then(|| shooter.clone()),
                             mounted_in: None,
+                            cargo: None,
                         }],
                         ai: None,
                         fire_support: vec![],
@@ -450,6 +451,7 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                             platoon: None,
                             squad: None,
                             mounted_in: None,
+                            cargo: None,
                         }],
                         ai: None,
                         fire_support: vec![],
@@ -593,6 +595,7 @@ fn detect(ds: &DataSet, a: &Args) -> Result<(), String> {
         platoon: None,
         squad: squad.map(str::to_owned),
         mounted_in: None,
+        cargo: None,
     };
     let side = |name: &str, doctrine: &str, u: UnitDef| SideDef {
         name: name.into(),
@@ -770,6 +773,7 @@ fn firefight(ds: &DataSet, a: &Args) -> Result<(), String> {
         platoon: None,
         squad: Some(squad.to_owned()),
         mounted_in: None,
+        cargo: None,
     };
     let side = |name: &str, doctrine: &str, u: UnitDef| SideDef {
         name: name.into(),

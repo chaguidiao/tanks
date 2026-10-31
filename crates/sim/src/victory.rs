@@ -32,11 +32,13 @@ impl VictoryState {
         let n_sides = sc.sides.len();
         let other = |s: usize| SideId(((s + 1) % n_sides) as u8);
         for s in 0..n_sides {
-            let total = (0..w.len()).filter(|&k| w.side[k].0 as usize == s).count();
+            // Supply trucks are neither force nor losses (plan M8C-TAILGATE-TRUCKS §8 #3).
+            let force = |k: usize| w.side[k].0 as usize == s && w.cargo[k].is_none();
+            let total = (0..w.len()).filter(|&k| force(k)).count();
             if total == 0 {
                 continue;
             }
-            let lost = (0..w.len()).filter(|&k| w.side[k].0 as usize == s && !fighting(w, k)).count();
+            let lost = (0..w.len()).filter(|&k| force(k) && !fighting(w, k)).count();
             if lost as f64 / total as f64 >= v.destroyed_fraction {
                 return Some((Some(other(s)), EndReason::ForceDestroyed { side: SideId(s as u8) }));
             }

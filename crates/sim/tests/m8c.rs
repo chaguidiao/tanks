@@ -294,3 +294,132 @@ fn bad_events_are_rejected_at_load() {
         assert!(err.contains(why), "{err}");
     }
 }
+
+// --- Slice 6: supply trucks (docs/plans/M8C-TAILGATE-TRUCKS.md) ---
+
+/// A Blue tank platoon with a cargo and a fuel truck behind it, and the Red units given.
+fn trucks_scenario(red: Vec<sim_data::UnitDef>) -> ScenarioDef {
+    let mut blue: Vec<_> = (0..4)
+        .map(|i| unit(&format!("1-{}", i + 1), "bulwark_a1", [600.0 + i as f64 * 60.0, 600.0], 90.0, Some("1")))
+        .collect();
+    blue.push(unit("SUP-1", "carter_c", [400.0, 300.0], 90.0, Some("SUP")));
+    blue.push(unit("SUP-2", "carter_f", [430.0, 300.0], 90.0, Some("SUP")));
+    scenario(12 * 3600, blue, red)
+}
+
+/// Plan §3: a truck without listed cargo carries its type's capacity in the rounds its side's
+/// vehicles carry; a fuel truck carries fuel only.
+#[test]
+fn supply_trucks_carry_their_sides_rounds_by_default() {
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    let sim = Sim::new(&trucks_scenario(vec![]), ds.clone(), m).unwrap();
+    let w = sim.truth();
+    let cap = ds.vehicle("carter_c").unwrap().cargo.clone().unwrap();
+    let tank = w.gun[0].as_ref().unwrap();
+    let ammo = sim.ammo_table();
+    let loaded = w.cargo[4].as_ref().expect("the cargo truck has cargo");
+    let main_gun: u32 = (0..ammo.len())
+        .filter(|&i| ammo[i].stow_class() == sim_data::StowClass::MainGun)
+        .map(|i| loaded.rounds[i])
+        .sum();
+    assert_eq!(main_gun, cap.main_gun_rounds);
+    // Every round loaded is one the tanks carry.
+    let carried: Vec<usize> =
+        sim.loadout(0).iter().zip(&tank.stock).filter(|&(_, &n)| n > 0).map(|(&a, _)| a).collect();
+    assert!((0..ammo.len()).all(|i| loaded.rounds[i] == 0 || carried.contains(&i)), "{:?}", loaded.rounds);
+    assert_eq!(loaded.fuel_l, 0.0);
+    let fuel = w.cargo[5].as_ref().expect("the fuel truck has cargo");
+    assert_eq!(fuel.fuel_l, ds.vehicle("carter_f").unwrap().cargo.as_ref().unwrap().fuel_l.get());
+    assert!(fuel.rounds.iter().all(|&n| n == 0));
+}
+
+#[test]
+fn scenario_cargo_replaces_the_default_and_trucks_keep_to_their_own_platoon() {
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    let mut sc = trucks_scenario(vec![]);
+    sc.sides[0].units[4].cargo =
+        Some(sim_data::CargoAssign { fuel_l: 0.0, rounds: vec![("apfsds_120a".into(), 12)], smoke_salvos: 2 });
+    let sim = Sim::new(&sc, ds.clone(), m.clone()).unwrap();
+    let c = sim.truth().cargo[4].clone().unwrap();
+    assert_eq!((c.rounds.iter().sum::<u32>(), c.smoke_salvos), (12, 2));
+
+    let mut mixed = trucks_scenario(vec![]);
+    mixed.sides[0].units[4].platoon = Some("1".into());
+    assert!(Sim::new(&mixed, ds.clone(), m.clone()).err().expect("refused").contains("platoon of their own"));
+    let mut tank_cargo = trucks_scenario(vec![]);
+    tank_cargo.sides[0].units[0].cargo = Some(Default::default());
+    assert!(Sim::new(&tank_cargo, ds, m).err().expect("refused").contains("only a supply truck"));
+}
+
+/// Plan §6 step 2: a truck never fires; the enemy engages and destroys it; trucks are not part
+/// of the force for victory (§8 #3).
+#[test]
+fn trucks_never_fire_are_killed_and_do_not_count_for_victory() {
+    let ds = data();
+    let m = map(&ds, 1200, 1200, "cropland", |_, _| 0.0);
+    // Only the trucks face a Red tank 1.2 km away; the Blue tanks are 5 km off, beyond its reach.
+    let mut sc = trucks_scenario(vec![unit("R1", "kurgan_b", [4200.0, 4200.0], 270.0, Some("R"))]);
+    for (i, u) in sc.sides[0].units.iter_mut().take(4).enumerate() {
+        u.position = [300.0 + i as f64 * 40.0, 300.0];
+    }
+    sc.sides[0].units[4].position = [3000.0, 4200.0];
+    sc.sides[0].units[5].position = [3000.0, 4260.0];
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    let mut ended = None;
+    for e in run(&mut sim, 300.0) {
+        if let Event::ScenarioEnd { reason, .. } = e {
+            ended = Some(reason);
+        }
+    }
+    let w = sim.truth();
+    assert!(w.last_fired[4].is_none() && w.last_fired[5].is_none(), "trucks have nothing to fire");
+    assert!(w.last_fired[6].is_some(), "the Red tank fired");
+    assert!(!w.alive(4) || !w.alive(5), "the Red tank destroyed a truck");
+    assert!(ended.is_none(), "losing trucks does not destroy Blue's force: {ended:?}");
+}
+
+/// Plan §5: trucks are the lowest-priority target: a gunner takes a tank before a nearer truck.
+#[test]
+fn a_gunner_takes_a_tank_before_a_nearer_truck() {
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    let mut sc = trucks_scenario(vec![unit("R1", "kurgan_b", [2200.0, 1200.0], 270.0, Some("R"))]);
+    // Tank 1-1 at 1.4 km, the cargo truck at 0.8 km; the other Blue vehicles far behind.
+    for (i, u) in sc.sides[0].units.iter_mut().enumerate() {
+        u.position = [100.0 + i as f64 * 30.0, 100.0];
+    }
+    sc.sides[0].units[0].position = [800.0, 1200.0];
+    sc.sides[0].units[4].position = [1400.0, 1200.0];
+    for u in sc.sides[0].units.iter_mut() {
+        u.heading_deg = 270.0;
+    }
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    // Both sides hold fire for a minute so Red has seen everything, then Red is released.
+    for side in [SideId(0), SideId(1)] {
+        let pl = sim.perceived(side).platoons[0].id;
+        sim.submit_immediate(
+            side,
+            Command::WeaponsControl { to: Addressee::Platoon(pl), status: sim::view::WeaponsStatus::Hold },
+        );
+    }
+    run(&mut sim, 60.0);
+    let seen = |sim: &Sim, k: usize| sim.truth().sensors[6].as_ref().unwrap().track(k).is_some();
+    assert!(seen(&sim, 0) && seen(&sim, 4), "Red sees the tank and the truck");
+    let red = sim.perceived(SideId(1)).platoons[0].id;
+    sim.submit_immediate(
+        SideId(1),
+        Command::WeaponsControl { to: Addressee::Platoon(red), status: sim::view::WeaponsStatus::Free },
+    );
+    let mut first = None;
+    for _ in 0..(60 * sim::TICK_HZ) {
+        sim.step();
+        if let Some(t) = sim.truth().gun[6].as_ref().and_then(|g| g.target) {
+            first = Some(t);
+            break;
+        }
+    }
+    let first = first.expect("Red engaged");
+    assert!(first < 4, "the Red tank's first target is a Blue tank, not the nearer truck: {first}");
+}
