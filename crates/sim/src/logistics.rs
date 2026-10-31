@@ -147,9 +147,19 @@ pub struct Tables<'a> {
     pub model: &'a LogisticsModel,
 }
 
-/// Serve vehicle `k` from `point` (a supply point's or a truck's stock) for `dt` seconds. Returns
-/// true when it is done: full in every item, or the stock has nothing more of what it lacks.
-pub fn transfer(world: &mut World, k: usize, point: &mut Stock, st: &mut ServiceState, t: &Tables, dt: f64) -> bool {
+/// Serve vehicle `k` from `point` (a supply point's or a truck's stock) for `dt` seconds, at tick
+/// `tick`. Returns true when it is done: full in every item, or the stock has nothing more of
+/// what it lacks. While main-gun rounds go in, the main gun does not fire (`loading_until`).
+#[allow(clippy::too_many_arguments)]
+pub fn transfer(
+    world: &mut World,
+    k: usize,
+    point: &mut Stock,
+    st: &mut ServiceState,
+    t: &Tables,
+    dt: f64,
+    tick: u64,
+) -> bool {
     let Some(vi) = world.vehicle[k] else { return true };
     let def = &t.vehicles[vi];
     let mut wants = false;
@@ -189,6 +199,10 @@ pub fn transfer(world: &mut World, k: usize, point: &mut Stock, st: &mut Service
             }
             if (0..lo.len()).any(|i| open(g, point, i)) {
                 wants = true;
+                if class == StowClass::MainGun {
+                    // Until the next service step (1 Hz) and a little beyond.
+                    g.loading_until = tick + ((dt + 0.5) / crate::DT).ceil() as u64;
+                }
             } else {
                 st.credit[c] = 0.0;
             }
@@ -214,6 +228,32 @@ pub fn transfer(world: &mut World, k: usize, point: &mut Stock, st: &mut Service
         st.credit[SMOKE] = 0.0;
     }
     !wants
+}
+
+/// Fuel a vehicle must lack before a truck stops to fill it (l): an idling engine is never quite
+/// full, and a truck should not stand behind a tank topping it up by the litre.
+const FUEL_WORTH_L: f64 = 10.0;
+
+/// Whether `stock` has anything vehicle `k` lacks worth stopping for (what `transfer` would hand
+/// over).
+pub fn can_give(world: &World, k: usize, stock: &Stock, t: &Tables) -> bool {
+    let Some(vi) = world.vehicle[k] else { return false };
+    let def = &t.vehicles[vi];
+    let fuel = world.mobility[k].as_ref().is_some_and(|m| m.fuel_l < def.mobility.fuel_capacity_l.get() - FUEL_WORTH_L)
+        && (stock.unlimited || stock.fuel_l > 1e-6);
+    let rounds = world.gun[k]
+        .as_ref()
+        .is_some_and(|g| (0..g.stock.len()).any(|i| g.stock[i] < g.capacity[i] && stock.has_rounds(t.loadouts[vi][i])));
+    let cap = def.smoke_launcher.as_ref().map_or(0, |l| l.salvos);
+    let smoke = world.smoke[k].salvos < cap && (stock.unlimited || stock.smoke_salvos > 0);
+    fuel || rounds || smoke
+}
+
+/// Whether vehicle `k` lacks anything a truck would stop for: as `needs_anything`, but fuel only
+/// when it is at least `FUEL_WORTH_L` short (tailgate resupply).
+pub fn needs_worth(world: &World, k: usize, t: &Tables) -> bool {
+    let full = Stock { unlimited: true, ..Stock::default() };
+    can_give(world, k, &full, t)
 }
 
 /// Whether vehicle `k` lacks anything (fuel, a carried round type, smoke salvos).
@@ -310,7 +350,7 @@ mod tests {
         let rate = ds.logistics.main_gun_rounds_per_min.get();
         let mut done_at = None;
         for s in 1..=900 {
-            if transfer(&mut w, 0, &mut sp, &mut st, &t, 1.0) && done_at.is_none() {
+            if transfer(&mut w, 0, &mut sp, &mut st, &t, 1.0, s as u64 * 20) && done_at.is_none() {
                 done_at = Some(s);
             }
             if s == 60 {
@@ -341,7 +381,7 @@ mod tests {
         let mut st = ServiceState::new();
         let mut done = false;
         for _ in 0..600 {
-            done = transfer(&mut w, 0, &mut sp, &mut st, &t, 1.0);
+            done = transfer(&mut w, 0, &mut sp, &mut st, &t, 1.0, 0);
             if done {
                 break;
             }

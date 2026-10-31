@@ -40,6 +40,47 @@ pub enum PlatoonOrder {
         approach: f64,
         members: Vec<crate::logistics::ServiceState>,
     },
+    /// Tailgate resupply by the supply trucks of platoon `trucks`: the platoon holds in its
+    /// positions. One `ServiceState` per member (stage for the picture; `done`, `short`).
+    Tailgate {
+        trucks: PlatoonId,
+        members: Vec<crate::logistics::ServiceState>,
+    },
+    /// Supply trucks serving platoon `to` (plan M8C-TAILGATE-TRUCKS §3). `targets` = its members'
+    /// world indices in platoon order; `release` = gathering point behind it; `home` = where each
+    /// truck started. One `TruckJob` per member of this platoon.
+    Deliver {
+        to: PlatoonId,
+        targets: Vec<usize>,
+        release: Vec2,
+        home: Vec<Vec2>,
+        phase: DeliverPhase,
+        jobs: Vec<TruckJob>,
+    },
+}
+
+/// Stage of a tailgate resupply run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliverPhase {
+    /// Driving to the release point.
+    Gather,
+    /// Going from vehicle to vehicle.
+    Serve,
+    /// Driving back home (`withdraw`: under fire, to the release point instead).
+    Return { withdraw: bool },
+}
+
+/// One truck's work in a tailgate run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TruckJob {
+    /// Index into `targets` of the vehicle it is serving.
+    pub serving: Option<usize>,
+    /// Parked behind that vehicle and handing over.
+    pub at_vehicle: bool,
+    /// Transfer credit and last route goal.
+    pub st: crate::logistics::ServiceState,
+    /// Indices into `targets` of the vehicles this truck has finished with.
+    pub finished: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -198,9 +239,15 @@ impl Platoon {
             PlatoonOrder::Occupy { reported: true, .. } => "SET IN BATTLE POSITION".to_owned(),
             PlatoonOrder::Occupy { .. } => "OCCUPYING BATTLE POSITION".to_owned(),
             PlatoonOrder::Contact => "IN CONTACT".to_owned(),
-            PlatoonOrder::Resupply { members, .. } => {
+            PlatoonOrder::Resupply { members, .. } | PlatoonOrder::Tailgate { members, .. } => {
                 format!("RESUPPLY {}/{}", members.iter().filter(|m| m.done).count(), members.len())
             }
+            PlatoonOrder::Deliver { phase, .. } => match phase {
+                DeliverPhase::Gather => "TO RELEASE POINT".to_owned(),
+                DeliverPhase::Serve => "RESUPPLYING".to_owned(),
+                DeliverPhase::Return { withdraw: false } => "RETURNING".to_owned(),
+                DeliverPhase::Return { withdraw: true } => "WITHDRAWING".to_owned(),
+            },
         };
         let (route, waypoints) = match (&self.order, &self.held) {
             (PlatoonOrder::Move { .. }, _) => self.order.route_view(),

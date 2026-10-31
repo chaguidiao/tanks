@@ -423,3 +423,155 @@ fn a_gunner_takes_a_tank_before_a_nearer_truck() {
     let first = first.expect("Red engaged");
     assert!(first < 4, "the Red tank's first target is a Blue tank, not the nearer truck: {first}");
 }
+
+/// The trucks scenario with the tanks short of rounds and fuel: each tank has fired 10 rounds of
+/// its main stowage entry and burned 300 l. Returns the sim and the platoon ids (tanks, trucks).
+fn depleted_platoon() -> (Sim, sim::view::PlatoonId, sim::view::PlatoonId, ScenarioDef) {
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    let sc = trucks_scenario(vec![]);
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    deplete_tanks(&mut sim);
+    let pic = sim.perceived(SideId(0));
+    let id = |cs: &str| pic.platoons.iter().find(|p| p.callsign == cs).unwrap().id;
+    let (tanks, trucks) = (id("1"), id("SUP"));
+    (sim, tanks, trucks, sc)
+}
+
+fn deplete_tanks(sim: &mut Sim) {
+    let w = sim.truth_mut();
+    for k in 0..4 {
+        let g = w.gun[k].as_mut().unwrap();
+        let i = (0..g.stock.len()).max_by_key(|&i| g.stock[i]).unwrap();
+        g.stock[i] -= 10;
+        w.mobility[k].as_mut().unwrap().fuel_l -= 300.0;
+    }
+}
+
+/// Rounds and fuel held by the tanks (0-3) and the trucks (4-5).
+fn totals(sim: &Sim) -> (u32, f64, u32, f64) {
+    let w = sim.truth();
+    let tank_rounds = (0..4).map(|k| w.gun[k].as_ref().unwrap().rounds()).sum();
+    let tank_fuel = (0..4).map(|k| w.mobility[k].as_ref().unwrap().fuel_l).sum();
+    let truck_rounds = (4..6).map(|k| w.cargo[k].as_ref().unwrap().rounds.iter().sum::<u32>()).sum();
+    let truck_fuel = (4..6).map(|k| w.cargo[k].as_ref().unwrap().fuel_l).sum();
+    (tank_rounds, tank_fuel, truck_rounds, truck_fuel)
+}
+
+/// Plan §3 and §6 step 3: the trucks drive up, serve every tank where it stands, conserve stock,
+/// stop the main gun firing while its rounds go in, report, and drive back home.
+#[test]
+fn tailgate_trucks_serve_the_platoon_in_place_and_drive_home() {
+    let (mut sim, tanks, trucks, _) = depleted_platoon();
+    let start: Vec<[f64; 2]> = (0..6).map(|k| sim.truth().transform[k].pos).collect();
+    let before = totals(&sim);
+    sim.submit(SideId(0), Command::Tailgate { platoon: tanks, trucks });
+    let (mut done, mut returning, mut served_seen, mut loading_seen) = (None, 0, false, false);
+    for s in 0..2400 {
+        for e in run(&mut sim, 1.0) {
+            match e {
+                Event::PlatoonReport { report: PlatoonReport::Resupplied { complete }, platoon, .. } => {
+                    assert_eq!(platoon, tanks);
+                    done = Some((s, complete));
+                }
+                Event::PlatoonReport { report: PlatoonReport::TrucksReturning { .. }, platoon, .. } => {
+                    assert_eq!(platoon, trucks);
+                    returning += 1;
+                }
+                _ => {}
+            }
+        }
+        let pic = sim.perceived(SideId(0));
+        served_seen |= pic.own.iter().any(|u| u.service == Some(sim::view::ServiceStage::Served));
+        loading_seen |= (0..4).any(|k| sim.truth().gun[k].as_ref().unwrap().loading_until > sim.tick());
+        if done.is_some() && sim.perceived(SideId(0)).platoons.iter().find(|p| p.id == trucks).unwrap().task == "HALTED"
+        {
+            break;
+        }
+    }
+    let (s, complete) = done.expect("the platoon reported");
+    assert!(complete, "every tank full");
+    assert_eq!(returning, 1);
+    assert!(served_seen && loading_seen, "stages shown, main gun held while loading");
+    let after = totals(&sim);
+    assert_eq!(after.0 - before.0, 40, "40 rounds handed over");
+    assert_eq!(before.2 - after.2, 40, "...and the trucks have 40 fewer");
+    // Fuel: each tank is full to within a few litres (it idles while it waits; a truck does not
+    // stop for less than 10 l), and the fuel truck gave about the 1200 l the tanks lacked.
+    let given = before.3 - after.3;
+    assert!((1150.0..1300.0).contains(&given), "fuel truck gave {given:.0} l");
+    let w = sim.truth();
+    let cap =
+        sim_data::DataSet::load(&sim_data::find_data_from(std::path::Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap())
+            .unwrap()
+            .vehicle("bulwark_a1")
+            .unwrap()
+            .mobility
+            .fuel_capacity_l
+            .get();
+    for k in 0..4 {
+        let f = w.mobility[k].as_ref().unwrap().fuel_l;
+        assert!(f > cap - 25.0, "tank {k} has {f:.0} of {cap:.0} l");
+    }
+    for (k, &at) in start.iter().enumerate() {
+        let (limit, what) = if k < 4 { (5.0, "tank stayed in its position") } else { (15.0, "truck is back home") };
+        assert!(dist(w.transform[k].pos, at) < limit, "{k}: {what}");
+    }
+    // 10 rounds a tank at 3 a minute, tanks one after another for the cargo truck.
+    assert!((600..2000).contains(&s), "finished after {s} s");
+}
+
+/// Plan §5: fired on, the trucks stop and withdraw; the platoon reports a partial resupply.
+#[test]
+fn trucks_under_fire_withdraw_and_the_resupply_is_partial() {
+    let (mut sim, tanks, trucks, _) = depleted_platoon();
+    sim.submit(SideId(0), Command::Tailgate { platoon: tanks, trucks });
+    // Until the first tank is being served.
+    for _ in 0..1200 {
+        run(&mut sim, 1.0);
+        if sim.perceived(SideId(0)).own.iter().any(|u| u.service == Some(sim::view::ServiceStage::Served)) {
+            break;
+        }
+    }
+    sim.truth_mut().suppression[4] = 0.3; // a near miss
+    let ev = run(&mut sim, 5.0);
+    let rep = |r: fn(&PlatoonReport) -> bool| {
+        ev.iter().any(|e| matches!(e, Event::PlatoonReport { report, .. } if r(report)))
+    };
+    assert!(rep(|r| matches!(r, PlatoonReport::TrucksWithdrawing)), "{ev:?}");
+    assert!(rep(|r| matches!(r, PlatoonReport::Resupplied { complete: false })), "{ev:?}");
+    let task = |sim: &Sim, id| sim.perceived(SideId(0)).platoons.iter().find(|p| p.id == id).unwrap().task.clone();
+    assert_eq!(task(&sim, trucks), "WITHDRAWING");
+}
+
+/// A new order to the served platoon ends its resupply; the trucks go home.
+#[test]
+fn a_new_order_to_the_served_platoon_sends_the_trucks_home_and_replays() {
+    let (mut sim, tanks, trucks, sc) = depleted_platoon();
+    sim.submit(SideId(0), Command::Tailgate { platoon: tanks, trucks });
+    run(&mut sim, 120.0);
+    let to = [600.0, 900.0];
+    sim.submit(
+        SideId(0),
+        Command::PlatoonMove {
+            platoon: tanks,
+            destination: to,
+            via: vec![],
+            formation: None,
+            technique: sim_data::Technique::Traveling,
+            speed_limit_mps: None,
+        },
+    );
+    run(&mut sim, 30.0); // over the radio
+    let task = |sim: &Sim, id| sim.perceived(SideId(0)).platoons.iter().find(|p| p.id == id).unwrap().task.clone();
+    assert_eq!(task(&sim, trucks), "RETURNING");
+    run(&mut sim, 60.0);
+    // The run replays to the same state (the depletion is set-up, redone before playing).
+    let rec = Replay::from_ron(&Replay::record(&sim).to_ron()).unwrap();
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    let mut again = Sim::new(&sc, ds, m).unwrap();
+    deplete_tanks(&mut again);
+    rec.play(&mut again, |_, _| {});
+    assert_eq!(again.state_hash(), rec.final_hash, "replay diverged");
+}

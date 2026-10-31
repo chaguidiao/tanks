@@ -3523,9 +3523,11 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                 PlatoonReport::Resupplied { complete: true } => format!("{cs}: RESUPPLY COMPLETE."),
                 PlatoonReport::LogpacReceived { refuel: true } => format!("{cs}: LOGPAC RECEIVED. REFUELLED."),
                 PlatoonReport::LogpacReceived { refuel: false } => format!("{cs}: LOGPAC RECEIVED. REARMED."),
-                PlatoonReport::Resupplied { complete: false } => {
-                    format!("{cs}: RESUPPLY PARTIAL. SUPPLY POINT SHORT.")
+                PlatoonReport::Resupplied { complete: false } => format!("{cs}: RESUPPLY PARTIAL. SUPPLIES SHORT."),
+                PlatoonReport::TrucksReturning { fuel_l, rounds } => {
+                    format!("{cs}: RESUPPLY DONE, RETURNING. {rounds} RDS, {:.0} L LEFT.", fuel_l)
                 }
+                PlatoonReport::TrucksWithdrawing => format!("{cs}: UNDER FIRE, WITHDRAWING."),
                 PlatoonReport::SetInPosition { hull_down, turret_down, exposed, facing } => format!(
                     "{cs}: SET IN BP. {hull_down} HULL-DOWN, {turret_down} TURRET-DOWN, {exposed} EXPOSED. ORIENTED {} MILS.",
                     format::mils(*facing)
