@@ -315,30 +315,59 @@ fn vehicle_sheet(ds: &DataSet, v: &VehicleDef) -> Sheet {
         stat("FUEL AT IDLE", &mo.fuel_idle_lph, |x| format!("{x:.0} L/H")),
         stat("FUEL PER KWH", &mo.fuel_per_kwh_l, |x| format!("{x:.2} L/KWH")),
         calc("FUEL AT FULL POWER", format!("{:.0} L/H", kw * mo.fuel_per_kwh_l.get()), "ENGINE KW · FUEL PER KWH"),
-        section("ARMAMENT"),
-        fact("MAIN GUN", a.gun.clone()),
-        stat("ELEVATION", &v.gun.elevation_rad, deg),
-        stat("DEPRESSION", &v.gun.depression_rad, deg),
     ];
+    // Supply trucks: cargo instead of weapons (M8c tailgate resupply).
+    let armed = !a.load.is_empty();
+    if let Some(c) = &v.cargo {
+        l.extend([
+            section("CARGO"),
+            stat("PAYLOAD", &c.payload_kg, |x| format!("{:.1} T", x / 1000.0)),
+            stat("FUEL", &c.fuel_l, |x| format!("{x:.0} L")),
+            fact("MAIN-GUN ROUNDS", c.main_gun_rounds.to_string()),
+            fact("AUTOCANNON ROUNDS", c.autocannon_rounds.to_string()),
+            fact("MISSILES", c.missiles.to_string()),
+            fact("SMOKE GRENADE SALVOS", c.smoke_salvos.to_string()),
+            fact("FILLED WITH", "THE ROUNDS ITS SIDE'S VEHICLES CARRY, UNLESS THE SCENARIO LISTS THEM"),
+        ]);
+    }
+    if armed {
+        l.extend([
+            section("ARMAMENT"),
+            fact("MAIN GUN", a.gun.clone()),
+            stat("ELEVATION", &v.gun.elevation_rad, deg),
+            stat("DEPRESSION", &v.gun.depression_rad, deg),
+        ]);
+    }
     for ld in &a.load {
         let name = ds.ammo(&ld.ammo).map_or(ld.ammo.clone(), |x| x.name.clone());
         let when = ld.in_service.as_ref().map_or(String::new(), |d| format!(" ({})", years(d)));
         l.push(fact("LOAD", format!("{} × {name}{when}", ld.count)));
     }
-    l.extend([
-        fact("LOADING", if a.autoloader { "AUTOLOADER" } else { "HUMAN LOADER" }),
-        stat("RELOAD", &a.reload_s, secs),
-        stat("TURRET TRAVERSE", &a.turret_traverse_rad_s, |x| format!("{:.0} °/S", x.to_degrees())),
-        calc("FULL TRAVERSE", secs(std::f64::consts::TAU / a.turret_traverse_rad_s.get()), "360° / TRAVERSE RATE"),
-        stat("ENGAGEMENT RANGE (CREW)", &a.max_engagement_range_m, |x| format!("{x:.0} M")),
-        fact(
-            "AMMUNITION STOWAGE",
-            match v.ammo_stowage {
-                sim_data::AmmoStowage::Isolated => "ISOLATED (BLOW-OUT PANELS)",
-                sim_data::AmmoStowage::Exposed => "EXPOSED (HIGH COOK-OFF RISK)",
-            },
-        ),
-    ]);
+    l.extend(
+        armed
+            .then(|| {
+                [
+                    fact("LOADING", if a.autoloader { "AUTOLOADER" } else { "HUMAN LOADER" }),
+                    stat("RELOAD", &a.reload_s, secs),
+                    stat("TURRET TRAVERSE", &a.turret_traverse_rad_s, |x| format!("{:.0} °/S", x.to_degrees())),
+                    calc(
+                        "FULL TRAVERSE",
+                        secs(std::f64::consts::TAU / a.turret_traverse_rad_s.get()),
+                        "360° / TRAVERSE RATE",
+                    ),
+                    stat("ENGAGEMENT RANGE (CREW)", &a.max_engagement_range_m, |x| format!("{x:.0} M")),
+                    fact(
+                        "AMMUNITION STOWAGE",
+                        match v.ammo_stowage {
+                            sim_data::AmmoStowage::Isolated => "ISOLATED (BLOW-OUT PANELS)",
+                            sim_data::AmmoStowage::Exposed => "EXPOSED (HIGH COOK-OFF RISK)",
+                        },
+                    ),
+                ]
+            })
+            .into_iter()
+            .flatten(),
+    );
     if let Some(c) = &v.coax {
         l.extend(small_arm_lines("COAX", c));
     }
@@ -350,21 +379,28 @@ fn vehicle_sheet(ds: &DataSet, v: &VehicleDef) -> Sheet {
             stat("MOUNT DRILL", &t.mount_s, secs),
         ]);
     }
-    l.extend([
-        section("FIRE CONTROL"),
-        fact("LASER RANGEFINDER", yes(fc.laser_rangefinder)),
-        stat("LASER RANGE ERROR", &fc.laser_range_error_m, |x| format!("{x:.0} M (1 SD)")),
-        stat("ESTIMATED RANGE ERROR", &fc.estimated_range_error_fraction, |x| {
-            format!("{:.0} % OF RANGE (1 SD)", x * 100.0)
-        }),
-        stat("BALLISTIC ERROR", &fc.ballistic_error_mrad, mrad),
-        stat("AIM ERROR, HALTED", &fc.aim_error_mrad, mrad),
-        stat("AIM ERROR, MOVING", &fc.moving_error_mrad, mrad),
-        stat("LEAD ERROR", &fc.lead_error_fraction, |x| format!("{:.0} % OF LEAD", x * 100.0)),
-        stat("LAY TIME", &fc.lay_time_s, secs),
-        stat("LASE TIME", &fc.lase_time_s, secs),
-        section("SENSORS"),
-    ]);
+    l.extend(
+        armed
+            .then(|| {
+                [
+                    section("FIRE CONTROL"),
+                    fact("LASER RANGEFINDER", yes(fc.laser_rangefinder)),
+                    stat("LASER RANGE ERROR", &fc.laser_range_error_m, |x| format!("{x:.0} M (1 SD)")),
+                    stat("ESTIMATED RANGE ERROR", &fc.estimated_range_error_fraction, |x| {
+                        format!("{:.0} % OF RANGE (1 SD)", x * 100.0)
+                    }),
+                    stat("BALLISTIC ERROR", &fc.ballistic_error_mrad, mrad),
+                    stat("AIM ERROR, HALTED", &fc.aim_error_mrad, mrad),
+                    stat("AIM ERROR, MOVING", &fc.moving_error_mrad, mrad),
+                    stat("LEAD ERROR", &fc.lead_error_fraction, |x| format!("{:.0} % OF LEAD", x * 100.0)),
+                    stat("LAY TIME", &fc.lay_time_s, secs),
+                    stat("LASE TIME", &fc.lase_time_s, secs),
+                ]
+            })
+            .into_iter()
+            .flatten(),
+    );
+    l.push(section("SENSORS"));
     for s in &v.sensors {
         let kind = match s.kind {
             sim_data::SensorKind::Optical => "OPTICAL",

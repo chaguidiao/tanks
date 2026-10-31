@@ -13,5 +13,5 @@
         notes: "Muzzle figure; scaled by (v/v0)^2 with range."),
     dispersion_mrad: (value: 0.9, source: "estimate", confidence: estimate, notes: "Burst dispersion folded into one sampled error."),
     max_range_m: (value: 2000.0, source: "estimate", confidence: estimate),
-    preferred_vs: [ifv, recon],
+    preferred_vs: [ifv, recon, support],
 )

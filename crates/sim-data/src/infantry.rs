@@ -360,9 +360,11 @@ mod tests {
             let t = ds.vehicle(carrier).and_then(|v| v.troops.as_ref()).expect(carrier);
             assert!(s.men <= t.capacity_men, "{squad} ({} men) fits {carrier} ({})", s.men, t.capacity_men);
         }
-        // Tanks carry no troops; every vehicle has a coax.
+        // Tanks carry no troops; every fighting vehicle has a coax (supply trucks are unarmed).
         assert!(ds.vehicle("bulwark_a1").unwrap().troops.is_none());
-        assert!(ds.vehicles.iter().all(|v| v.coax.is_some()), "every vehicle has a coax MG");
+        let fighting = ds.vehicles.iter().filter(|v| v.class != crate::VehicleClass::Support);
+        assert!(fighting.clone().all(|v| v.coax.is_some()), "every fighting vehicle has a coax MG");
+        assert!(fighting.count() >= 15);
     }
 
     #[test]

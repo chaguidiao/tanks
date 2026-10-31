@@ -106,6 +106,8 @@ pub struct DamageTables {
     /// A shot plunging more steeply than this onto the target meets its top armour (deg; plan
     /// M8B-AT-TEAMS §3).
     pub top_hit_above_deg: Stat<f64>,
+    /// Any penetration of a soft-skinned `Support` vehicle (trucks: cargo and fuel burn).
+    pub soft_skin_penetration: Outcomes,
 }
 
 /// Long-rod penetration model (Lanz–Odermatt functional form), `data/combat/penetration.ron`:

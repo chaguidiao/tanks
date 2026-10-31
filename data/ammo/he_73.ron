@@ -10,6 +10,6 @@
     flat_penetration_mm: (value: 10.0, source: "estimate", confidence: estimate, notes: "Blast and fragments: defeats only thin sheet."),
     dispersion_mrad: (value: 1.5, source: "estimate", confidence: estimate),
     max_range_m: (value: 1300.0, source: "estimate", confidence: estimate),
-    preferred_vs: [infantry],
+    preferred_vs: [infantry, support],
     lethal_radius_m: (value: 10.0, source: "estimate: a 73 mm fragmentation shell", confidence: estimate, notes: "Meant for infantry and soft targets."),
 )

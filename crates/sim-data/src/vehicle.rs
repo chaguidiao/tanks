@@ -33,6 +33,9 @@ pub struct VehicleDef {
     /// Troop compartment (IFVs).
     #[serde(default)]
     pub troops: Option<crate::TroopsDef>,
+    /// What a supply truck carries (M8c tailgate resupply, `Support` class only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cargo: Option<CargoDef>,
 }
 
 /// What a vehicle is, as a crew would call it when recognising it.
@@ -45,6 +48,27 @@ pub enum VehicleClass {
     Ifv,
     /// Light reconnaissance vehicle.
     Recon,
+    /// Unarmed supply vehicle (M8c): carries cargo, fights nothing, does not count as a fighting
+    /// vehicle for victory.
+    Support,
+}
+
+/// Cargo capacity of a supply truck (plan M8C-TAILGATE-TRUCKS §3). Rounds are counted per stow
+/// class: a scenario fills them with the rounds its side's vehicles carry unless it lists the
+/// cargo itself.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CargoDef {
+    /// Rated payload; the round counts below are derived from it (see the data notes).
+    pub payload_kg: Stat<f64>,
+    pub fuel_l: Stat<f64>,
+    #[serde(default)]
+    pub main_gun_rounds: u32,
+    #[serde(default)]
+    pub autocannon_rounds: u32,
+    #[serde(default)]
+    pub missiles: u32,
+    #[serde(default)]
+    pub smoke_salvos: u32,
 }
 
 /// What a round is meant for: a vehicle class or dismounted infantry.
@@ -55,6 +79,7 @@ pub enum TargetClass {
     Ifv,
     Recon,
     Infantry,
+    Support,
 }
 
 impl From<VehicleClass> for TargetClass {
@@ -63,6 +88,7 @@ impl From<VehicleClass> for TargetClass {
             VehicleClass::Mbt => TargetClass::Mbt,
             VehicleClass::Ifv => TargetClass::Ifv,
             VehicleClass::Recon => TargetClass::Recon,
+            VehicleClass::Support => TargetClass::Support,
         }
     }
 }
@@ -73,6 +99,7 @@ impl VehicleClass {
             VehicleClass::Mbt => "TANK",
             VehicleClass::Ifv => "IFV",
             VehicleClass::Recon => "RECON",
+            VehicleClass::Support => "SUPPORT",
         }
     }
 }

@@ -30,4 +30,10 @@
     non_penetration_sights: (value: 0.1, source: "estimate", confidence: estimate),
     top_hit_above_deg: (value: 20.0, source: "estimate (plan M8B-AT-TEAMS §3)", confidence: estimate,
         notes: "An upper floor at close range: Grau (FMSO, 1997) records Grozny hits on turret and engine-deck tops from upper floors. 20 deg at 1 km needs 360 m of height, so ridge fire at gun ranges never reaches it."),
+    soft_skin_penetration: (
+        catastrophic: (value: 0.60, source: "estimate: a truck hit by a main-gun round or a rocket usually burns, its fuel or ammunition cargo with it", confidence: estimate),
+        firepower: (value: 0.0, source: "estimate: no weapons", confidence: estimate),
+        mobility: (value: 0.30, source: "estimate: engine, tyres, axles", confidence: estimate),
+        crew: (value: 0.10, source: "estimate", confidence: estimate),
+    ),
 )

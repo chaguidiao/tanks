@@ -29,6 +29,13 @@ pub struct LogisticsModel {
     pub stations: Stat<f64>,
     /// A vehicle within this distance of the point's centre can be served (m).
     pub point_radius_m: Stat<f64>,
+    /// Tailgate resupply (plan M8C-TAILGATE-TRUCKS §3): the trucks gather this far behind the
+    /// platoon before going forward (m).
+    pub release_m: Stat<f64>,
+    /// A serving truck parks this far behind the vehicle it serves (m).
+    pub tailgate_m: Stat<f64>,
+    /// A truck stops serving and withdraws when a burst lands this close or it is fired at (m).
+    pub withdraw_burst_m: Stat<f64>,
 }
 
 impl LogisticsModel {

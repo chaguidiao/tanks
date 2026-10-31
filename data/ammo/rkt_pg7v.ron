@@ -13,7 +13,7 @@
     dispersion_mrad: (value: 0.5, source: "estimate", confidence: estimate, notes: "Round-to-round; the gunner's aim error dominates (launcher sight data)."),
     max_range_m: (value: 300.0, source: "Wikipedia (RPG-7): effective range 330 m; Isby (1988): 27 % hit at 300 m", confidence: low,
         notes: "Not fired beyond the range where about one shot in four hits."),
-    preferred_vs: [mbt, ifv, recon],
+    preferred_vs: [mbt, ifv, recon, support],
     behind_armour: (value: 0.4, source: "estimate (plan M8B-AT-TEAMS §2.3)", confidence: estimate,
         notes: "A narrow jet behind the armour: Grau (FMSO, 1997) counts 3-6 lethal hits per vehicle destroyed in Grozny; tuned to about 3 hits to destroy a T-72 from the side (target A8)."),
 )
