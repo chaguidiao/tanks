@@ -6,7 +6,7 @@
 - Terrain, map format, generation, editor: `docs/TERRAIN.md`
 - Sources: `docs/REFERENCES.md`
 - Dev environment (container, commands): `docs/DEVELOPMENT.md`
-- Status: **version 0.1.2** (2026-10-31). Done: M0–M7 (v1.0: tanks, terrain, AI, plans, smoke, weather, fire support, content, packaging), M8a, M8h1a/b (buildings, towns), M8b (infantry, anti-tank teams), M8f1/M8g1 (infantry AI, plans and editor), M8c slices 1–5 (supply points, LOGPACs, battery resupply). **Next: M8c slice 6 (tailgate supply trucks)**, `docs/plans/M8C-LOGISTICS.md`. Stack: **Rust sim core + raylib 6.x client (`raylib-rs`)**, licence MIT. Per-phase detail: DESIGN.md §13.1 and §14; open work and order: `docs/TODO.md`; release rule and checklist: `docs/DEVELOPMENT.md` Releases (TODO K4).
+- Status: **version 0.1.2** (2026-10-31). Done: M0–M7 (v1.0: tanks, terrain, AI, plans, smoke, weather, fire support, content, packaging), M8a, M8h1a/b (buildings, towns), M8b (infantry, anti-tank teams), M8f1/M8g1 (infantry AI, plans and editor), M8c slices 1–6 (supply points, LOGPACs, battery resupply, tailgate supply trucks). **Next: M8c slice 7 (C2 recovery)**, `docs/plans/M8C-LOGISTICS.md`. Stack: **Rust sim core + raylib 6.x client (`raylib-rs`)**, licence MIT. Per-phase detail: DESIGN.md §13.1 and §14; open work and order: `docs/TODO.md`; release rule and checklist: `docs/DEVELOPMENT.md` Releases (TODO K4).
 
 ## Architecture rules (non-negotiable)
 1. **`sim` is graphics-agnostic.** No raylib/rendering/UI types in `sim`, `terrain`, `terragen`, `ai`, `sim-data`. All raylib calls live in `client` behind a small `render` module. The client talks to the sim only via `Command` in, `Event` out, and `PerceivedWorld` reads.

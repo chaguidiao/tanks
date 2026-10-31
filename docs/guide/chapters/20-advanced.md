@@ -304,6 +304,16 @@ Some scenarios give a side **supply points** (the `SP` pin on the map, with a da
 
 Resupply one platoon at a time, behind cover, while the others hold.
 
+## Supply trucks
+
+Some scenarios give a side a **supply platoon** (`SUP`): a cargo truck with ammunition and a fuel truck, shown with the supply symbol (a frame with a bar across its lower part). With trucks, resupply can come to the platoon instead (the **tailgate** method): select the platoon and press **RESUPPLY** (<kbd>R</kbd>); when there is more than one source, a short list asks which (**AT SP 1 (SERVICE STATION)** or **BY SUP (TAILGATE)**).
+
+The platoon holds where it is. The trucks drive to a point about 300 m behind it, then go from vehicle to vehicle, park close behind each one and hand over rounds and fuel at the same rates as a supply point. The platoon card shows `RESUPPLY BY SUP: 1 SERVED, 2 WAITING, 1 DONE`. A tank does not fire its main gun while its rounds are being loaded, but the rest of the platoon fights on. When they are done the trucks report what they have left and drive back: `SUP: RESUPPLY DONE, RETURNING. 120 RDS, 8300 L LEFT.`
+
+Trucks are not armoured. If they come under fire (a shell close by, a shot at them, a truck hit), they stop and withdraw to the point behind the platoon: `SUP: UNDER FIRE, WITHDRAWING.` The resupply is then partial. Enemy gunners take trucks last, after anything that can shoot back, but they do take them, and a truck that burns takes its cargo with it. Bring the trucks forward when the platoon is in cover, not in the middle of a fight.
+
+Trucks do not count for victory: they cannot hold an objective, and losing them does not count as losing fighting strength.
+
 ## LOGPACs
 
 A scenario can also bring a **LOGPAC** (logistics package) at a set time: `LOGPAC RECEIVED. REARMED.` or `REFUELLED.` The rounds and fuel arrive at once, wherever the platoon is. The scenario editor's supply points (<kbd>S</kbd>) and the RON file's `logistics` list set both up.

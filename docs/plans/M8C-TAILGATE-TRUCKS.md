@@ -59,6 +59,16 @@ A new order to the served platoon ends its part; a new order to the trucks ends 
 
 Assignment order is platoon slot then entity id; no randomness. Truck cargo and tailgate state hashed. Golden hash unchanged (no trucks in it); the v1 scenarios have no trucks, so the balance batch should be unchanged run for run (it is re-run to prove it, because victory and target-priority code change). `SIM_VERSION` bump (new command field).
 
+## 7a. Built (2026-10-31)
+
+Four commits on `m8c-tailgate-trucks`, in the order of §6 (steps 1–4; the stretch refill is TODO C5). Differences from the text above:
+- The order is a new `Command::Tailgate { platoon, trucks }`, not a `source` field on `Resupply`, so replays with the old command load unchanged; `SIM_VERSION` 8.
+- The truck types are CARTER C / F (M977 / M978 HEMTT, 1982) and VOLOK C / F (Ural-4320, 1977; ATZ-5-4320, 1980). Default cargo fills each stow class's capacity with the side's carried rounds in proportion (`logistics::default_cargo`); `UnitDef.cargo` (`CargoAssign`) replaces it.
+- A truck does not stop for less than 10 l of fuel (an idling engine is never quite full) and remembers the vehicles it has finished; RESUPPLY COMPLETE / PARTIAL depends on whether a vehicle still lacks something no live truck carries.
+- Trucks are the last target in two places: platoon fire distribution hands out recognised trucks (new `ContactKind::Supply`) only when nothing else is in view, and a gunner's own choice takes them after everything else.
+- The main-gun hold while loading (`GunState.loading_until`) applies to the service station too, which did not have it before (§8 #6 said it did).
+- Client: RESUPPLY lists all sources (popup when several), truck cards show cargo, APP-6D supply symbol. Fighting orders are still offered on a truck platoon's card (TODO C5).
+
 ## 8. Decisions
 
 | # | Question | Options | Recommendation |
