@@ -39,6 +39,35 @@ pub struct BatteryDef {
     pub smoke_rounds: u32,
     /// Smoke kind id in `smoke.ron` for a smoke round.
     pub smoke_kind: String,
+    /// Restocking from the trains (M8c C3); absent = the battery never restocks by itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resupply: Option<BatteryResupply>,
+    /// Survivability moves (M8c C3); absent = the battery never displaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub displace: Option<BatteryDisplace>,
+}
+
+/// The battery's ammunition vehicles fetch rounds from the trains when the stock runs low
+/// (ATP 3-09.50 ch. 4, battery ammunition resupply). The guns keep firing what is left.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatteryResupply {
+    /// A resupply starts when HE drops below this fraction of the basic load and the battery is
+    /// not firing.
+    pub threshold_frac: Stat<f64>,
+    /// Time from the start of a resupply until the basic load is back (s).
+    pub resupply_s: Stat<f64>,
+    /// Basic loads held in the trains for the battery; a scenario may override it.
+    pub loads: u32,
+}
+
+/// After a number of missions the battery moves to a new position to survive counter-battery
+/// fire (ATP 3-09.50 ch. 2, survivability moves); it cannot fire while moving and laying.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatteryDisplace {
+    /// Missions fired from one position before it displaces.
+    pub after_missions: u32,
+    /// Time out of action: march order, move, emplace and lay (s).
+    pub displace_s: Stat<f64>,
 }
 
 /// Effect of one HE shell on one vehicle class.

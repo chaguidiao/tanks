@@ -1205,6 +1205,7 @@ impl ScenarioEditor {
             position: at,
             he_rounds: None,
             smoke_rounds: None,
+            resupplies: None,
         });
         self.sel = Some(Sel::Battery(self.side, side.fire_support.len() - 1));
         self.page = Page::Fires;

@@ -102,6 +102,7 @@ A reading list grouped by subsystem. ★ = read first. Public sources only — n
 - **Johnson / NVESD** and thermal-sight literature — thermal crossover at dawn and dusk (target-background contrast passes through zero).
 - **ATP 3-09.30** *Observers*, **ATP 3-09.42** *Fire Support for the Brigade Combat Team*, **FM 6-40** — call-for-fire format (observer ID, warning order, target location, description, method of engagement and control), SHOT / SPLASH / ROUNDS COMPLETE.
 - **ATP 3-20.15** *Tank Platoon* and **FM 3-90.1** — break contact (suppress, smoke, bound back), react to indirect fire.
+- **ATP 3-09.50** *The Field Artillery Cannon Battery* (2016) — battery ammunition resupply from the ammunition transfer point (ch. 4) and survivability moves after firing (ch. 2): the basis of the C3 resupply and displacement timings in `data/combat/fires.ron` (values `estimate`).
 - Ranging errors: firing-table probable errors (about 0.3–0.5 % of range, σ = 1.48 × PE) from **FM 6-40** / **TC 3-09.81**; battery ranges and rates from open descriptions of the M109A6 and 2S3. Effects of HE on armour (`data/combat/fires.ron`) are `estimate`.
 - Suppression: Dunnigan, Marshall and later suppression-model discussions are *qualitative only*; values in data are `estimate`.
 

@@ -243,6 +243,9 @@ pub struct BatteryAssign {
     pub he_rounds: Option<u32>,
     #[serde(default)]
     pub smoke_rounds: Option<u32>,
+    /// Override the type's basic loads in the trains (C3 resupply); 0 = none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resupplies: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

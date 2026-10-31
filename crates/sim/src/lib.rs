@@ -453,11 +453,9 @@ impl Sim {
                     .kind(&d.smoke_kind)
                     .ok_or_else(|| format!("{}: unknown smoke kind '{}'", d.id, d.smoke_kind))?;
                 let mut b = fires::Battery::new(SideId(si as u8), a.callsign.clone(), di, d, a.position, sk);
-                if let Some(n) = a.he_rounds {
-                    b.he = n;
-                }
-                if let Some(n) = a.smoke_rounds {
-                    b.smoke = n;
+                b.set_stock(a.he_rounds.unwrap_or(d.he_rounds), a.smoke_rounds.unwrap_or(d.smoke_rounds));
+                if let Some(n) = a.resupplies {
+                    b.loads_left = n;
                 }
                 batteries.push(b);
             }

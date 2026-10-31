@@ -464,6 +464,7 @@ fn two_platoon_sim() -> Sim {
         position: [200.0, 100.0],
         he_rounds: None,
         smoke_rounds: None,
+        resupplies: None,
     }];
     let mut sim = Sim::new(&sc, ds, m).unwrap();
     sim.set_ai_enabled(SideId(1), false);
