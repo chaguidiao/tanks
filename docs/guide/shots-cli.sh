@@ -72,6 +72,9 @@ shot h-ctx-unit $S $V2 $SEL --rclick 730,590,0.1 --frames 14
 shot h-multi $S $V2 --select 1+2
 shot h-uplands $S --scenario cw-village-defence --zoom 2.4 --center 4000,3400
 shot h-dusk --scenario mod-dusk-attack
+# ---- logistics (LONG DEFENCE)
+shot l-rear --scenario m8c-long-defence --advance 3 --zoom 1.0 --center 3900,3000
+shot l-sources --scenario m8c-long-defence --advance 3 --zoom 1.4 --center 4250,3800 --select 1 --press R
 true
 # ---- tour
 shot tour $S --plan 1:@docs/plans/example-plan.ron --bp 2:4750,4450,45 --pl -:4000,5400,5000,5300,6000,4700 --advance 230 --zoom 2.2 --center 4500,4500 --select 1

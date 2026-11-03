@@ -338,12 +338,15 @@ fn run_scenario(data: &std::path::Path, ds: &DataSet, a: &Args) -> Result<(), St
     }
     for u in &sim.perceived(blue).own {
         println!(
-            "{:<4} pos ({:7.1}, {:7.1})  speed {:4.1} m/s  fuel {:5.1} %",
+            "{:<4} pos ({:7.1}, {:7.1})  speed {:4.1} m/s  fuel {:5.1} %  rounds {}/{}  {:?}",
             u.callsign,
             u.pos[0],
             u.pos[1],
             u.speed,
-            u.fuel_fraction * 100.0
+            u.fuel_fraction * 100.0,
+            u.ammo,
+            u.full_load,
+            u.condition
         );
     }
     let total: u32 = men_lost.iter().sum();
@@ -434,6 +437,8 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                             squad: squad_shooter.then(|| shooter.clone()),
                             mounted_in: None,
                             cargo: None,
+                            ammo_fraction: None,
+                            fuel_fraction: None,
                         }],
                         ai: None,
                         fire_support: vec![],
@@ -452,6 +457,8 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                             squad: None,
                             mounted_in: None,
                             cargo: None,
+                            ammo_fraction: None,
+                            fuel_fraction: None,
                         }],
                         ai: None,
                         fire_support: vec![],
@@ -596,6 +603,8 @@ fn detect(ds: &DataSet, a: &Args) -> Result<(), String> {
         squad: squad.map(str::to_owned),
         mounted_in: None,
         cargo: None,
+        ammo_fraction: None,
+        fuel_fraction: None,
     };
     let side = |name: &str, doctrine: &str, u: UnitDef| SideDef {
         name: name.into(),
@@ -774,6 +783,8 @@ fn firefight(ds: &DataSet, a: &Args) -> Result<(), String> {
         squad: Some(squad.to_owned()),
         mounted_in: None,
         cargo: None,
+        ammo_fraction: None,
+        fuel_fraction: None,
     };
     let side = |name: &str, doctrine: &str, u: UnitDef| SideDef {
         name: name.into(),

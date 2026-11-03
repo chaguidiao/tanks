@@ -323,6 +323,11 @@ impl Sim {
                         l.stowed_in(year) && data.ammo(&l.ammo).is_some_and(|a| a.in_service.contains(year))
                     };
                     let any = def.armament.load.iter().any(carried);
+                    // A unit that has already fought starts short (scenario `ammo_fraction`).
+                    let frac = u.ammo_fraction.unwrap_or(1.0);
+                    if !(0.0..=1.0).contains(&frac) || !(0.0..=1.0).contains(&u.fuel_fraction.unwrap_or(1.0)) {
+                        return Err(format!("{}: ammo and fuel fractions must be 0 to 1", u.callsign));
+                    }
                     let stock: Vec<u32> =
                         def.armament.load.iter().map(|l| if !any || carried(l) { l.count } else { 0 }).collect();
                     let z = g.height(u.position[0], u.position[1]);
@@ -337,7 +342,18 @@ impl Sim {
                         year,
                         stock,
                     );
-                    world.len() - 1
+                    let k = world.len() - 1;
+                    // Short of the full load, which stays the capacity resupply fills to.
+                    if let Some(g) = world.gun[k].as_mut() {
+                        for s in g.stock.iter_mut() {
+                            *s = (*s as f64 * frac) as u32;
+                        }
+                    }
+                    world.smoke[k].salvos = (world.smoke[k].salvos as f64 * frac) as u32;
+                    if let (Some(f), Some(m)) = (u.fuel_fraction, world.mobility[k].as_mut()) {
+                        m.fuel_l *= f;
+                    }
+                    k
                 };
                 if world.cargo[k].is_some() {
                     trucks.push((k, u.cargo.clone()));

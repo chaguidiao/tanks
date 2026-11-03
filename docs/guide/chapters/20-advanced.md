@@ -304,9 +304,13 @@ Some scenarios give a side **supply points** (the `SP` pin on the map, with a da
 
 Resupply one platoon at a time, behind cover, while the others hold.
 
+::fig l-rear | crop=500,200,700,420 | w=60 | The rear area of LONG DEFENCE: the supply platoon SUP (cargo and fuel truck, supply symbol), the recovery vehicle R-1 (maintenance symbol) and the supply point SP 1 with its serving area.
+
 ## Supply trucks
 
 Some scenarios give a side a **supply platoon** (`SUP`): a cargo truck with ammunition and a fuel truck, shown with the supply symbol (a frame with a bar across its lower part). With trucks, resupply can come to the platoon instead (the **tailgate** method): select the platoon and press **RESUPPLY** (<kbd>R</kbd>); when there is more than one source, a short list asks which (**AT SP 1 (SERVICE STATION)** or **BY SUP (TAILGATE)**).
+
+::fig l-sources | crop=1360,615,240,260 | w=35 | RESUPPLY (R) with a supply point and a supply platoon: the source list opens above the card cell.
 
 The platoon holds where it is. The trucks drive to a point about 300 m behind it, then go from vehicle to vehicle, park close behind each one and hand over rounds and fuel at the same rates as a supply point. The platoon card shows `RESUPPLY BY SUP: 1 SERVED, 2 WAITING, 1 DONE`. A tank does not fire its main gun while its rounds are being loaded, but the rest of the platoon fights on. When they are done the trucks report what they have left and drive back: `SUP: RESUPPLY DONE, RETURNING. 120 RDS, 8300 L LEFT.`
 

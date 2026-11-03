@@ -271,6 +271,13 @@ pub struct UnitDef {
     /// A supply truck's cargo, instead of its type's default (M8c tailgate resupply).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cargo: Option<CargoAssign>,
+    /// Starts with this fraction of each main-gun round type (rounded down) and of its smoke
+    /// salvos: a unit that has already fought (M8c). None = full.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ammo_fraction: Option<f64>,
+    /// Starts with this fraction of its fuel. None = full.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fuel_fraction: Option<f64>,
 }
 
 /// Cargo listed for one supply truck in a scenario: replaces the default fill (rounds its side

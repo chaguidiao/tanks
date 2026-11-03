@@ -915,3 +915,23 @@ fn the_commander_has_an_immobilised_tank_recovered() {
     assert_eq!(complete, Some(1), "the commander sent the recovery platoon");
     assert!(dist(sim.truth().transform[2].pos, [400.0, 300.0]) < 40.0, "towed to the collection point");
 }
+
+/// Slice 9: a unit that has already fought starts with a fraction of its rounds, smoke salvos and
+/// fuel; its capacity stays the full load, so resupply fills it up again.
+#[test]
+fn a_scenario_unit_can_start_short_of_rounds_and_fuel() {
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    let mut sc = trucks_scenario(vec![]);
+    sc.sides[0].units[0].ammo_fraction = Some(0.25);
+    sc.sides[0].units[0].fuel_fraction = Some(0.5);
+    let sim = Sim::new(&sc, ds.clone(), m.clone()).unwrap();
+    let w = sim.truth();
+    let g = w.gun[0].as_ref().unwrap();
+    assert_eq!((g.rounds(), g.capacity.iter().sum::<u32>()), (10, 40), "{:?}", g.stock);
+    assert_eq!(w.gun[1].as_ref().unwrap().rounds(), 40, "the others are full");
+    let cap = ds.vehicle("bulwark_a1").unwrap().mobility.fuel_capacity_l.get();
+    assert!((w.mobility[0].as_ref().unwrap().fuel_l - cap * 0.5).abs() < 1e-9);
+    sc.sides[0].units[0].ammo_fraction = Some(1.5);
+    assert!(Sim::new(&sc, ds, m).err().expect("refused").contains("fractions"));
+}

@@ -1575,6 +1575,8 @@ mod tests {
             squad: None,
             mounted_in: None,
             cargo: None,
+            ammo_fraction: None,
+            fuel_fraction: None,
         }
     }
 

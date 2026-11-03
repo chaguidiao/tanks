@@ -57,6 +57,8 @@ fn scenario(year: i32, pos: [f64; 2], heading_deg: f64) -> ScenarioDef {
                 squad: None,
                 mounted_in: None,
                 cargo: None,
+                ammo_fraction: None,
+                fuel_fraction: None,
             }],
             ai: None,
             fire_support: vec![],

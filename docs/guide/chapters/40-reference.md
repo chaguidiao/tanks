@@ -215,6 +215,7 @@ All vehicles are fictional names for designs that mirror real ones. Numbers are 
 | AMBUSH IN THE VILLAGE | `m8b-ambush` | 1987, 10:00 | demo | 4 BULWARK A1 | RPG squads and a missile team in the houses |
 | CLEARING THE VILLAGE | `m8f-ambush` | 1987, 10:00 | demo | 4 BULWARK A1, 3 WARD M2 with rifle squads | Infantry with RPGs and a missile team in the houses |
 | THE MARKET TOWN | `m8h-town` | 1987, 09:00 | town | 4 BULWARK A1, 3 WARD M2 with rifle squads | 9 KURGAN-B, 6 SKIF M1 with squads |
+| LONG DEFENCE | `m8c-long-defence` | 1987, 05:30 | demo | 8 BULWARK A1 (10 rounds each), 2 supply trucks, 1 HAWSER A1, supply point | 36 KURGAN-A in three waves |
 
 # Troubleshooting
 
