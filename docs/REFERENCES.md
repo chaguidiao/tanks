@@ -7,6 +7,7 @@ A reading list grouped by subsystem. ★ = read first. Public sources only — n
 - **FM 17-15 *Tank Platoon*** (1987 & 1996 editions) — Cold War predecessor; ideal if the era is ~1990.
 - **ATP 3-90.1 *Armor and Mechanized Infantry Company Team*** — the company echelon the player commands.
 - **FM 71-1 *Tank and Mechanized Infantry Company Team*** (1998) — Cold War/90s company TTPs.
+- **FM 20-22 *Vehicle Recovery Operations*** (1988), successors **FM 4-30.31 *Recovery and Battle Damage Assessment and Repair*** (2006) and **ATP 4-31** — self-, like-vehicle and recovery-vehicle recovery, towing with a tow bar, recovery under fire, fix forward (M8c recovery; no per-task times given).
 - **FM 3-90 *Tactics*** (2023) — offence/defence tasks, control measures.
 - **TC 3-20.31 *Training and Qualification, Crew*** — tank gunnery: fire commands, engagement standards and times.
 - **ATP 2-01.3 *Intelligence Preparation of the Battlefield*** — OAKOC terrain analysis (what the AI's terrain reasoning should mimic).

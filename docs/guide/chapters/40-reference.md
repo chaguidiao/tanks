@@ -63,6 +63,7 @@
 <dt>KE (kinetic energy)</dt><dd>Penetration by mass and velocity (sabot rounds).</dd>
 <dt>LKP (last known position)</dt><dd>Where a contact was last reported; shown with its age in seconds.</dd>
 <dt>Loader</dt><dd>The crew member who loads the main gun in Western tanks. Red tanks use an autoloader and have 3 crew.</dd>
+<dt>UMCP (unit maintenance collection point)</dt><dd>Where recovered vehicles are brought and repaired, normally with the combat trains; in the game, where the recovery platoon waited when ordered to recover.</dd>
 <dt>LOGPAC (logistics package)</dt><dd>A convoy that brings a unit ammunition, fuel and other supplies; in the game an instant refill at a set time.</dd>
 <dt>LOS (line of sight)</dt><dd>Whether two points can see each other.</dd>
 <dt>Masked</dt><dd>Here: a position where the hull is visible but the view towards the threat is blocked.</dd>
@@ -143,7 +144,8 @@
 | <kbd>N</kbd> <kbd>Y</kbd> <kbd>J</kbd> | Smoke rounds, call for fire (again: HE/smoke), adjust fire |
 | <kbd>U</kbd> | Dismount / mount the carriers' squads |
 | <kbd>B</kbd> (squads), RMB on a house | Occupy a building |
-| <kbd>R</kbd> | Resupply at the nearest supply point |
+| <kbd>R</kbd> | Resupply: at a supply point or by the supply trucks |
+| <kbd>O</kbd> | Recover the platoon's immobilised vehicles |
 | <kbd>K</kbd> | Timing of the next order: now / on crossing / +5 min |
 | <kbd>G</kbd> | Graphics: phase line, objective, TRP |
 | <kbd>V</kbd> <kbd>L</kbd> | Viewshed, line of sight |

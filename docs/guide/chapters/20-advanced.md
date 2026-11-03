@@ -314,6 +314,16 @@ Trucks are not armoured. If they come under fire (a shell close by, a shot at th
 
 Trucks do not count for victory: they cannot hold an objective, and losing them does not count as losing fighting strength.
 
+## Recovery
+
+A tank with a **mobility kill** (tracks or running gear knocked out) can still shoot, but it cannot move. Some scenarios give a side a **recovery platoon** (`R`): an armoured recovery vehicle such as the HAWSER A1 or the BUKSIR, shown with the maintenance symbol (a bar with a jaw at each end, like a spanner) and waiting in the trains.
+
+Select the platoon with the immobilised vehicle and press **RECOVER** (<kbd>O</kbd>, also in the right-click **ORDERS** menu); with more than one recovery platoon a short list asks which. The platoon card lists its immobilised vehicles and where each one is (`M-KILL 1-2 AWAITING RECOVERY · 1-4 UNDER TOW`). The recovery vehicle drives up behind the first one (`R: MOVING TO 1-2.`), takes about five minutes to rig the tow bar, and tows it back to the collection point (`R: 1-2 HOOKED UP, TOWING TO UMCP.`), the place where the recovery platoon waited when you gave the order. It tows at about 16 km/h, slower with a vehicle heavier than it is rated for. Then it goes for the next one, and reports `R: RECOVERY COMPLETE, 2 AT UMCP.` when none is left.
+
+At the collection point the vehicle is repaired, which takes about 40 minutes: `1-2: REPAIRED AT UMCP, OPERATIONAL.` It then moves with its platoon again at the platoon's next order.
+
+The recovery vehicle is armoured, but unarmed, and it does not count for victory. It does not stop under fire, so wait until the enemy cannot see the damaged tank, or cover it with smoke and the platoon's fire. If it is knocked out while towing, the tank stays where it was dropped.
+
 ## LOGPACs
 
 A scenario can also bring a **LOGPAC** (logistics package) at a set time: `LOGPAC RECEIVED. REARMED.` or `REFUELLED.` The rounds and fuel arrive at once, wherever the platoon is. The scenario editor's supply points (<kbd>S</kbd>) and the RON file's `logistics` list set both up.
