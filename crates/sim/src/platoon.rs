@@ -304,6 +304,7 @@ impl Platoon {
                 PlatoonOrder::Tailgate { trucks, .. } => Some(*trucks),
                 _ => None,
             },
+            idle: self.is_idle(w),
         }
     }
 

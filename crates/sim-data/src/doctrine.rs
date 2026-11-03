@@ -102,6 +102,24 @@ pub struct DoctrinePack {
     pub defence: Option<DefenceDoctrine>,
     /// Dismounted infantry (plan M8B-INFANTRY §6).
     pub infantry: crate::InfantryDoctrine,
+    /// When the commander AI resupplies and recovers (M8c); `None` = it never does.
+    #[serde(default)]
+    pub logistics: Option<LogisticsDoctrine>,
+}
+
+/// When the commander AI sends platoons to resupply and immobilised vehicles to recovery (plan
+/// M8C-LOGISTICS §4; FM 17-15 (1996) and ATP 3-20.15 (2025) on sustainment: resupply during a
+/// lull, one platoon at a time while the others hold the position).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogisticsDoctrine {
+    /// Resupply a platoon whose main-gun rounds are below this fraction of its full load.
+    pub ammo_threshold: Stat<f64>,
+    /// ... or whose emptiest vehicle has less than this fraction of its fuel.
+    pub fuel_threshold: Stat<f64>,
+    /// Only with no fresh contact this close to the platoon (or the immobilised vehicle) (m).
+    pub clear_of_contact_m: Stat<f64>,
+    /// Do not send the same platoon again for this long after a resupply order (s).
+    pub retry_s: Stat<f64>,
 }
 
 /// Attack position / line of departure (FM 3-90 ch. 3; FM 100-2-1 ch. 5: the echeloned attack

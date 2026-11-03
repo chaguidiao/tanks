@@ -73,6 +73,8 @@ pub struct OwnUnit {
     /// Recovery (M8C-RECOVERY): an immobilised vehicle's or a recovery vehicle's stage, while an
     /// order or a repair is under way.
     pub recovery: Option<RecoveryStage>,
+    /// A recovery vehicle (tow gear).
+    pub recovery_vehicle: bool,
     /// Rounds left per type: (type label, count), in loadout order.
     pub rounds: Vec<(String, u32)>,
     /// Round type the commander ordered; None = crew's choice.
@@ -269,6 +271,8 @@ pub struct PlatoonView {
     pub resupply_at: Option<u32>,
     /// Supply-truck platoon of a tailgate resupply in progress.
     pub resupply_by: Option<PlatoonId>,
+    /// Nothing left to do: no order or plan running, every vehicle halted.
+    pub idle: bool,
 }
 
 /// Control measures (DESIGN.md §8.4; MIL-STD-2525D tactical graphics).

@@ -828,6 +828,9 @@ impl Sim {
                             let start = plan.steps.first().map_or(1, |s| s.id);
                             Command::SetPlan { platoon, plan, start }
                         }
+                        ai::commander::Order::Resupply { platoon, point } => Command::Resupply { platoon, point },
+                        ai::commander::Order::Tailgate { platoon, trucks } => Command::Tailgate { platoon, trucks },
+                        ai::commander::Order::Recover { platoon, by } => Command::Recover { platoon, by },
                         ai::commander::Order::CallFire { battery, at, volleys, smoke } => Command::CallForFire {
                             battery,
                             at,

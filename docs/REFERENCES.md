@@ -26,6 +26,7 @@ A reading list grouped by subsystem. ★ = read first. Public sources only — n
 
 ## Doctrine — Red (OPFOR)
 - ★ **FM 100-2-1 *The Soviet Army: Operations and Tactics*** (1984) — march → pre-battle → battle formations, norms.
+- **FM 100-2-2 *The Soviet Army: Specialized Warfare and Rear Area Support*** (1984) — rear services: resupply and recovery of forward units (generic-opfor logistics block; no thresholds given).
 - **FM 100-2-3 *The Soviet Army: Troops, Organization and Equipment*** (1991).
 - **TC 7-100.2 *Opposing Force Tactics*** (2011); **ATP 7-100.1 *Russian Tactics*** (2024).
 - **Grau & Bartles, *The Russian Way of War*** (FMSO, 2016) — free PDF.

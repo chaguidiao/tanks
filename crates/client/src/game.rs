@@ -1657,7 +1657,7 @@ impl Game {
 
     /// A vehicle type with tow gear (M8c recovery).
     pub(crate) fn is_recovery_vehicle(&self, u: &OwnUnit) -> bool {
-        self.sim.data().vehicle(&u.vehicle_id).is_some_and(|d| d.recovery.is_some())
+        u.recovery_vehicle
     }
 
     /// A platoon of recovery vehicles.
