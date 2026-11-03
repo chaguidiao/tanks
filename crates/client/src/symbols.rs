@@ -34,6 +34,35 @@ pub fn friendly_supply(f: &mut Frame, p: P2, c: Rgba) {
     f.line([x0, y0 + H * 0.68], [x0 + W, y0 + H * 0.68], 1.5, c);
 }
 
+/// The maintenance icon (APP-6D sustainment, maintenance: a bar with a jaw opening outwards at
+/// each end, like a spanner), centred on `p`, `half` = half its length.
+fn maintenance_icon(f: &mut Frame, p: P2, half: f32, c: Rgba) {
+    let r = half * 0.3;
+    let y = p[1];
+    // Jaws: half circles with their tips at the ends, bulging towards the middle (open outwards).
+    for (tip, s) in [(p[0] - half, 1.0f32), (p[0] + half, -1.0)] {
+        let pts: Vec<P2> = (0..=6)
+            .map(|k| {
+                let a = k as f32 * std::f32::consts::PI / 6.0;
+                [tip + s * a.sin() * r, y - a.cos() * r]
+            })
+            .collect();
+        for w in pts.windows(2) {
+            f.line(w[0], w[1], 1.5, c);
+        }
+    }
+    f.line([p[0] - half + r, y], [p[0] + half - r, y], 1.5, c);
+}
+
+/// Friendly recovery vehicle (APP-6D sustainment, maintenance icon in the frame).
+pub fn friendly_recovery(f: &mut Frame, p: P2, c: Rgba) {
+    let (x0, y0) = (p[0] - W / 2.0, p[1] - H / 2.0);
+    f.rect(x0, y0, W, H, Rgba(10, 18, 24, 200));
+    f.rect_lines(x0, y0, W, H, c);
+    f.rect_lines(x0 + 1.0, y0 + 1.0, W - 2.0, H - 2.0, c);
+    maintenance_icon(f, p, W * 0.36, c);
+}
+
 /// Hostile supply vehicle: diamond with the supply bar.
 pub fn hostile_supply(f: &mut Frame, p: P2, c: Rgba) {
     let r = H * 0.9;

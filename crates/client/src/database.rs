@@ -330,6 +330,20 @@ fn vehicle_sheet(ds: &DataSet, v: &VehicleDef) -> Sheet {
             fact("FILLED WITH", "THE ROUNDS ITS SIDE'S VEHICLES CARRY, UNLESS THE SCENARIO LISTS THEM"),
         ]);
     }
+    // Recovery vehicles: tow gear instead of weapons (M8c recovery).
+    if let Some(r) = &v.recovery {
+        let lg = &ds.logistics;
+        l.extend([
+            section("RECOVERY"),
+            stat("TOW SPEED", &r.tow_speed_mps, kmh),
+            stat("RATED TOW MASS", &r.rated_tow_kg, |x| format!("{:.0} T", x / 1000.0)),
+            fact("HEAVIER VEHICLES", "TOWED SLOWER: TOW SPEED · RATED MASS / MASS"),
+            stat("HOOK-UP", &r.hookup_s, |x| format!("{:.0} MIN", x / 60.0)),
+            stat("UNHOOK", &r.unhook_s, |x| format!("{:.0} MIN", x / 60.0)),
+            stat("TOW BAR", &lg.hitch_m, m),
+            stat("REPAIR AT UMCP", &lg.repair_mobility_s, |x| format!("{:.0} MIN", x / 60.0)),
+        ]);
+    }
     if armed {
         l.extend([
             section("ARMAMENT"),
