@@ -362,7 +362,10 @@ mod tests {
         }
         // Tanks carry no troops; every fighting vehicle has a coax (supply trucks are unarmed).
         assert!(ds.vehicle("bulwark_a1").unwrap().troops.is_none());
-        let fighting = ds.vehicles.iter().filter(|v| v.class != crate::VehicleClass::Support);
+        let fighting = ds
+            .vehicles
+            .iter()
+            .filter(|v| !matches!(v.class, crate::VehicleClass::Support | crate::VehicleClass::Recovery));
         assert!(fighting.clone().all(|v| v.coax.is_some()), "every fighting vehicle has a coax MG");
         assert!(fighting.count() >= 15);
     }

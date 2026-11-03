@@ -83,6 +83,13 @@ pub enum Command {
         platoon: PlatoonId,
         trucks: PlatoonId,
     },
+    /// Recovery (docs/plans/M8C-RECOVERY.md): the recovery vehicles of platoon `by` tow the
+    /// immobilised vehicles of `platoon`, one at a time, to the collection point (where they are
+    /// when the order arrives), where they are repaired.
+    Recover {
+        platoon: PlatoonId,
+        by: PlatoonId,
+    },
     /// Occupy a battle position (ATP 3-20.15 ch. 5): circle area, threat direction (compass rad).
     OccupyPosition {
         platoon: PlatoonId,
@@ -510,6 +517,22 @@ pub enum PlatoonReport {
     },
     /// Supply trucks under fire: they stop serving and withdraw to the release point.
     TrucksWithdrawing,
+    /// Recovery vehicle on its way to immobilised `vehicle` (callsign).
+    RecoveryMoving {
+        vehicle: String,
+    },
+    /// Recovery vehicle has `vehicle` on the tow bar, towing to the collection point.
+    RecoveryTowing {
+        vehicle: String,
+    },
+    /// Nothing more to recover: `recovered` vehicles brought in by this order.
+    RecoveryComplete {
+        recovered: u8,
+    },
+    /// `vehicle` of this platoon repaired at the collection point, operational again.
+    Repaired {
+        vehicle: String,
+    },
     /// An off-map LOGPAC arrived: `refuel` = fuel, else ammunition.
     LogpacReceived {
         refuel: bool,

@@ -575,3 +575,200 @@ fn a_new_order_to_the_served_platoon_sends_the_trucks_home_and_replays() {
     rec.play(&mut again, |_, _| {});
     assert_eq!(again.state_hash(), rec.final_hash, "replay diverged");
 }
+
+// --- Slice 7: recovery (docs/plans/M8C-RECOVERY.md) ---
+
+/// A Blue tank platoon with a recovery vehicle in the trains behind it; tanks `killed` are
+/// immobilised. Returns the sim, the platoon ids (tanks, recovery) and the scenario.
+fn recovery_setup(killed: &[usize]) -> (Sim, sim::view::PlatoonId, sim::view::PlatoonId, ScenarioDef) {
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    let mut blue: Vec<_> = (0..4)
+        .map(|i| unit(&format!("1-{}", i + 1), "bulwark_a1", [600.0 + i as f64 * 60.0, 600.0], 90.0, Some("1")))
+        .collect();
+    blue.push(unit("R-1", "hawser_a1", [400.0, 300.0], 90.0, Some("R")));
+    let sc = scenario(12 * 3600, blue, vec![]);
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    immobilise(&mut sim, killed);
+    let pic = sim.perceived(SideId(0));
+    let id = |cs: &str| pic.platoons.iter().find(|p| p.callsign == cs).unwrap().id;
+    let (tanks, rec) = (id("1"), id("R"));
+    (sim, tanks, rec, sc)
+}
+
+fn immobilise(sim: &mut Sim, killed: &[usize]) {
+    for &k in killed {
+        sim.truth_mut().condition[k] = sim::view::Condition::MobilityKill;
+    }
+}
+
+fn stage(sim: &Sim, k: usize) -> Option<sim::view::RecoveryStage> {
+    let id = sim.truth().id[k];
+    sim.perceived(SideId(0)).own.iter().find(|u| u.id == id).unwrap().recovery
+}
+
+/// Plan §3: the recovery vehicle takes the immobilised tanks in platoon order, hooks each up
+/// behind it, tows it home at the tow speed for its mass on a bar of `hitch_m`, drops it there,
+/// and reports; after the repair time each tank is operational and reported repaired.
+#[test]
+fn a_recovery_vehicle_tows_immobilised_tanks_home_one_by_one_and_they_are_repaired() {
+    use sim::view::RecoveryStage as S;
+    let (mut sim, tanks, rec, _) = recovery_setup(&[1, 3]);
+    let ds = data();
+    let hawser = ds.vehicle("hawser_a1").unwrap().recovery.clone().unwrap();
+    let mass = ds.vehicle("bulwark_a1").unwrap().mobility.combat_mass_kg.get();
+    let tow_speed = hawser.tow_speed(mass);
+    assert!(tow_speed < hawser.tow_speed_mps.get(), "an M1A1-class tank is over the M88A1-class rating");
+    let hitch = ds.logistics.hitch_m.get();
+    let home = sim.truth().transform[4].pos;
+    sim.submit(SideId(0), Command::Recover { platoon: tanks, by: rec });
+    let (mut moving, mut towing, mut complete, mut seen) = (Vec::new(), Vec::new(), None, Vec::new());
+    for s in 0..4000 {
+        for e in run(&mut sim, 1.0) {
+            match e {
+                Event::PlatoonReport { report: PlatoonReport::RecoveryMoving { vehicle }, platoon, .. } => {
+                    assert_eq!(platoon, rec);
+                    moving.push(vehicle);
+                }
+                Event::PlatoonReport { report: PlatoonReport::RecoveryTowing { vehicle }, .. } => towing.push(vehicle),
+                Event::PlatoonReport { report: PlatoonReport::RecoveryComplete { recovered }, platoon, .. } => {
+                    assert_eq!(platoon, rec);
+                    complete = Some((s, recovered));
+                }
+                _ => {}
+            }
+        }
+        let w = sim.truth();
+        if let Some(t) = w.tow[4].as_ref().unwrap().towing {
+            let d = dist(w.transform[4].pos, w.transform[t].pos);
+            assert!((d - hitch).abs() < 0.5, "towed on a {hitch} m bar: {d:.1} m");
+            let v = w.mobility[4].as_ref().unwrap().speed;
+            assert!(v <= tow_speed + 0.2, "towing at {v:.2} m/s, limit {tow_speed:.2}");
+        }
+        for k in [1, 3] {
+            if let Some(st) = stage(&sim, k)
+                && !seen.contains(&(k, std::mem::discriminant(&st)))
+            {
+                seen.push((k, std::mem::discriminant(&st)));
+            }
+        }
+        if complete.is_some() {
+            break;
+        }
+    }
+    let (_, recovered) = complete.expect("the recovery platoon reported");
+    assert_eq!(recovered, 2);
+    assert_eq!(moving, vec!["1-2".to_owned(), "1-4".to_owned()], "platoon order");
+    assert_eq!(towing, moving);
+    for k in [1, 3] {
+        for s in [S::Awaiting, S::UnderTow, S::InRepair { ready_in_s: 0.0 }] {
+            assert!(seen.contains(&(k, std::mem::discriminant(&s))), "{k}: {s:?} shown");
+        }
+    }
+    let w = sim.truth();
+    for k in [1, 3] {
+        assert!(dist(w.transform[k].pos, home) < 40.0, "{k} is at the collection point");
+        assert_eq!(w.condition[k], sim::view::Condition::MobilityKill, "{k} not yet repaired");
+    }
+    assert!(w.tow[4].as_ref().unwrap().towing.is_none());
+    assert_eq!(w.condition[0], sim::view::Condition::Operational);
+    // Repairs: the first in at most `repair_mobility_s`.
+    let repair = ds.logistics.repair_mobility_s.get();
+    let mut repaired = Vec::new();
+    for e in run(&mut sim, repair + 5.0) {
+        if let Event::PlatoonReport { report: PlatoonReport::Repaired { vehicle }, platoon, .. } = e {
+            assert_eq!(platoon, tanks);
+            repaired.push(vehicle);
+        }
+    }
+    assert_eq!(repaired, vec!["1-2".to_owned(), "1-4".to_owned()]);
+    for k in [1, 3] {
+        assert_eq!(sim.truth().condition[k], sim::view::Condition::Operational);
+        assert_eq!(stage(&sim, k), None);
+    }
+}
+
+/// Plan §3: a recovery vehicle put out of action drops its tow where it is; with no recovery
+/// vehicle left the order ends, and the tank stays immobilised.
+#[test]
+fn a_recovery_vehicle_knocked_out_while_towing_drops_the_tow() {
+    let (mut sim, tanks, rec, _) = recovery_setup(&[1]);
+    sim.submit(SideId(0), Command::Recover { platoon: tanks, by: rec });
+    for _ in 0..1200 {
+        run(&mut sim, 1.0);
+        if sim.truth().tow[4].as_ref().unwrap().towing.is_some() {
+            break;
+        }
+    }
+    run(&mut sim, 20.0);
+    assert!(sim.truth().tow[4].as_ref().unwrap().towing.is_some(), "under tow");
+    let at = sim.truth().transform[1].pos;
+    sim.truth_mut().condition[4] = sim::view::Condition::MobilityKill;
+    let ev = run(&mut sim, 3.0);
+    assert!(
+        ev.iter().any(|e| matches!(
+            e,
+            Event::PlatoonReport { report: PlatoonReport::RecoveryComplete { recovered: 0 }, .. }
+        )),
+        "{ev:?}"
+    );
+    let w = sim.truth();
+    assert!(w.tow[4].as_ref().unwrap().towing.is_none(), "tow dropped");
+    assert!(dist(w.transform[1].pos, at) < 15.0, "the tank stays about where it was dropped");
+    run(&mut sim, 10.0);
+    assert!(dist(sim.truth().transform[1].pos, at) < 15.0);
+    assert_eq!(sim.truth().condition[1], sim::view::Condition::MobilityKill);
+}
+
+/// Recovery vehicles are support vehicles: not fighting vehicles, never part of the force for
+/// victory, and recognised by the enemy as logistics vehicles; they form a platoon of their own.
+#[test]
+fn recovery_vehicles_are_support_and_form_their_own_platoon() {
+    let (sim, _, _, sc) = recovery_setup(&[]);
+    let w = sim.truth();
+    assert!(w.support(4) && !w.fighting(4));
+    assert!(w.gun[4].as_ref().unwrap().rounds() == 0, "nothing to fire");
+    let mut mixed = sc.clone();
+    mixed.sides[0].units[4].platoon = Some("1".into());
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    assert!(Sim::new(&mixed, ds, m).err().expect("refused").contains("platoon of their own"));
+}
+
+/// Nothing to recover: the order ends at once; a new order to the recovery platoon mid-tow drops
+/// the tow; the run replays to the same state.
+#[test]
+fn a_new_order_to_the_recovery_platoon_drops_the_tow_and_replays() {
+    let (mut sim, tanks, rec, sc) = recovery_setup(&[2]);
+    sim.submit(SideId(0), Command::Recover { platoon: tanks, by: rec });
+    for _ in 0..1200 {
+        run(&mut sim, 1.0);
+        if sim.truth().tow[4].as_ref().unwrap().towing.is_some() {
+            break;
+        }
+    }
+    run(&mut sim, 10.0);
+    let task = |sim: &Sim| sim.perceived(SideId(0)).platoons.iter().find(|p| p.id == rec).unwrap().task.clone();
+    assert_eq!(task(&sim), "RECOVERING, TOWING");
+    sim.submit(
+        SideId(0),
+        Command::PlatoonMove {
+            platoon: rec,
+            destination: [300.0, 300.0],
+            via: vec![],
+            formation: None,
+            technique: sim_data::Technique::Traveling,
+            speed_limit_mps: None,
+        },
+    );
+    run(&mut sim, 30.0);
+    assert!(sim.truth().tow[4].as_ref().unwrap().towing.is_none(), "tow dropped on the new order");
+    assert_eq!(sim.truth().condition[2], sim::view::Condition::MobilityKill);
+    let rec_rep = Replay::from_ron(&Replay::record(&sim).to_ron()).unwrap();
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    let mut again = Sim::new(&sc, ds, m).unwrap();
+    immobilise(&mut again, &[2]);
+    rec_rep.play(&mut again, |_, _| {});
+    assert_eq!(again.state_hash(), rec_rep.final_hash, "replay diverged");
+}

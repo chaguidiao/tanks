@@ -24,6 +24,7 @@ pub mod picture;
 pub mod plan;
 pub mod platoon;
 pub mod platoon_ai;
+pub mod recovery;
 pub mod sensors;
 pub mod smallarms;
 pub mod smoke;
@@ -127,6 +128,8 @@ pub struct Sim {
     supply: Vec<logistics::SupplyPoint>,
     /// Scenario re-arm events as (tick, side, generated `Command::Logpac`), in tick order.
     logpacs: Vec<(u64, SideId, Command)>,
+    /// Recovered vehicles being repaired at their collection point (M8c recovery).
+    repairs: Vec<recovery::Repair>,
     /// Recent shell bursts (pruned after `IMPACT_KEEP_S`).
     impacts: Vec<fires::Impact>,
     /// Per side: the equipment year (scenario date or the side's tech year).
@@ -500,9 +503,13 @@ impl Sim {
         // Supply trucks: the scenario's cargo, else the type's capacity filled with the rounds
         // the side's vehicles carry (plan M8C-TAILGATE-TRUCKS §3).
         for p in &platoons {
-            let support = p.members.iter().filter(|&&k| world.cargo[k].is_some()).count();
-            if support > 0 && support < p.members.len() {
+            let trucks = p.members.iter().filter(|&&k| world.cargo[k].is_some()).count();
+            let wreckers = p.members.iter().filter(|&&k| world.tow[k].is_some()).count();
+            if trucks > 0 && trucks < p.members.len() {
                 return Err(format!("{}: supply trucks form a platoon of their own", p.callsign));
+            }
+            if wreckers > 0 && wreckers < p.members.len() {
+                return Err(format!("{}: recovery vehicles form a platoon of their own", p.callsign));
             }
         }
         for (k, assign) in &trucks {
@@ -594,6 +601,7 @@ impl Sim {
             batteries,
             supply,
             logpacs,
+            repairs: Vec::new(),
             impacts: Vec::new(),
             years,
         };
@@ -854,10 +862,21 @@ impl Sim {
                 logistics: &self.data.logistics,
                 avoid: &self.avoid,
                 recalled: Vec::new(),
+                repairs: &mut self.repairs,
             };
             platoon_ai::step(&mut self.platoons, &mut ctx);
             for (side, cmd) in sim_cmds {
                 self.apply(&TimedCommand { tick, side, cmd, immediate: true, generated: true }, &mut events);
+            }
+            // Repairs at the collection point (plan M8C-RECOVERY §3).
+            for r in recovery::repair_step(&mut self.world, &mut self.repairs, tick) {
+                if let Some(pid) = r.platoon {
+                    events.push(Event::PlatoonReport {
+                        side: self.world.side[r.k],
+                        platoon: pid,
+                        report: PlatoonReport::Repaired { vehicle: self.world.callsign[r.k].clone() },
+                    });
+                }
             }
         }
 
@@ -1176,6 +1195,10 @@ impl Sim {
 
         infantry::move_squads(&mut self.world, &self.map, &self.data.terrain, &self.data.infantry, &mut events);
         infantry::follow_carriers(&mut self.world);
+        if self.world.tow.iter().flatten().any(|t| t.towing.is_some()) {
+            let g = Ground::new(&self.map, &self.data.terrain);
+            recovery::tow_step(&mut self.world, &g, self.data.logistics.hitch_m.get());
+        }
 
         // 9. Victory conditions (1 Hz).
         if tick.is_multiple_of(PLATOON_AI_EVERY)
@@ -1301,6 +1324,7 @@ impl Sim {
             | Command::OccupyPosition { platoon, .. }
             | Command::Resupply { platoon, .. }
             | Command::Tailgate { platoon, .. }
+            | Command::Recover { by: platoon, .. }
             | Command::SetPlan { platoon, .. }
             | Command::BreakContact { platoon } => Some(*platoon),
             Command::Reverse { to: Addressee::Platoon(p), .. } => Some(*p),
@@ -1829,6 +1853,35 @@ impl Sim {
                 events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
                 events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*trucks) });
             }
+            Command::Recover { platoon, by } => {
+                let world = &self.world;
+                let own = |p: &&platoon::Platoon, id: PlatoonId| p.side == c.side && p.id == id;
+                let wreckers = |p: &platoon::Platoon| p.members.iter().all(|&k| world.tow[k].is_some());
+                let (Some(from), Some(rec)) = (
+                    self.platoons.iter().find(|p| own(p, *platoon) && !p.dismount && *platoon != *by),
+                    self.platoons.iter().find(|p| own(p, *by) && !p.members.is_empty() && wreckers(p)),
+                ) else {
+                    return;
+                };
+                let alive: Vec<usize> = rec.members.iter().copied().filter(|&k| world.can_move(k)).collect();
+                if alive.is_empty() {
+                    return;
+                }
+                // The collection point: where the recovery vehicles are (the combat trains).
+                let home = platoon_ai::centroid(world, &alive);
+                let order = platoon::PlatoonOrder::Recover {
+                    from: *platoon,
+                    targets: from.members.clone(),
+                    home,
+                    jobs: vec![recovery::RecoveryJob::new(); rec.members.len()],
+                    recovered: 0,
+                };
+                let q = self.platoons.iter_mut().find(|p| p.side == c.side && p.id == *by).expect("found above");
+                q.order = order;
+                q.plan = None;
+                q.held = None;
+                events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*by) });
+            }
             Command::Dismount { platoon } | Command::Mount { platoon } => {
                 let Some(p) = self.platoons.iter().find(|p| p.id == *platoon && p.side == c.side) else { return };
                 // Either platoon of the pair can be addressed.
@@ -1983,6 +2036,41 @@ impl Sim {
                     }
                 }
             }
+            for p in self.platoons.iter().filter(|p| p.side == dst.side) {
+                let platoon::PlatoonOrder::Recover { targets, jobs, .. } = &p.order else { continue };
+                use ai::picture::RecoveryStage as S;
+                use recovery::RecoveryStep;
+                let mut stage = |k: usize, s: S| {
+                    if let Some(u) = dst.own.iter_mut().find(|u| u.id == self.world.id[k]) {
+                        u.recovery = Some(s);
+                    }
+                };
+                for &t in targets.iter().filter(|&&t| self.world.condition[t] == Condition::MobilityKill) {
+                    stage(t, S::Awaiting);
+                }
+                for (&k, j) in p.members.iter().zip(jobs) {
+                    let (own, towed) = match j.step {
+                        RecoveryStep::Idle => (S::Returning, None),
+                        RecoveryStep::ToVehicle => (S::ToVehicle, None),
+                        RecoveryStep::HookingUp => (S::HookingUp, None),
+                        RecoveryStep::Towing => (S::Towing, Some(S::UnderTow)),
+                        RecoveryStep::Unhooking => (S::Unhooking, Some(S::UnderTow)),
+                    };
+                    if self.world.alive(k) {
+                        stage(k, own);
+                    }
+                    if let (Some(v), Some(s)) = (j.target, towed) {
+                        stage(targets[v], s);
+                    }
+                }
+            }
+            for u in dst.own.iter_mut() {
+                if let Some(s) =
+                    self.world.index_of(u.id).and_then(|k| recovery::repair_stage(&self.repairs, k, self.tick))
+                {
+                    u.recovery = Some(s);
+                }
+            }
             for u in dst.own.iter_mut() {
                 let Some(c) = self.world.index_of(u.id).and_then(|k| self.world.cargo[k].as_ref()) else { continue };
                 u.cargo = Some(ai::picture::CargoView {
@@ -2083,6 +2171,21 @@ impl Sim {
                 }
             }
         }
+        // Recovery work and repairs (nothing without recovery vehicles: old hashes hold).
+        for p in &self.platoons {
+            if let platoon::PlatoonOrder::Recover { from, jobs, recovered, .. } = &p.order {
+                h.u32(p.id.0);
+                h.u32(from.0);
+                h.u8(*recovered);
+                for j in jobs {
+                    j.hash_into(&mut h);
+                }
+            }
+        }
+        for r in &self.repairs {
+            h.u64(r.k as u64);
+            h.u64(r.done_tick);
+        }
         for r in [
             &self.rngs.mobility,
             &self.rngs.sensors,
@@ -2100,7 +2203,7 @@ impl Sim {
 /// Behaviour version of the simulation. A replay records it and is only played back by a build
 /// with the same version: bump it whenever a change makes an old command log play out
 /// differently (plan M8B-INFANTRY §8, DESIGN.md §14 #29). Replays from before versioning read as 0.
-pub const SIM_VERSION: u32 = 8;
+pub const SIM_VERSION: u32 = 9;
 
 /// A recorded game: scenario id plus the external command log. Re-simulating it reproduces the
 /// game exactly (determinism), which is what the after-action review and replays rely on.

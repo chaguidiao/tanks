@@ -111,13 +111,12 @@ impl SideState {
                 _ => None,
             })
             .flatten();
-        let kind = (level >= ContactLevel::Recognised).then(|| {
-            match (world.squad[target].is_some(), world.cargo[target].is_some()) {
+        let kind =
+            (level >= ContactLevel::Recognised).then(|| match (world.squad[target].is_some(), world.support(target)) {
                 (true, _) => ContactKind::Infantry,
                 (false, true) => ContactKind::Supply,
                 (false, false) => ContactKind::Vehicle,
-            }
-        });
+            });
         let launched = world.launch[target].is_some_and(|(lt, _)| tick.saturating_sub(lt) <= LAUNCH_REPORT);
         let missile_team = level == ContactLevel::Identified
             && world.squad[target].as_ref().is_some_and(|s| {
@@ -364,6 +363,7 @@ impl SideState {
                 full_load: w.gun[k].as_ref().map_or(0, |g| g.capacity.iter().sum()),
                 service: None,
                 cargo: None,
+                recovery: None,
                 rounds,
                 ammo_selected,
                 era_left: w.era[k],

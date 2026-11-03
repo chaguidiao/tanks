@@ -20,4 +20,8 @@
     release_m: (value: 300.0, source: "estimate: FM 17-15 (1996) / ATP 3-20.15 (2025) bring the LOGPAC to a release point behind the platoon; a few hundred metres keeps it out of direct-fire range of the line", confidence: estimate),
     tailgate_m: (value: 12.0, source: "estimate: the truck backs up close behind the vehicle so rounds and the fuel hose can be handed over", confidence: estimate),
     withdraw_burst_m: (value: 150.0, source: "estimate: unarmoured trucks do not stay under fire; the same radius as the platoon's react-to-indirect-fire drill", confidence: estimate),
+    hitch_m: (value: 10.0, source: "estimate: a rigid tow bar of a few metres between the hulls, plus the hull overhangs", confidence: estimate,
+        notes: "FM 20-22 (1988) describes towing tracked vehicles with a tow bar; the length here is where the recovery vehicle stops and where the towed hull follows."),
+    repair_mobility_s: (value: 2400.0, source: "estimate", confidence: estimate,
+        notes: "FM 17-15 (1996) / FM 71-1 (1998): what cannot be fixed on the spot is recovered to the UMCP and repaired there. A typical mobility kill (track, road wheels, suspension arm) is crew-and-mechanic work of about an hour at the collection point; 40 min keeps a repaired tank inside a scenario's time. No public per-repair times."),
 )

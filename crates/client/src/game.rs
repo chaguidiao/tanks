@@ -3670,6 +3670,13 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                     format!("{cs}: RESUPPLY DONE, RETURNING. {rounds} RDS, {:.0} L LEFT.", fuel_l)
                 }
                 PlatoonReport::TrucksWithdrawing => format!("{cs}: UNDER FIRE, WITHDRAWING."),
+                PlatoonReport::RecoveryMoving { vehicle } => format!("{cs}: MOVING TO {vehicle}."),
+                PlatoonReport::RecoveryTowing { vehicle } => format!("{cs}: {vehicle} HOOKED UP, TOWING TO UMCP."),
+                PlatoonReport::RecoveryComplete { recovered: 0 } => format!("{cs}: RECOVERY COMPLETE. NONE RECOVERED."),
+                PlatoonReport::RecoveryComplete { recovered } => {
+                    format!("{cs}: RECOVERY COMPLETE, {recovered} AT UMCP.")
+                }
+                PlatoonReport::Repaired { vehicle } => format!("{vehicle}: REPAIRED AT UMCP, OPERATIONAL."),
                 PlatoonReport::SetInPosition { hull_down, turret_down, exposed, facing } => format!(
                     "{cs}: SET IN BP. {hull_down} HULL-DOWN, {turret_down} TURRET-DOWN, {exposed} EXPOSED. ORIENTED {} MILS.",
                     format::mils(*facing)

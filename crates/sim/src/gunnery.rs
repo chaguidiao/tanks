@@ -608,8 +608,9 @@ fn choose_target(
             .min_by(|a, b| a.range_m.total_cmp(&b.range_m).then(a.target.cmp(&b.target)))
             .map(|tr| tr.target)
     };
-    // Supply trucks come last: they do not shoot back (plan M8C-TAILGATE-TRUCKS §5).
-    let truck = |tr: &crate::world::LocalTrack| world.cargo[tr.target].is_some();
+    // Supply trucks and recovery vehicles come last: they do not shoot back (plan
+    // M8C-TAILGATE-TRUCKS §5).
+    let truck = |tr: &crate::world::LocalTrack| world.support(tr.target);
     nearest(&anti_tank)
         .or_else(|| nearest(&|tr| squad(tr) && tr.range_m <= close_infantry))
         .or_else(|| nearest(&|tr| !squad(tr) && !truck(tr)))

@@ -72,6 +72,10 @@
             direct: (catastrophic: (value: 0.7, source: "estimate: a soft-skinned truck hit by a 150 mm shell is destroyed", confidence: estimate), firepower: (value: 0.0, source: "estimate: no weapons", confidence: estimate), mobility: (value: 0.25, source: "estimate", confidence: estimate), crew: (value: 0.05, source: "estimate", confidence: estimate)),
             near: (catastrophic: (value: 0.1, source: "estimate: fragments through a cab or a fuel tank", confidence: estimate), firepower: (value: 0.0, source: "estimate", confidence: estimate), mobility: (value: 0.3, source: "estimate: tyres and radiators", confidence: estimate), crew: (value: 0.15, source: "estimate", confidence: estimate)),
             near_sights: (value: 0.0, source: "estimate: no sights", confidence: estimate)),
+        (class: recovery,
+            direct: (catastrophic: (value: 0.1, source: "estimate: an armoured tank-hull vehicle without a turret, a little more vulnerable than a tank to a roof hit", confidence: estimate), firepower: (value: 0.0, source: "estimate: no weapons in the model", confidence: estimate), mobility: (value: 0.3, source: "estimate: as a tank's running gear", confidence: estimate), crew: (value: 0.15, source: "estimate: crew works outside the hull while rigging", confidence: estimate)),
+            near: (catastrophic: (value: 0.0, source: "estimate", confidence: estimate), firepower: (value: 0.0, source: "estimate", confidence: estimate), mobility: (value: 0.04, source: "estimate", confidence: estimate), crew: (value: 0.03, source: "estimate", confidence: estimate)),
+            near_sights: (value: 0.0, source: "estimate: no sights", confidence: estimate)),
         ],
     ),
     suppression: (

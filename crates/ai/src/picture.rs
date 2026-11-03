@@ -70,6 +70,9 @@ pub struct OwnUnit {
     pub service: Option<ServiceStage>,
     /// What a supply truck carries (M8c tailgate resupply); None for every other unit.
     pub cargo: Option<CargoView>,
+    /// Recovery (M8C-RECOVERY): an immobilised vehicle's or a recovery vehicle's stage, while an
+    /// order or a repair is under way.
+    pub recovery: Option<RecoveryStage>,
     /// Rounds left per type: (type label, count), in loadout order.
     pub rounds: Vec<(String, u32)>,
     /// Round type the commander ordered; None = crew's choice.
@@ -167,6 +170,26 @@ pub enum ServiceStage {
     Done,
 }
 
+/// Recovery of immobilised vehicles (M8c; FM 17-15 (1996): recovered to the UMCP and repaired).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RecoveryStage {
+    /// Immobilised, a recovery vehicle on its way or about to be.
+    Awaiting,
+    /// On the tow bar.
+    UnderTow,
+    /// Being repaired at the collection point.
+    InRepair {
+        ready_in_s: f64,
+    },
+    /// A recovery vehicle driving to the vehicle it has taken.
+    ToVehicle,
+    HookingUp,
+    Towing,
+    Unhooking,
+    /// A recovery vehicle with nothing taken (back at or returning to the collection point).
+    Returning,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ContactLevel {
     /// Something is there.
@@ -182,7 +205,7 @@ pub enum ContactLevel {
 pub enum ContactKind {
     Vehicle,
     Infantry,
-    /// An unarmed supply vehicle (truck), recognised as such (M8c tailgate resupply).
+    /// An unarmed logistics vehicle (supply truck or recovery vehicle), recognised as such (M8c).
     Supply,
 }
 

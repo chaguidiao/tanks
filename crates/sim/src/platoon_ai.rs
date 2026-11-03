@@ -69,6 +69,8 @@ pub struct Ctx<'a> {
     /// Carrier platoons whose plans called their squads back aboard this tick: the orders and
     /// plans of their dismount platoons end.
     pub recalled: Vec<PlatoonId>,
+    /// Recovered vehicles in repair at the collection point (M8c recovery).
+    pub repairs: &'a mut Vec<crate::recovery::Repair>,
 }
 
 impl<'a> Ctx<'a> {
@@ -145,14 +147,22 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
             crate::plan::step(p, ctx);
             continue;
         }
-        // Supply trucks fight nothing: no plans, no fire distribution, no contact drills.
-        if p.members.iter().any(|&k| ctx.world.cargo[k].is_some()) {
+        // Supply trucks and recovery vehicles fight nothing: no plans, no fire distribution, no
+        // contact drills.
+        if p.members.iter().any(|&k| ctx.world.support(k)) {
+            if !matches!(p.order, PlatoonOrder::Recover { .. }) {
+                // Another order ended the recovery: a tow is dropped where it is.
+                for &k in &p.members {
+                    crate::recovery::drop_tow(ctx.world, k);
+                }
+            }
             match p.order.clone() {
                 PlatoonOrder::Move { .. } => {
                     let doctrine = ctx.doctrines[p.side.0 as usize].clone();
                     move_step(p, ctx, &doctrine)
                 }
                 PlatoonOrder::Deliver { .. } => deliver_step(p, ctx),
+                PlatoonOrder::Recover { .. } => recover_step(p, ctx),
                 _ => {}
             }
             continue;
@@ -171,7 +181,10 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
             PlatoonOrder::Occupy { .. } => occupy_step(p, ctx, &doctrine),
             PlatoonOrder::Contact => contact_step(p, ctx),
             PlatoonOrder::Resupply { .. } => resupply_step(p, ctx),
-            PlatoonOrder::Tailgate { .. } | PlatoonOrder::Deliver { .. } | PlatoonOrder::None => {}
+            PlatoonOrder::Tailgate { .. }
+            | PlatoonOrder::Deliver { .. }
+            | PlatoonOrder::Recover { .. }
+            | PlatoonOrder::None => {}
         }
     }
     tailgate_link(platoons, ctx);
@@ -706,6 +719,133 @@ fn deliver_step(p: &mut Platoon, ctx: &mut Ctx) {
         }
     }
     p.order = PlatoonOrder::Deliver { to, targets, release, home, phase, jobs };
+}
+
+/// Recovery (plan M8C-RECOVERY §3; FM 17-15 (1996), FM 71-1 (1998): what the crew cannot move
+/// is recovered by the maintenance section to the UMCP; FM 20-22 (1988): towing with a tow bar).
+/// Each recovery vehicle takes, in platoon order, the next immobilised vehicle no other one has
+/// taken, stops `hitch_m` behind it, hooks up, tows it to the collection point at the tow speed
+/// for its mass, drops it there for repair and takes the next. With nothing left and every
+/// recovery vehicle back, the platoon reports and the order ends.
+fn recover_step(p: &mut Platoon, ctx: &mut Ctx) {
+    use crate::recovery::{RecoveryStep, Repair, drop_tow};
+    let PlatoonOrder::Recover { from, targets, home, mut jobs, mut recovered } = p.order.clone() else { return };
+    let hitch = ctx.logistics.hitch_m.get();
+    let members = p.members.clone();
+    let park = |i: usize| -> Vec2 {
+        // Side by side at the collection point.
+        let off = (i as f64 - (members.len() as f64 - 1.0) / 2.0) * 15.0;
+        [home[0] + off, home[1]]
+    };
+    let drive = |ctx: &mut Ctx, k: usize, goal_now: &mut Vec2, goal: Vec2, arrive: f64, limit: Option<f64>| {
+        let pos = ctx.world.transform[k].pos;
+        let idle = ctx.world.ai[k].as_ref().is_some_and(|a| matches!(a.order, Order::Idle | Order::Face { .. }));
+        let moved = goal_now[0].is_nan() || dist(*goal_now, goal) > 2.0;
+        if dist(pos, goal) > arrive && (moved || idle) {
+            if let Some(r) = ctx.route(k, goal, false) {
+                ctx.world.set_route(k, r, limit, None, true, arrive);
+            }
+            *goal_now = goal;
+        }
+        dist(pos, goal) <= arrive.max(8.0)
+    };
+    let still = |w: &World, q: usize| w.mobility[q].as_ref().is_some_and(|m| m.speed.abs() < 0.5);
+    let ticks = |s: f64| (s / DT).round() as u64;
+    for (i, &k) in members.iter().enumerate() {
+        let job = &mut jobs[i];
+        let tgt = job.target.map(|v| targets[v]);
+        // A recovery vehicle put out of action drops its tow; a target destroyed is let go.
+        if !ctx.world.can_move(k) || tgt.is_some_and(|t| ctx.world.condition[t] != Condition::MobilityKill) {
+            drop_tow(ctx.world, k);
+            job.target = None;
+            job.step = RecoveryStep::Idle;
+            job.goal = [f64::NAN, f64::NAN];
+            if !ctx.world.can_move(k) {
+                continue;
+            }
+        }
+        let Some(rd) = ctx.world.vehicle[k].and_then(|vi| ctx.vehicles[vi].recovery.clone()) else { continue };
+        if job.target.is_none() {
+            let taken: Vec<usize> = jobs.iter().filter_map(|j| j.target).collect();
+            let repairs = &*ctx.repairs;
+            let w = &*ctx.world;
+            let next = (0..targets.len()).find(|&v| {
+                let t = targets[v];
+                !taken.contains(&v) && w.condition[t] == Condition::MobilityKill && !repairs.iter().any(|r| r.k == t)
+            });
+            let job = &mut jobs[i];
+            if let Some(v) = next {
+                job.target = Some(v);
+                job.step = RecoveryStep::ToVehicle;
+                job.goal = [f64::NAN, f64::NAN];
+                let vehicle = ctx.world.callsign[targets[v]].clone();
+                ctx.report(p, PlatoonReport::RecoveryMoving { vehicle });
+            } else {
+                drive(ctx, k, &mut job.goal, park(i), 10.0, None);
+                continue;
+            }
+        }
+        let job = &mut jobs[i];
+        let t = targets[job.target.expect("taken above")];
+        match job.step {
+            RecoveryStep::Idle | RecoveryStep::ToVehicle => {
+                job.step = RecoveryStep::ToVehicle;
+                let (tp, h) = (ctx.world.transform[t].pos, ctx.world.transform[t].heading);
+                let spot = [tp[0] - libm::sin(h) * hitch, tp[1] - libm::cos(h) * hitch];
+                let there = drive(ctx, k, &mut job.goal, spot, 4.0, None);
+                if there && still(ctx.world, k) {
+                    ctx.world.halt(k);
+                    job.step = RecoveryStep::HookingUp;
+                    job.until = ctx.tick + ticks(rd.hookup_s.get());
+                }
+            }
+            RecoveryStep::HookingUp => {
+                if ctx.tick >= job.until {
+                    if let Some(g) = ctx.world.tow[k].as_mut() {
+                        g.towing = Some(t);
+                    }
+                    job.step = RecoveryStep::Towing;
+                    job.goal = [f64::NAN, f64::NAN];
+                    let vehicle = ctx.world.callsign[t].clone();
+                    ctx.report(p, PlatoonReport::RecoveryTowing { vehicle });
+                }
+            }
+            RecoveryStep::Towing => {
+                let mass = ctx.world.vehicle[t].map_or(0.0, |vi| ctx.vehicles[vi].mobility.combat_mass_kg.get());
+                let limit = Some(rd.tow_speed(mass));
+                if drive(ctx, k, &mut job.goal, park(i), 10.0, limit) {
+                    ctx.world.halt(k);
+                    job.step = RecoveryStep::Unhooking;
+                    job.until = ctx.tick + ticks(rd.unhook_s.get());
+                }
+            }
+            RecoveryStep::Unhooking => {
+                if ctx.tick >= job.until {
+                    drop_tow(ctx.world, k);
+                    let done_tick = ctx.tick + ticks(ctx.logistics.repair_mobility_s.get());
+                    ctx.repairs.push(Repair { k: t, platoon: ctx.world.platoon[t], done_tick });
+                    recovered = recovered.saturating_add(1);
+                    job.target = None;
+                    job.step = RecoveryStep::Idle;
+                    job.goal = [f64::NAN, f64::NAN];
+                }
+            }
+        }
+    }
+    let home_now = members.iter().enumerate().all(|(i, &k)| {
+        !ctx.world.can_move(k) || (jobs[i].target.is_none() && dist(ctx.world.transform[k].pos, park(i)) <= 15.0)
+    });
+    let waiting = (0..targets.len()).any(|v| {
+        let t = targets[v];
+        ctx.world.condition[t] == Condition::MobilityKill && !ctx.repairs.iter().any(|r| r.k == t)
+    });
+    let able = members.iter().any(|&k| ctx.world.can_move(k));
+    if home_now && (!waiting || !able) {
+        p.order = PlatoonOrder::None;
+        ctx.report(p, PlatoonReport::RecoveryComplete { recovered });
+        return;
+    }
+    p.order = PlatoonOrder::Recover { from, targets, home, jobs, recovered };
 }
 
 /// Tailgate resupply, platoon side: the served platoon's per-vehicle stage follows the trucks;
