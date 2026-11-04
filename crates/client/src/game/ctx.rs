@@ -60,6 +60,8 @@ pub enum MenuAct {
     Gfx(GfxEdit),
     /// Resupply the selected platoon from this source.
     Resupply(super::ResupplySource),
+    /// Recover the selected platoon's immobilised vehicles with this recovery platoon.
+    Recover(PlatoonId),
 }
 
 pub(super) fn reaction_name(r: ContactReaction) -> &'static str {
@@ -164,6 +166,15 @@ impl Game {
                 match self.sel_platoon {
                     _ if self.picture().supply_points.is_empty() => it.disabled("NO SUPPLY POINT"),
                     None => it.disabled("NO PLATOON SELECTED"),
+                    Some(_) => it,
+                }
+            },
+            {
+                let it = MenuItem::new("RECOVER", MenuAct::Cmd(Cmd::Recover)).key("O");
+                match self.sel_platoon {
+                    None => it.disabled("NO PLATOON SELECTED"),
+                    Some(p) if self.immobilised(p).is_empty() => it.disabled("NO VEHICLE IMMOBILISED"),
+                    Some(p) if !self.recovery_platoons(p).iter().any(|s| s.2) => it.disabled("NO RECOVERY VEHICLE"),
                     Some(_) => it,
                 }
             },
@@ -342,6 +353,11 @@ impl Game {
             MenuAct::Resupply(src) => {
                 if let Some(p) = self.sel_platoon {
                     self.send_resupply(p, src);
+                }
+            }
+            MenuAct::Recover(by) => {
+                if let Some(p) = self.sel_platoon {
+                    self.send_recover(p, by);
                 }
             }
             MenuAct::SelectPlatoon(p) => self.act(GameAction::SelectPlatoon(p), fx),

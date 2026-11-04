@@ -68,22 +68,30 @@ pub struct ScenarioEntry {
 }
 
 /// Count a side's vehicles by class, e.g. `8 TANKS · 3 IFVS`. Classes appear in the order
-/// MBT, IFV, RECON, SUPPORT; a vehicle id the data set does not know counts as `UNKNOWN`.
+/// MBT, IFV, RECON, SUPPORT, RECOVERY; a vehicle id the data set does not know counts as `UNKNOWN`.
 pub fn force_summary<'a>(
     vehicles: impl IntoIterator<Item = &'a str>,
     class_of: impl Fn(&str) -> Option<VehicleClass>,
 ) -> String {
-    let mut counts = [0usize; 5];
+    let mut counts = [0usize; 6];
     for v in vehicles {
         counts[match class_of(v) {
             Some(VehicleClass::Mbt) => 0,
             Some(VehicleClass::Ifv) => 1,
             Some(VehicleClass::Recon) => 2,
             Some(VehicleClass::Support) => 3,
-            None => 4,
+            Some(VehicleClass::Recovery) => 4,
+            None => 5,
         }] += 1;
     }
-    let names = [("TANK", "TANKS"), ("IFV", "IFVS"), ("RECON", "RECON"), ("TRUCK", "TRUCKS"), ("UNKNOWN", "UNKNOWN")];
+    let names = [
+        ("TANK", "TANKS"),
+        ("IFV", "IFVS"),
+        ("RECON", "RECON"),
+        ("TRUCK", "TRUCKS"),
+        ("ARV", "ARVS"),
+        ("UNKNOWN", "UNKNOWN"),
+    ];
     let parts: Vec<String> = counts
         .iter()
         .zip(names)

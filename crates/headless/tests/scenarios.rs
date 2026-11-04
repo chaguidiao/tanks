@@ -5,13 +5,14 @@
 
 use std::process::Command;
 
-const SCENARIOS: [&str; 6] = [
+const SCENARIOS: [&str; 7] = [
     "cw-village-defence",
     "cw-night-delay",
     "cw-hasty-attack",
     "mod-fog-meeting",
     "mod-dusk-attack",
     "mod-delay-in-depth",
+    "m8c-long-defence",
 ];
 
 fn run(id: &str) -> String {

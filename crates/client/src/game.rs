@@ -134,6 +134,8 @@ pub enum Cmd {
     Resupply,
     /// DISMOUNT the selected carrier platoon's squads, or MOUNT a dismount platoon.
     Dismount,
+    /// Recover the selected platoon's immobilised vehicles with a recovery platoon (M8c).
+    Recover,
     Contingency,
     NextPlatoon,
     PhaseLine,
@@ -304,6 +306,8 @@ pub struct Game {
     graphics_request: bool,
     /// The RESUPPLY source list, asked for while several sources exist.
     resupply_request: bool,
+    /// The RECOVER list of recovery platoons, asked for while several exist.
+    recover_request: bool,
     /// HALT (true) / RESUME (false) sent but not yet received.
     pending_held: Vec<(Addressee, bool, f64)>,
     /// Plan being edited (sent with SEND; drawn dashed until then).
@@ -377,6 +381,7 @@ impl Game {
             posture_request: None,
             graphics_request: false,
             resupply_request: false,
+            recover_request: false,
             pending_held: Vec::new(),
             plan: None,
             parked: BTreeMap::new(),
@@ -797,6 +802,7 @@ impl Game {
             (Key::Char('x'), C::BreakContact),
             (Key::Char('r'), C::Resupply),
             (Key::Char('u'), C::Dismount),
+            (Key::Char('o'), C::Recover),
             (Key::Char('h'), C::Halt),
             (Key::Char('m'), C::Move),
             (Key::Char('a'), C::Engage),
@@ -926,6 +932,7 @@ impl Game {
         self.open_posture_menu(inp);
         self.open_graphics_menu(inp);
         self.open_resupply_menu(inp);
+        self.open_recover_menu(inp);
         let world = cam.to_world(inp.mouse);
         let swallowed = self.rmb_update(inp, cam, over_ui, &mut fx) || menu_was_open;
         let over_ui = over_ui || swallowed;
@@ -1263,6 +1270,19 @@ impl Game {
                             self.send_resupply(p, s.0);
                         }
                         _ => self.resupply_request = true,
+                    }
+                }
+            }
+            Cmd::Recover => {
+                if let Some(p) = self.sel_platoon {
+                    let by = self.recovery_platoons(p);
+                    match by.iter().filter(|s| s.2).count() {
+                        0 => {}
+                        1 => {
+                            let s = by.into_iter().find(|s| s.2).expect("one");
+                            self.send_recover(p, s.0);
+                        }
+                        _ => self.recover_request = true,
                     }
                 }
             }
@@ -1633,6 +1653,68 @@ impl Game {
     pub(crate) fn is_truck_platoon(&self, p: PlatoonId) -> bool {
         let pic = self.picture();
         pic.platoon(p).is_some_and(|pv| pv.members.iter().filter_map(|m| pic.unit(*m)).any(|u| u.cargo.is_some()))
+    }
+
+    /// A vehicle type with tow gear (M8c recovery).
+    pub(crate) fn is_recovery_vehicle(&self, u: &OwnUnit) -> bool {
+        u.recovery_vehicle
+    }
+
+    /// A platoon of recovery vehicles.
+    pub(crate) fn is_recovery_platoon(&self, p: PlatoonId) -> bool {
+        let pic = self.picture();
+        pic.platoon(p)
+            .is_some_and(|pv| pv.members.iter().filter_map(|m| pic.unit(*m)).any(|u| self.is_recovery_vehicle(u)))
+    }
+
+    /// Immobilised (mobility-kill) vehicles of platoon `p`, by callsign.
+    pub(crate) fn immobilised(&self, p: PlatoonId) -> Vec<String> {
+        let pic = self.picture();
+        pic.platoon(p).map_or(Vec::new(), |pv| {
+            pv.members
+                .iter()
+                .filter_map(|m| pic.unit(*m))
+                .filter(|u| u.condition == Condition::MobilityKill)
+                .map(|u| u.callsign.clone())
+                .collect()
+        })
+    }
+
+    /// Recovery platoons that can recover platoon `p`'s immobilised vehicles: (platoon, label,
+    /// available). Available = it has a vehicle able to move and `p` has an immobilised vehicle.
+    pub(crate) fn recovery_platoons(&self, p: PlatoonId) -> Vec<(PlatoonId, String, bool)> {
+        let pic = self.picture();
+        if self.is_recovery_platoon(p) || pic.platoon(p).is_none() {
+            return Vec::new();
+        }
+        let waiting = !self.immobilised(p).is_empty();
+        pic.platoons
+            .iter()
+            .filter(|pv| self.is_recovery_platoon(pv.id))
+            .map(|pv| {
+                let able = pv
+                    .members
+                    .iter()
+                    .filter_map(|m| pic.unit(*m))
+                    .any(|u| matches!(u.condition, Condition::Operational | Condition::FirepowerKill));
+                let why = if !able {
+                    " (OUT OF ACTION)"
+                } else if pv.task.starts_with("RECOVERING") {
+                    " (BUSY)"
+                } else {
+                    ""
+                };
+                (pv.id, format!("BY {}{why}", pv.callsign), able && waiting)
+            })
+            .collect()
+    }
+
+    pub(crate) fn send_recover(&mut self, p: PlatoonId, by: PlatoonId) {
+        let (cs, rcs) = (self.platoon_cs(p), self.platoon_cs(by));
+        let which = self.immobilised(p).join(", ");
+        self.remember_replaced(by);
+        self.order(Command::Recover { platoon: p, by });
+        self.radio(format!("TO {rcs}: RECOVER {which} OF {cs} TO UMCP."));
     }
 
     pub(crate) fn send_resupply(&mut self, p: PlatoonId, src: ResupplySource) {
@@ -2159,6 +2241,8 @@ impl Game {
                 let p = cam.to_screen([cx, cy]);
                 if members.iter().any(|m| m.cargo.is_some()) {
                     symbols::friendly_supply(f, p, style::FRIENDLY);
+                } else if members.iter().any(|m| self.is_recovery_vehicle(m)) {
+                    symbols::friendly_recovery(f, p, style::FRIENDLY);
                 } else {
                     symbols::friendly_armour(f, p, style::FRIENDLY);
                 }
@@ -2205,6 +2289,8 @@ impl Game {
                 }
                 if u.cargo.is_some() {
                     symbols::friendly_supply(f, p, style::FRIENDLY);
+                } else if self.is_recovery_vehicle(u) {
+                    symbols::friendly_recovery(f, p, style::FRIENDLY);
                 } else {
                     symbols::friendly_armour(f, p, style::FRIENDLY);
                 }
@@ -2928,6 +3014,20 @@ impl Game {
                     style::AMBER,
                 ));
             }
+            // Recovery (M8c): what is immobilised and where it is in the recovery.
+            let mkills: Vec<&&OwnUnit> = members.iter().filter(|u| u.condition == Condition::MobilityKill).collect();
+            if !mkills.is_empty() {
+                let parts: Vec<String> = mkills
+                    .iter()
+                    .map(|u| format!("{} {}", u.callsign, recovery_text(u.recovery).unwrap_or("AWAITING ORDER".into())))
+                    .collect();
+                let by = self.recovery_platoons(pv.id);
+                let hint = match by.iter().find(|s| s.2) {
+                    Some(_) if mkills.iter().any(|u| u.recovery.is_none()) => "   RECOVER (O)",
+                    _ => "",
+                };
+                head.push((format!("M-KILL {}{hint}", parts.join(" · ")), style::AMBER));
+            }
             if squads.is_empty() && !trucks {
                 head.push((
                     format!("UP {up}/{}   MAIN GUN {rounds}/{full} RDS   FUEL LOW {fuel}", members.len()),
@@ -3142,8 +3242,24 @@ impl Game {
                 row("CARGO ROUNDS", if list.is_empty() { "NONE".into() } else { list.join(" · ") }),
                 style::TEXT,
             ));
+        } else if def.is_some_and(|d| d.recovery.is_some()) {
+            let tow = def.and_then(|d| d.recovery.as_ref()).expect("checked");
+            out.push((
+                row(
+                    "TOW GEAR",
+                    format!(
+                        "{} KM/H TO {:.0} T",
+                        format::kmh(tow.tow_speed_mps.get()),
+                        tow.rated_tow_kg.get() / 1000.0
+                    ),
+                ),
+                style::TEXT,
+            ));
         } else {
             out.push((row("MAIN GUN", format!("{}/{load} RDS   {gun}", u.ammo)), ammo_c));
+        }
+        if let Some(t) = recovery_text(u.recovery) {
+            out.push((row("RECOVERY", t), style::AMBER));
         }
         if !u.rounds.is_empty() {
             let list: Vec<String> = u.rounds.iter().map(|(l, n)| format!("{l} {n}")).collect();
@@ -3496,11 +3612,27 @@ fn short_task(u: &sim::view::OwnUnit) -> String {
         (Some(ServiceStage::Done), _) => "RESUPPLIED".into(),
     };
     match u.condition {
+        _ if u.recovery.is_some() => recovery_text(u.recovery).unwrap_or_default(),
         Condition::Operational => t,
         Condition::MobilityKill => "M-KILL".into(),
         Condition::FirepowerKill => "F-KILL".into(),
         Condition::Destroyed => "DESTROYED".into(),
     }
+}
+
+/// A recovery stage as card text (M8c).
+fn recovery_text(s: Option<sim::view::RecoveryStage>) -> Option<String> {
+    use sim::view::RecoveryStage as S;
+    Some(match s? {
+        S::Awaiting => "AWAITING RECOVERY".into(),
+        S::UnderTow => "UNDER TOW".into(),
+        S::InRepair { ready_in_s } => format!("IN REPAIR, {} MIN", (ready_in_s / 60.0).ceil() as u32),
+        S::ToVehicle => "TO VEHICLE".into(),
+        S::HookingUp => "HOOKING UP".into(),
+        S::Towing => "TOWING".into(),
+        S::Unhooking => "UNHOOKING".into(),
+        S::Returning => "TO UMCP".into(),
+    })
 }
 
 /// What a supply point has left: "UNLIMITED" or "1200 L · APFSDS 120-A 40 · SMOKE SALVOS 4".
@@ -3670,6 +3802,13 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                     format!("{cs}: RESUPPLY DONE, RETURNING. {rounds} RDS, {:.0} L LEFT.", fuel_l)
                 }
                 PlatoonReport::TrucksWithdrawing => format!("{cs}: UNDER FIRE, WITHDRAWING."),
+                PlatoonReport::RecoveryMoving { vehicle } => format!("{cs}: MOVING TO {vehicle}."),
+                PlatoonReport::RecoveryTowing { vehicle } => format!("{cs}: {vehicle} HOOKED UP, TOWING TO UMCP."),
+                PlatoonReport::RecoveryComplete { recovered: 0 } => format!("{cs}: RECOVERY COMPLETE. NONE RECOVERED."),
+                PlatoonReport::RecoveryComplete { recovered } => {
+                    format!("{cs}: RECOVERY COMPLETE, {recovered} AT UMCP.")
+                }
+                PlatoonReport::Repaired { vehicle } => format!("{vehicle}: REPAIRED AT UMCP, OPERATIONAL."),
                 PlatoonReport::SetInPosition { hull_down, turret_down, exposed, facing } => format!(
                     "{cs}: SET IN BP. {hull_down} HULL-DOWN, {turret_down} TURRET-DOWN, {exposed} EXPOSED. ORIENTED {} MILS.",
                     format::mils(*facing)

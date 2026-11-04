@@ -217,7 +217,8 @@ fn run(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx) -> bool {
                 PlatoonOrder::Occupy { .. }
                 | PlatoonOrder::Resupply { .. }
                 | PlatoonOrder::Tailgate { .. }
-                | PlatoonOrder::Deliver { .. } => return false,
+                | PlatoonOrder::Deliver { .. }
+                | PlatoonOrder::Recover { .. } => return false,
             },
             Phase::Waiting { since, signs } => {
                 let step = &st.plan.steps[st.cursor];

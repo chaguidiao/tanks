@@ -323,6 +323,25 @@ impl Game {
         self.menu_world = [0.0, 0.0];
     }
 
+    pub(super) fn open_recover_menu(&mut self, inp: &Input) {
+        if !std::mem::take(&mut self.recover_request) {
+            return;
+        }
+        let Some(p) = self.sel_platoon else { return };
+        let items = self
+            .recovery_platoons(p)
+            .into_iter()
+            .map(|(by, label, ok)| {
+                let mut it = MenuItem::new(label, MenuAct::Recover(by));
+                it.enabled = ok;
+                it
+            })
+            .collect();
+        let r = hud::card_cell(inp.screen, 23);
+        self.menu = Some(PopupMenu::new([r.x, r.y], "RECOVER · BY", items));
+        self.menu_world = [0.0, 0.0];
+    }
+
     pub(super) fn open_graphics_menu(&mut self, inp: &Input) {
         if !std::mem::take(&mut self.graphics_request) {
             return;

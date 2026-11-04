@@ -20,6 +20,11 @@
 //! Reconnaissance (FM 3-98: gain and maintain enemy contact): move ahead along an axis, stop at
 //! the first contact and observe. Tasks may be held until a contact exists (`release_on_contact`).
 //!
+//! Sustainment (FM 17-15 (1996), ATP 3-20.15 (2025); FM 71-1 (1998)): in a steady phase, a platoon
+//! low on rounds or fuel is resupplied during a lull, one platoon of a task at a time, by the
+//! supply trucks where it stands if they are free, else at the nearest stocked supply point,
+//! from where it returns to its post; immobilised vehicles clear of the enemy are recovered.
+//!
 //! Orders are issued only on phase changes, so the radio order delay applies once per change.
 
 use sim_data::{BattlePosition, DoctrinePack, Formation, Mission, ObjectiveDef, Technique};
@@ -60,6 +65,32 @@ pub enum Order {
         platoon: PlatoonId,
         plan: Plan,
     },
+    /// Service-station resupply at supply point `point`.
+    Resupply {
+        platoon: PlatoonId,
+        point: u32,
+    },
+    /// Tailgate resupply by the supply trucks of platoon `trucks`.
+    Tailgate {
+        platoon: PlatoonId,
+        trucks: PlatoonId,
+    },
+    /// Recovery of the platoon's immobilised vehicles by recovery platoon `by`.
+    Recover {
+        platoon: PlatoonId,
+        by: PlatoonId,
+    },
+}
+
+/// A resupply the commander has ordered and is waiting on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Resupplying {
+    pub platoon: PlatoonId,
+    /// The trucks, for a tailgate; None = at a supply point (the platoon leaves its post).
+    pub trucks: Option<PlatoonId>,
+    pub since_s: f64,
+    /// The platoon's picture has shown the resupply under way.
+    pub seen: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -108,6 +139,12 @@ pub struct TaskState {
     /// Plans for dismount platoons, sent once their squads are out: (carrier platoon, plan,
     /// squads seen aboard since the plan was made).
     pub squad_plans: Vec<(PlatoonId, Plan, bool)>,
+    /// Last position each platoon was ordered to occupy: (platoon, centre, radius, facing,
+    /// ordered at s).
+    pub posts: Vec<(PlatoonId, Vec2, f64, f64, f64)>,
+    /// Resupply under way (one platoon at a time), and when each platoon was last sent (s).
+    pub resupplying: Option<Resupplying>,
+    pub resupplied_s: Vec<(PlatoonId, f64)>,
 }
 
 impl TaskState {
@@ -134,6 +171,9 @@ impl TaskState {
             sync_since_s: None,
             dismounted: Vec::new(),
             squad_plans: Vec::new(),
+            posts: Vec::new(),
+            resupplying: None,
+            resupplied_s: Vec::new(),
         }
     }
 }
@@ -143,6 +183,8 @@ pub struct Commander {
     pub tasks: Vec<TaskState>,
     /// Time of the last call for fire (s).
     pub last_call_s: f64,
+    /// Recovery platoons sent, and when (s): not sent again while the order is on its way.
+    pub recovery_sent: Vec<(PlatoonId, f64)>,
 }
 
 /// Defending squads take buildings this far beyond the battle position's radius (m; plan
@@ -150,6 +192,9 @@ pub struct Commander {
 const SQUAD_BUILDINGS_M: f64 = 150.0;
 /// Carriers are sent to their dismount point when this much short of it (m).
 const DISMOUNT_LEAD_M: f64 = 400.0;
+/// An ordered resupply or recovery that has not shown in the picture by then has failed (s): the
+/// radio delay is well under this.
+const ORDER_TIMEOUT_S: f64 = 120.0;
 
 fn dist(a: Vec2, b: Vec2) -> f64 {
     libm::sqrt((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2))
@@ -157,7 +202,7 @@ fn dist(a: Vec2, b: Vec2) -> f64 {
 
 impl Commander {
     pub fn new(tasks: Vec<TaskState>) -> Self {
-        Self { tasks, last_call_s: f64::NEG_INFINITY }
+        Self { tasks, last_call_s: f64::NEG_INFINITY, recovery_sent: Vec::new() }
     }
 
     fn centroid(pic: &PerceivedWorld, p: PlatoonId) -> Option<(Vec2, usize, usize)> {
@@ -677,7 +722,140 @@ impl Commander {
                 }
             }
         }
+        // Where each platoon was posted, for its return from a supply point.
+        for o in &out {
+            if let Order::Occupy { platoon, centre, radius, facing } = *o
+                && let Some(t) = self.tasks.iter_mut().find(|t| t.platoons.contains(&platoon))
+            {
+                t.posts.retain(|(q, ..)| *q != platoon);
+                t.posts.push((platoon, centre, radius, facing, pic.time_s));
+            }
+        }
+        self.sustain(pic, d, &mut out);
         out
+    }
+
+    /// The platoon an order goes to.
+    fn addressed(o: &Order) -> Option<PlatoonId> {
+        match *o {
+            Order::Move { platoon, .. }
+            | Order::Occupy { platoon, .. }
+            | Order::Halt { platoon }
+            | Order::Dismount { platoon }
+            | Order::Plan { platoon, .. }
+            | Order::Resupply { platoon, .. }
+            | Order::Tailgate { platoon, .. }
+            | Order::Recover { platoon, .. } => Some(platoon),
+            Order::CallFire { .. } => None,
+        }
+    }
+
+    /// Resupply and recovery (module doc; FM 17-15 (1996), ATP 3-20.15 (2025): resupply in a lull,
+    /// one platoon at a time while the others hold; tailgate keeps it in position, the service
+    /// station takes it out of the line; FM 71-1 (1998): what cannot move is recovered to the
+    /// UMCP).
+    fn sustain(&mut self, pic: &PerceivedWorld, d: &DoctrinePack, out: &mut Vec<Order>) {
+        let Some(lg) = d.logistics.as_ref() else { return };
+        let clear = lg.clear_of_contact_m.get();
+        let fresh: Vec<Vec2> =
+            pic.live_contacts().filter(|c| pic.time_s - c.last_report_s < 30.0).map(|c| c.pos).collect();
+        let quiet = |at: Vec2| !fresh.iter().any(|c| dist(*c, at) < clear);
+        let units = |pv: &crate::picture::PlatoonView| -> Vec<&crate::picture::OwnUnit> {
+            pv.members.iter().filter_map(|m| pic.unit(*m)).filter(|u| u.condition != Condition::Destroyed).collect()
+        };
+        // Free truck platoons with something aboard, and free recovery platoons.
+        let mut trucks: Vec<PlatoonId> = pic
+            .platoons
+            .iter()
+            .filter(|pv| pv.idle)
+            .filter(|pv| {
+                units(pv).iter().any(|u| {
+                    u.cargo.as_ref().is_some_and(|c| c.fuel_l > 0.0 || c.smoke_salvos > 0 || !c.rounds.is_empty())
+                })
+            })
+            .map(|pv| pv.id)
+            .collect();
+        trucks.retain(|tp| !self.tasks.iter().any(|t| t.resupplying.as_ref().is_some_and(|r| r.trucks == Some(*tp))));
+        self.recovery_sent.retain(|(_, s)| pic.time_s - s < ORDER_TIMEOUT_S);
+        let mut wreckers: Vec<PlatoonId> = pic
+            .platoons
+            .iter()
+            .filter(|pv| pv.idle && !self.recovery_sent.iter().any(|(q, _)| *q == pv.id))
+            .filter(|pv| units(pv).iter().any(|u| u.recovery_vehicle && u.condition != Condition::MobilityKill))
+            .map(|pv| pv.id)
+            .collect();
+        for t in self.tasks.iter_mut() {
+            let steady = matches!(t.phase, Phase::Defending | Phase::Reserve | Phase::Consolidate | Phase::Observing);
+            // The resupply under way: done once the picture has shown it and no longer does.
+            if let Some(r) = t.resupplying.as_mut() {
+                let on = pic.platoon(r.platoon).is_some_and(|pv| pv.resupply_at.is_some() || pv.resupply_by.is_some());
+                r.seen |= on;
+                if !on && (r.seen || pic.time_s - r.since_s > ORDER_TIMEOUT_S) {
+                    let back = r.trucks.is_none() && r.seen && steady;
+                    let p = r.platoon;
+                    t.resupplying = None;
+                    if back && let Some(&(_, centre, radius, facing, _)) = t.posts.iter().find(|(q, ..)| *q == p) {
+                        out.push(Order::Occupy { platoon: p, centre, radius, facing });
+                    }
+                }
+            }
+            if !steady {
+                continue;
+            }
+            for (i, &p) in t.platoons.iter().enumerate() {
+                if t.broken.get(i).copied().unwrap_or(false) {
+                    continue;
+                }
+                let Some(pv) = pic.platoon(p) else { continue };
+                let alive = units(pv);
+                let Some((centre, ..)) = Self::centroid(pic, p) else { continue };
+                // Recovery: immobilised vehicles not yet taken, clear of the enemy.
+                let waiting = alive
+                    .iter()
+                    .any(|u| u.condition == Condition::MobilityKill && u.recovery.is_none() && quiet(u.pos));
+                if waiting && let Some(by) = wreckers.first().copied() {
+                    wreckers.remove(0);
+                    self.recovery_sent.push((by, pic.time_s));
+                    out.push(Order::Recover { platoon: p, by });
+                }
+                // Only once it has done what it was last told (set in its position).
+                let settled = pv.idle
+                    && !out.iter().any(|o| Self::addressed(o) == Some(p))
+                    && t.posts.iter().find(|(q, ..)| *q == p).is_none_or(|x| pic.time_s - x.4 >= ORDER_TIMEOUT_S);
+                if !settled
+                    || t.resupplying.is_some()
+                    || alive.iter().any(|u| u.squad.is_some())
+                    || t.resupplied_s.iter().any(|(q, s)| *q == p && pic.time_s - s < lg.retry_s.get())
+                {
+                    continue;
+                }
+                let full: u32 = alive.iter().map(|u| u.full_load).sum();
+                let ammo = if full > 0 { alive.iter().map(|u| u.ammo).sum::<u32>() as f64 / full as f64 } else { 1.0 };
+                let fuel = alive.iter().map(|u| u.fuel_fraction).fold(1.0, f64::min);
+                if (ammo >= lg.ammo_threshold.get() && fuel >= lg.fuel_threshold.get()) || !quiet(centre) {
+                    continue;
+                }
+                // Trucks keep the platoon in its position; a supply point only for a platoon with a
+                // post to come back to and no squads out.
+                let order = if let Some(tp) = trucks.first().copied() {
+                    trucks.remove(0);
+                    Some((Order::Tailgate { platoon: p, trucks: tp }, Some(tp)))
+                } else if t.posts.iter().any(|(q, ..)| *q == p) && !t.dismounted.contains(&p) {
+                    pic.supply_points
+                        .iter()
+                        .filter(|sp| sp.unlimited || sp.fuel_l > 0.0 || !sp.rounds.is_empty())
+                        .min_by(|a, b| dist(a.pos, centre).total_cmp(&dist(b.pos, centre)))
+                        .map(|sp| (Order::Resupply { platoon: p, point: sp.id }, None))
+                } else {
+                    None
+                };
+                let Some((o, by)) = order else { continue };
+                out.push(o);
+                t.resupplying = Some(Resupplying { platoon: p, trucks: by, since_s: pic.time_s, seen: false });
+                t.resupplied_s.retain(|(q, _)| *q != p);
+                t.resupplied_s.push((p, pic.time_s));
+            }
+        }
     }
 
     /// Reconnaissance move: traveling overwatch in the march formation, platoons side by side.

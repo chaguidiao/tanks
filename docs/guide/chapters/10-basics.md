@@ -496,7 +496,7 @@ Press <kbd>Enter</kbd> (**EXECUTE**). The platoons move into their positions. Us
 
 Red approaches in column along the road from the north. Around 06:10 the first spot reports arrive. Switch to **X1** so you can follow the fight.
 
-::fig f660 | crop=0,30,1600,850 | pins=1@640,150;2@545,780 | 06:11. Destroyed and burning Red tanks on the road north of PL RED <span class="pinref">1</span>; the radio net <span class="pinref">2</span> lists contacts, updates and kills.
+::fig f660 | crop=0,30,1600,850 | pins=1@690,160;2@545,780 | 06:10. Destroyed and burning Red tanks on the road north of PL RED <span class="pinref">1</span>; the radio net <span class="pinref">2</span> lists contacts, updates and kills.
 
 You don't need to do anything during this fight: your crews detect, report, distribute fire and shoot. What you *could* do:
 
@@ -512,7 +512,7 @@ When Red has lost 70 % of its vehicles it is **combat ineffective** and the scen
 
 ## Step 7: Look at what really happened
 
-Open the **AFTER-ACTION REVIEW** (<kbd>F8</kbd>). It shows the ground truth: where every vehicle really was, every shot, and statistics per side. In this run, Blue fired 17 rounds, hit 14 and destroyed 7 tanks without loss. Red was spotted 610 seconds after H-hour (Red had first reported something at 397 s).
+Open the **AFTER-ACTION REVIEW** (<kbd>F8</kbd>). It shows the ground truth: where every vehicle really was, every shot, and statistics per side. In this run, Blue fired 19 rounds, hit 16 and destroyed 9 vehicles without loss. Blue's first contact report came 411 seconds after H-hour, Red's at 420 s.
 
 ::fig g-aar | crop=0,0,1600,900 | pins=1@160,44;2@1430,135;3@640,830 | The after-action review: playback controls <span class="pinref">1</span>, statistics <span class="pinref">2</span>, timeline with event marks <span class="pinref">3</span>. <kbd>Space</kbd> plays, <kbd>←</kbd>/<kbd>→</kbd> jump 10 s, drag the timeline, <kbd>Ctrl</kbd>+<kbd>R</kbd> saves a replay file.
 

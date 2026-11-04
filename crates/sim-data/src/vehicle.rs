@@ -36,6 +36,9 @@ pub struct VehicleDef {
     /// What a supply truck carries (M8c tailgate resupply, `Support` class only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cargo: Option<CargoDef>,
+    /// Tow gear of a recovery vehicle (M8c recovery, `Recovery` class only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<RecoveryDef>,
 }
 
 /// What a vehicle is, as a crew would call it when recognising it.
@@ -51,6 +54,29 @@ pub enum VehicleClass {
     /// Unarmed supply vehicle (M8c): carries cargo, fights nothing, does not count as a fighting
     /// vehicle for victory.
     Support,
+    /// Armoured recovery vehicle (M8c): tows immobilised vehicles to the collection point, fights
+    /// nothing, does not count as a fighting vehicle for victory.
+    Recovery,
+}
+
+/// Tow gear of a recovery vehicle (plan M8C-RECOVERY §3).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveryDef {
+    /// Towing speed with a vehicle of up to `rated_tow_kg` on the tow bar (m/s).
+    pub tow_speed_mps: Stat<f64>,
+    /// Heaviest vehicle it tows at `tow_speed_mps`; heavier ones go slower, in proportion.
+    pub rated_tow_kg: Stat<f64>,
+    /// Halted at the vehicle, rigging the tow bar (s).
+    pub hookup_s: Stat<f64>,
+    /// Halted at the collection point, dropping the tow (s).
+    pub unhook_s: Stat<f64>,
+}
+
+impl RecoveryDef {
+    /// Tow speed for a vehicle of `mass_kg` (m/s).
+    pub fn tow_speed(&self, mass_kg: f64) -> f64 {
+        self.tow_speed_mps.get() * (self.rated_tow_kg.get() / mass_kg.max(1.0)).min(1.0)
+    }
 }
 
 /// Cargo capacity of a supply truck (plan M8C-TAILGATE-TRUCKS §3). Rounds are counted per stow
@@ -80,6 +106,7 @@ pub enum TargetClass {
     Recon,
     Infantry,
     Support,
+    Recovery,
 }
 
 impl From<VehicleClass> for TargetClass {
@@ -89,6 +116,7 @@ impl From<VehicleClass> for TargetClass {
             VehicleClass::Ifv => TargetClass::Ifv,
             VehicleClass::Recon => TargetClass::Recon,
             VehicleClass::Support => TargetClass::Support,
+            VehicleClass::Recovery => TargetClass::Recovery,
         }
     }
 }
@@ -100,6 +128,7 @@ impl VehicleClass {
             VehicleClass::Ifv => "IFV",
             VehicleClass::Recon => "RECON",
             VehicleClass::Support => "SUPPORT",
+            VehicleClass::Recovery => "RECOVERY",
         }
     }
 }

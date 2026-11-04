@@ -57,6 +57,16 @@ pub enum PlatoonOrder {
         phase: DeliverPhase,
         jobs: Vec<TruckJob>,
     },
+    /// Recovery vehicles recovering the immobilised vehicles of platoon `from` (plan
+    /// M8C-RECOVERY §3). `targets` = its members' world indices in platoon order; `home` = the
+    /// collection point; one `RecoveryJob` per member of this platoon; `recovered` so far.
+    Recover {
+        from: PlatoonId,
+        targets: Vec<usize>,
+        home: Vec2,
+        jobs: Vec<crate::recovery::RecoveryJob>,
+        recovered: u8,
+    },
 }
 
 /// Stage of a tailgate resupply run.
@@ -248,6 +258,16 @@ impl Platoon {
                 DeliverPhase::Return { withdraw: false } => "RETURNING".to_owned(),
                 DeliverPhase::Return { withdraw: true } => "WITHDRAWING".to_owned(),
             },
+            PlatoonOrder::Recover { jobs, .. } => {
+                use crate::recovery::RecoveryStep;
+                if jobs.iter().any(|j| matches!(j.step, RecoveryStep::Towing | RecoveryStep::Unhooking)) {
+                    "RECOVERING, TOWING".to_owned()
+                } else if jobs.iter().any(|j| j.target.is_some()) {
+                    "RECOVERING".to_owned()
+                } else {
+                    "RECOVERY, RETURNING".to_owned()
+                }
+            }
         };
         let (route, waypoints) = match (&self.order, &self.held) {
             (PlatoonOrder::Move { .. }, _) => self.order.route_view(),
@@ -284,6 +304,7 @@ impl Platoon {
                 PlatoonOrder::Tailgate { trucks, .. } => Some(*trucks),
                 _ => None,
             },
+            idle: self.is_idle(w),
         }
     }
 

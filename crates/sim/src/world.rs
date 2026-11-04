@@ -253,6 +253,8 @@ pub struct World {
     pub coax: Vec<Option<SmallArmState>>,
     /// What a supply truck carries (M8c tailgate resupply); `Some` marks a supply vehicle.
     pub cargo: Vec<Option<crate::logistics::Stock>>,
+    /// Tow gear of a recovery vehicle (M8c recovery); `Some` marks a recovery vehicle.
+    pub tow: Vec<Option<crate::recovery::TowGear>>,
 }
 
 impl World {
@@ -287,10 +289,16 @@ impl World {
     pub fn fighting(&self, k: usize) -> bool {
         match &self.squad[k] {
             Some(s) => self.alive(k) && !s.ineffective,
-            // Supply trucks never count as fighting vehicles (plan M8C-TAILGATE-TRUCKS §8 #3).
-            None if self.cargo[k].is_some() => false,
+            // Supply trucks and recovery vehicles never count as fighting vehicles (plan
+            // M8C-TAILGATE-TRUCKS §8 #3, M8C-RECOVERY §3).
+            None if self.support(k) => false,
             None => matches!(self.condition[k], Condition::Operational | Condition::MobilityKill),
         }
+    }
+
+    /// An unarmed logistics vehicle: a supply truck or a recovery vehicle.
+    pub fn support(&self, k: usize) -> bool {
+        self.cargo[k].is_some() || self.tow[k].is_some()
     }
 
     fn push_common(&mut self, side: SideId, callsign: &str, pos: Vec2, z: f64, heading: f64) -> EntityId {
@@ -373,6 +381,7 @@ impl World {
         self.carrier.push(None);
         self.coax.push(None);
         self.cargo.push(None);
+        self.tow.push(None);
         let k = self.len() - 1;
         if let Some(c) = carrier
             && let Some(cs) = self.carrier[c].as_mut()
@@ -430,6 +439,7 @@ impl World {
         self.coax.push(def.coax.as_ref().map(|c| SmallArmState::new(0, c)));
         // Filled once every unit is placed (the default cargo depends on the side's vehicles).
         self.cargo.push(def.cargo.as_ref().map(|_| crate::logistics::Stock::default()));
+        self.tow.push(def.recovery.as_ref().map(|_| crate::recovery::TowGear::default()));
         id
     }
 
@@ -520,6 +530,9 @@ impl World {
             }
             if let Some(c) = &self.cargo[k] {
                 c.hash_into(h);
+            }
+            if let Some(t) = &self.tow[k] {
+                h.u64(t.towing.map_or(u64::MAX, |v| v as u64));
             }
             let sm = &self.smoke[k];
             h.u32(sm.salvos);

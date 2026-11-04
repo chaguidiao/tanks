@@ -205,6 +205,10 @@ IFVs (WARD M2, SKIF M1) carry squads; the roster lists the men aboard. The squad
 - **MOUNT** (<kbd>U</kbd> again): the squads walk back and board.
 - A move or plan given to the dismount platoon while its squads still ride starts once they are out.
 
+::fig i-dismount | crop=560,420,480,170 | w=60 | Platoon 1 has dismounted: each squad (1-1A, 1-2A, 1-3A, with its strength in men) has taken up security behind its carrier.
+
+::fig i-dismount | crop=1272,36,322,180 | w=40 | The card of the dismount platoon 1-D: men, effective squads, how many still ride, and one row per squad.
+
 Squads move on foot: slowly, through woods and over ground no vehicle can cross, and into buildings only through their doors. A dismount platoon moves on line.
 
 ## Buildings
@@ -304,15 +308,29 @@ Some scenarios give a side **supply points** (the `SP` pin on the map, with a da
 
 Resupply one platoon at a time, behind cover, while the others hold.
 
+::fig l-rear | crop=500,200,700,420 | w=60 | The rear area of LONG DEFENCE: the supply platoon SUP (cargo and fuel truck, supply symbol), the recovery vehicle R-1 (maintenance symbol) and the supply point SP 1 with its serving area.
+
 ## Supply trucks
 
 Some scenarios give a side a **supply platoon** (`SUP`): a cargo truck with ammunition and a fuel truck, shown with the supply symbol (a frame with a bar across its lower part). With trucks, resupply can come to the platoon instead (the **tailgate** method): select the platoon and press **RESUPPLY** (<kbd>R</kbd>); when there is more than one source, a short list asks which (**AT SP 1 (SERVICE STATION)** or **BY SUP (TAILGATE)**).
+
+::fig l-sources | crop=1360,615,240,260 | w=35 | RESUPPLY (R) with a supply point and a supply platoon: the source list opens above the card cell.
 
 The platoon holds where it is. The trucks drive to a point about 300 m behind it, then go from vehicle to vehicle, park close behind each one and hand over rounds and fuel at the same rates as a supply point. The platoon card shows `RESUPPLY BY SUP: 1 SERVED, 2 WAITING, 1 DONE`. A tank does not fire its main gun while its rounds are being loaded, but the rest of the platoon fights on. When they are done the trucks report what they have left and drive back: `SUP: RESUPPLY DONE, RETURNING. 120 RDS, 8300 L LEFT.`
 
 Trucks are not armoured. If they come under fire (a shell close by, a shot at them, a truck hit), they stop and withdraw to the point behind the platoon: `SUP: UNDER FIRE, WITHDRAWING.` The resupply is then partial. Enemy gunners take trucks last, after anything that can shoot back, but they do take them, and a truck that burns takes its cargo with it. Bring the trucks forward when the platoon is in cover, not in the middle of a fight.
 
 Trucks do not count for victory: they cannot hold an objective, and losing them does not count as losing fighting strength.
+
+## Recovery
+
+A tank with a **mobility kill** (tracks or running gear knocked out) can still shoot, but it cannot move. Some scenarios give a side a **recovery platoon** (`R`): an armoured recovery vehicle such as the HAWSER A1 or the BUKSIR, shown with the maintenance symbol (a bar with a jaw at each end, like a spanner) and waiting in the trains.
+
+Select the platoon with the immobilised vehicle and press **RECOVER** (<kbd>O</kbd>, also in the right-click **ORDERS** menu); with more than one recovery platoon a short list asks which. The platoon card lists its immobilised vehicles and where each one is (`M-KILL 1-2 AWAITING RECOVERY · 1-4 UNDER TOW`). The recovery vehicle drives up behind the first one (`R: MOVING TO 1-2.`), takes about five minutes to rig the tow bar, and tows it back to the collection point (`R: 1-2 HOOKED UP, TOWING TO UMCP.`), the place where the recovery platoon waited when you gave the order. It tows at about 16 km/h, slower with a vehicle heavier than it is rated for. Then it goes for the next one, and reports `R: RECOVERY COMPLETE, 2 AT UMCP.` when none is left.
+
+At the collection point the vehicle is repaired, which takes about 40 minutes: `1-2: REPAIRED AT UMCP, OPERATIONAL.` It then moves with its platoon again at the platoon's next order.
+
+The recovery vehicle is armoured, but unarmed, and it does not count for victory. It does not stop under fire, so wait until the enemy cannot see the damaged tank, or cover it with smoke and the platoon's fire. If it is knocked out while towing, the tank stays where it was dropped.
 
 ## LOGPACs
 
@@ -396,13 +414,13 @@ The simulation runs at 20 steps per second. The same scenario, seed and orders a
 
 # The database
 
-The **DATABASE** (main menu, screen menu, or **DATA**/<kbd>I</kbd> on a selected vehicle) shows everything the simulation loads, in five tabs: **VEHICLES**, **AMMUNITION**, **TERRAIN**, **DOCTRINE**, **COMBAT MODELS**.
+The **DATABASE** (main menu, screen menu, or **DATA**/<kbd>I</kbd> on a selected vehicle) shows everything the simulation loads, in six tabs: **VEHICLES**, **INFANTRY**, **AMMUNITION**, **TERRAIN**, **DOCTRINE**, **COMBAT MODELS**.
 
-::fig database-ammo | crop=0,100,1600,710 | pins=1@200,121;2@1527,263;3@1527,397;4@600,530;5@700,121 | The ammunition tab.
+::fig database-ammo | crop=0,100,1600,710 | pins=1@200,121;2@1527,263;3@1527,397;4@600,530;5@800,121 | The ammunition tab.
 
 | | |
 |---|---|
-| <span class="pinref">1</span> | Tabs (<kbd>←</kbd>/<kbd>→</kbd> or <kbd>1</kbd>–<kbd>5</kbd>) |
+| <span class="pinref">1</span> | Tabs (<kbd>←</kbd>/<kbd>→</kbd> or <kbd>1</kbd>–<kbd>6</kbd>) |
 | <span class="pinref">2</span> | Every value has a **confidence**: **HIGH**, **MED**, **LOW** or **EST** (estimate). Hover a value to see its source and notes at the bottom |
 | <span class="pinref">3</span> | **CALC** values are computed with the simulation's own formulas: velocity, flight time, drop and penetration by range |
 | <span class="pinref">4</span> | "Defeats frontal armour of": the range out to which this round penetrates each vehicle's turret and hull front |

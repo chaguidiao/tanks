@@ -148,6 +148,7 @@ The top bar always shows the light, the preset and the visibility.
 | **FOG MEETING** (2005) | 2005 | Hold the crossroads in fog with an M1A2 platoon and an M2A2 platoon | Thermals don't see through fog. Overlapping fields of fire; the T-90A front is hard, so aim for its sides |
 | **CLEARING THE VILLAGE** | 1987 | Clear a village held by RPG squads and a missile team | Dismount the Bradleys short of the village and send the squads in first (OCCUPY BUILDINGS FACING...). Bring the tanks in behind them; alone, they drive into the rockets |
 | **THE MARKET TOWN** | 1987 | Hold the north edge of a town against a motor-rifle attack through the woods | Squads in the edge blocks see the approach; tanks in the streets don't. Keep the tanks on the flanks of the town where they see the wood line, and expect the BMP squads to come in on foot
+| **LONG DEFENCE** | 1987 | Hold the village crossroads against three tank companies, one after another, with 10 rounds a tank | Ammunition decides. Resupply in the lull after each attack, one platoon at a time: the trucks (R, tailgate) keep it in position. Send R to the immobilised tanks (O) once the enemy is beaten off |
 
 # A primer on armoured doctrine
 

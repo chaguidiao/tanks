@@ -170,6 +170,14 @@ impl DataSet {
                     message: format!("{}: a support vehicle has cargo and an empty load, others no cargo", v.id),
                 });
             }
+            // Recovery vehicles carry tow gear and nothing to shoot (plan M8C-RECOVERY §3).
+            let recovery = v.class == VehicleClass::Recovery;
+            if recovery != v.recovery.is_some() || (recovery && (!v.armament.load.is_empty() || v.coax.is_some())) {
+                return Err(DataError {
+                    path: root.join("vehicles"),
+                    message: format!("{}: a recovery vehicle has tow gear and no weapons, others no tow gear", v.id),
+                });
+            }
             for l in &v.armament.load {
                 if ds.ammo(&l.ammo).is_none() {
                     return Err(DataError {
@@ -290,6 +298,24 @@ mod tests {
             assert!(v.armament.load.is_empty() && v.coax.is_none(), "{id} is unarmed");
             assert_eq!((c.main_gun_rounds > 0, c.fuel_l.get() > 0.0), (ammo, fuel), "{id}");
             assert!(v.in_service.contains(1985), "{id} in service for the Cold War scenarios");
+        }
+    }
+
+    /// M8c slice 7: each side has an unarmed recovery vehicle in service from the mid-1980s.
+    #[test]
+    fn recovery_vehicles_load_with_tow_gear_and_no_weapons() {
+        let ds = DataSet::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data")).unwrap();
+        for id in ["hawser_a1", "buksir"] {
+            let v = ds.vehicle(id).expect(id);
+            let r = v.recovery.as_ref().unwrap();
+            assert_eq!(v.class, VehicleClass::Recovery);
+            assert!(v.armament.load.is_empty() && v.coax.is_none() && v.cargo.is_none(), "{id} is unarmed");
+            assert!(r.tow_speed_mps.get() > 0.0 && r.rated_tow_kg.get() > 40_000.0, "{id}");
+            assert!(v.in_service.contains(1985), "{id} in service for the Cold War scenarios");
+            // Heavier than rated: slower in proportion; lighter: the rated speed.
+            let m = r.rated_tow_kg.get();
+            assert_eq!(r.tow_speed(m * 0.5), r.tow_speed_mps.get());
+            assert!((r.tow_speed(m * 1.25) - r.tow_speed_mps.get() * 0.8).abs() < 1e-9);
         }
     }
 

@@ -36,6 +36,11 @@ pub struct LogisticsModel {
     pub tailgate_m: Stat<f64>,
     /// A truck stops serving and withdraws when a burst lands this close or it is fired at (m).
     pub withdraw_burst_m: Stat<f64>,
+    /// Recovery (plan M8C-RECOVERY §3): length of the tow bar, and where the recovery vehicle
+    /// stops behind the vehicle it hooks up (m).
+    pub hitch_m: Stat<f64>,
+    /// Repair of a mobility kill at the collection point (s).
+    pub repair_mobility_s: Stat<f64>,
 }
 
 impl LogisticsModel {

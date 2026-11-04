@@ -32,8 +32,9 @@ impl VictoryState {
         let n_sides = sc.sides.len();
         let other = |s: usize| SideId(((s + 1) % n_sides) as u8);
         for s in 0..n_sides {
-            // Supply trucks are neither force nor losses (plan M8C-TAILGATE-TRUCKS §8 #3).
-            let force = |k: usize| w.side[k].0 as usize == s && w.cargo[k].is_none();
+            // Supply trucks and recovery vehicles are neither force nor losses (plan
+            // M8C-TAILGATE-TRUCKS §8 #3, M8C-RECOVERY §3).
+            let force = |k: usize| w.side[k].0 as usize == s && !w.support(k);
             let total = (0..w.len()).filter(|&k| force(k)).count();
             if total == 0 {
                 continue;

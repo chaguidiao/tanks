@@ -51,6 +51,13 @@
         reserve_commit_range_m: (value: 500.0, source: "estimate", confidence: estimate, notes: "Enemy on or just short of the objective: the reserve's decisive point."),
         reserve_commit_losses: (value: 0.25, source: "estimate", confidence: estimate, notes: "A quarter of the side out of action: the main effort is faltering."),
     ),
+    // Commander AI resupply and recovery (M8c; FM 17-15 (1996) / ATP 3-20.15 (2025) sustainment).
+    logistics: (
+        ammo_threshold: (value: 0.6, source: "estimate", confidence: estimate, notes: "Logistics status reports grade a unit's ammunition GREEN / AMBER / RED / BLACK; RED (about 60 % and below) is where the unit asks for resupply before it is combat-ineffective."),
+        fuel_threshold: (value: 0.5, source: "estimate", confidence: estimate, notes: "Refuel at half tanks in a lull rather than run dry in the next move."),
+        clear_of_contact_m: (value: 2500.0, source: "estimate", confidence: estimate, notes: "Resupply during a lull: no fresh enemy within main-gun range of the platoon."),
+        retry_s: (value: 900.0, source: "estimate", confidence: estimate, notes: "A resupply that came back short is not repeated at once; the next LOGPAC comes later."),
+    ),
     code_words: ["HAMMER", "ANVIL", "SWORD", "SHIELD", "FALCON", "RAVEN", "COBRA", "TIGER", "EAGLE"],
     break_off_losses: (value: 0.5, source: "estimate", confidence: estimate),
     // Ordered march speeds (m/s): 40, 25 and 15 km/h.

@@ -575,3 +575,363 @@ fn a_new_order_to_the_served_platoon_sends_the_trucks_home_and_replays() {
     rec.play(&mut again, |_, _| {});
     assert_eq!(again.state_hash(), rec.final_hash, "replay diverged");
 }
+
+// --- Slice 7: recovery (docs/plans/M8C-RECOVERY.md) ---
+
+/// A Blue tank platoon with a recovery vehicle in the trains behind it; tanks `killed` are
+/// immobilised. Returns the sim, the platoon ids (tanks, recovery) and the scenario.
+fn recovery_setup(killed: &[usize]) -> (Sim, sim::view::PlatoonId, sim::view::PlatoonId, ScenarioDef) {
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    let mut blue: Vec<_> = (0..4)
+        .map(|i| unit(&format!("1-{}", i + 1), "bulwark_a1", [600.0 + i as f64 * 60.0, 600.0], 90.0, Some("1")))
+        .collect();
+    blue.push(unit("R-1", "hawser_a1", [400.0, 300.0], 90.0, Some("R")));
+    let sc = scenario(12 * 3600, blue, vec![]);
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    immobilise(&mut sim, killed);
+    let pic = sim.perceived(SideId(0));
+    let id = |cs: &str| pic.platoons.iter().find(|p| p.callsign == cs).unwrap().id;
+    let (tanks, rec) = (id("1"), id("R"));
+    (sim, tanks, rec, sc)
+}
+
+fn immobilise(sim: &mut Sim, killed: &[usize]) {
+    for &k in killed {
+        sim.truth_mut().condition[k] = sim::view::Condition::MobilityKill;
+    }
+}
+
+fn stage(sim: &Sim, k: usize) -> Option<sim::view::RecoveryStage> {
+    let id = sim.truth().id[k];
+    sim.perceived(SideId(0)).own.iter().find(|u| u.id == id).unwrap().recovery
+}
+
+/// Plan §3: the recovery vehicle takes the immobilised tanks in platoon order, hooks each up
+/// behind it, tows it home at the tow speed for its mass on a bar of `hitch_m`, drops it there,
+/// and reports; after the repair time each tank is operational and reported repaired.
+#[test]
+fn a_recovery_vehicle_tows_immobilised_tanks_home_one_by_one_and_they_are_repaired() {
+    use sim::view::RecoveryStage as S;
+    let (mut sim, tanks, rec, _) = recovery_setup(&[1, 3]);
+    let ds = data();
+    let hawser = ds.vehicle("hawser_a1").unwrap().recovery.clone().unwrap();
+    let mass = ds.vehicle("bulwark_a1").unwrap().mobility.combat_mass_kg.get();
+    let tow_speed = hawser.tow_speed(mass);
+    assert!(tow_speed < hawser.tow_speed_mps.get(), "an M1A1-class tank is over the M88A1-class rating");
+    let hitch = ds.logistics.hitch_m.get();
+    let home = sim.truth().transform[4].pos;
+    sim.submit(SideId(0), Command::Recover { platoon: tanks, by: rec });
+    let (mut moving, mut towing, mut complete, mut seen) = (Vec::new(), Vec::new(), None, Vec::new());
+    for s in 0..4000 {
+        for e in run(&mut sim, 1.0) {
+            match e {
+                Event::PlatoonReport { report: PlatoonReport::RecoveryMoving { vehicle }, platoon, .. } => {
+                    assert_eq!(platoon, rec);
+                    moving.push(vehicle);
+                }
+                Event::PlatoonReport { report: PlatoonReport::RecoveryTowing { vehicle }, .. } => towing.push(vehicle),
+                Event::PlatoonReport { report: PlatoonReport::RecoveryComplete { recovered }, platoon, .. } => {
+                    assert_eq!(platoon, rec);
+                    complete = Some((s, recovered));
+                }
+                _ => {}
+            }
+        }
+        let w = sim.truth();
+        if let Some(t) = w.tow[4].as_ref().unwrap().towing {
+            let d = dist(w.transform[4].pos, w.transform[t].pos);
+            assert!((d - hitch).abs() < 0.5, "towed on a {hitch} m bar: {d:.1} m");
+            let v = w.mobility[4].as_ref().unwrap().speed;
+            assert!(v <= tow_speed + 0.2, "towing at {v:.2} m/s, limit {tow_speed:.2}");
+        }
+        for k in [1, 3] {
+            if let Some(st) = stage(&sim, k)
+                && !seen.contains(&(k, std::mem::discriminant(&st)))
+            {
+                seen.push((k, std::mem::discriminant(&st)));
+            }
+        }
+        if complete.is_some() {
+            break;
+        }
+    }
+    let (_, recovered) = complete.expect("the recovery platoon reported");
+    assert_eq!(recovered, 2);
+    assert_eq!(moving, vec!["1-2".to_owned(), "1-4".to_owned()], "platoon order");
+    assert_eq!(towing, moving);
+    for k in [1, 3] {
+        for s in [S::Awaiting, S::UnderTow, S::InRepair { ready_in_s: 0.0 }] {
+            assert!(seen.contains(&(k, std::mem::discriminant(&s))), "{k}: {s:?} shown");
+        }
+    }
+    let w = sim.truth();
+    for k in [1, 3] {
+        assert!(dist(w.transform[k].pos, home) < 40.0, "{k} is at the collection point");
+        assert_eq!(w.condition[k], sim::view::Condition::MobilityKill, "{k} not yet repaired");
+    }
+    assert!(w.tow[4].as_ref().unwrap().towing.is_none());
+    assert_eq!(w.condition[0], sim::view::Condition::Operational);
+    // Repairs: the first in at most `repair_mobility_s`.
+    let repair = ds.logistics.repair_mobility_s.get();
+    let mut repaired = Vec::new();
+    for e in run(&mut sim, repair + 5.0) {
+        if let Event::PlatoonReport { report: PlatoonReport::Repaired { vehicle }, platoon, .. } = e {
+            assert_eq!(platoon, tanks);
+            repaired.push(vehicle);
+        }
+    }
+    assert_eq!(repaired, vec!["1-2".to_owned(), "1-4".to_owned()]);
+    for k in [1, 3] {
+        assert_eq!(sim.truth().condition[k], sim::view::Condition::Operational);
+        assert_eq!(stage(&sim, k), None);
+    }
+}
+
+/// Plan §3: a recovery vehicle put out of action drops its tow where it is; with no recovery
+/// vehicle left the order ends, and the tank stays immobilised.
+#[test]
+fn a_recovery_vehicle_knocked_out_while_towing_drops_the_tow() {
+    let (mut sim, tanks, rec, _) = recovery_setup(&[1]);
+    sim.submit(SideId(0), Command::Recover { platoon: tanks, by: rec });
+    for _ in 0..1200 {
+        run(&mut sim, 1.0);
+        if sim.truth().tow[4].as_ref().unwrap().towing.is_some() {
+            break;
+        }
+    }
+    run(&mut sim, 20.0);
+    assert!(sim.truth().tow[4].as_ref().unwrap().towing.is_some(), "under tow");
+    let at = sim.truth().transform[1].pos;
+    sim.truth_mut().condition[4] = sim::view::Condition::MobilityKill;
+    let ev = run(&mut sim, 3.0);
+    assert!(
+        ev.iter().any(|e| matches!(
+            e,
+            Event::PlatoonReport { report: PlatoonReport::RecoveryComplete { recovered: 0 }, .. }
+        )),
+        "{ev:?}"
+    );
+    let w = sim.truth();
+    assert!(w.tow[4].as_ref().unwrap().towing.is_none(), "tow dropped");
+    assert!(dist(w.transform[1].pos, at) < 15.0, "the tank stays about where it was dropped");
+    run(&mut sim, 10.0);
+    assert!(dist(sim.truth().transform[1].pos, at) < 15.0);
+    assert_eq!(sim.truth().condition[1], sim::view::Condition::MobilityKill);
+}
+
+/// Recovery vehicles are support vehicles: not fighting vehicles, never part of the force for
+/// victory, and recognised by the enemy as logistics vehicles; they form a platoon of their own.
+#[test]
+fn recovery_vehicles_are_support_and_form_their_own_platoon() {
+    let (sim, _, _, sc) = recovery_setup(&[]);
+    let w = sim.truth();
+    assert!(w.support(4) && !w.fighting(4));
+    assert!(w.gun[4].as_ref().unwrap().rounds() == 0, "nothing to fire");
+    let mut mixed = sc.clone();
+    mixed.sides[0].units[4].platoon = Some("1".into());
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    assert!(Sim::new(&mixed, ds, m).err().expect("refused").contains("platoon of their own"));
+}
+
+/// Nothing to recover: the order ends at once; a new order to the recovery platoon mid-tow drops
+/// the tow; the run replays to the same state.
+#[test]
+fn a_new_order_to_the_recovery_platoon_drops_the_tow_and_replays() {
+    let (mut sim, tanks, rec, sc) = recovery_setup(&[2]);
+    sim.submit(SideId(0), Command::Recover { platoon: tanks, by: rec });
+    for _ in 0..1200 {
+        run(&mut sim, 1.0);
+        if sim.truth().tow[4].as_ref().unwrap().towing.is_some() {
+            break;
+        }
+    }
+    run(&mut sim, 10.0);
+    let task = |sim: &Sim| sim.perceived(SideId(0)).platoons.iter().find(|p| p.id == rec).unwrap().task.clone();
+    assert_eq!(task(&sim), "RECOVERING, TOWING");
+    sim.submit(
+        SideId(0),
+        Command::PlatoonMove {
+            platoon: rec,
+            destination: [300.0, 300.0],
+            via: vec![],
+            formation: None,
+            technique: sim_data::Technique::Traveling,
+            speed_limit_mps: None,
+        },
+    );
+    run(&mut sim, 30.0);
+    assert!(sim.truth().tow[4].as_ref().unwrap().towing.is_none(), "tow dropped on the new order");
+    assert_eq!(sim.truth().condition[2], sim::view::Condition::MobilityKill);
+    let rec_rep = Replay::from_ron(&Replay::record(&sim).to_ron()).unwrap();
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    let mut again = Sim::new(&sc, ds, m).unwrap();
+    immobilise(&mut again, &[2]);
+    rec_rep.play(&mut again, |_, _| {});
+    assert_eq!(again.state_hash(), rec_rep.final_hash, "replay diverged");
+}
+
+// --- Slice 8: commander AI resupply and recovery (plan M8C-LOGISTICS §4) ---
+
+/// Blue under its commander AI, defending where the tanks stand, with the given support units.
+fn ai_defence(support: Vec<sim_data::UnitDef>, supply: Vec<SupplyPointDef>) -> (Sim, ScenarioDef) {
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    let mut blue: Vec<_> = (0..4)
+        .map(|i| unit(&format!("1-{}", i + 1), "bulwark_a1", [600.0 + i as f64 * 60.0, 600.0], 0.0, Some("1")))
+        .collect();
+    blue.extend(support);
+    let mut sc = scenario(12 * 3600, blue, vec![]);
+    sc.sides[0].supply_points = supply;
+    sc.sides[0].ai = Some(sim_data::AiPlan {
+        tasks: vec![sim_data::AiTask {
+            platoons: vec!["1".into()],
+            mission: sim_data::Mission::Defend {
+                centre: [690.0, 620.0],
+                radius_m: 150.0,
+                facing_deg: 0.0,
+                alternates: vec![],
+            },
+            start_s: 0.0,
+            release_on_contact: false,
+            latest_s: None,
+        }],
+    });
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    sim.set_ai_enabled(SideId(0), true);
+    (sim, sc)
+}
+
+/// Main-gun rounds left in the tanks (0-3).
+fn tank_rounds(sim: &Sim) -> u32 {
+    (0..4).map(|k| sim.truth().gun[k].as_ref().unwrap().rounds()).sum()
+}
+
+fn tank_centre(sim: &Sim) -> [f64; 2] {
+    let w = sim.truth();
+    [(0..4).map(|k| w.transform[k].pos[0]).sum::<f64>() / 4.0, (0..4).map(|k| w.transform[k].pos[1]).sum::<f64>() / 4.0]
+}
+
+/// Take 20 of each tank's 40 rounds: 50 %, below the doctrine's 60 % threshold.
+fn half_empty(sim: &mut Sim) {
+    for k in 0..4 {
+        let g = sim.truth_mut().gun[k].as_mut().unwrap();
+        let mut left = 20;
+        for s in g.stock.iter_mut() {
+            let n = (*s).min(left);
+            *s -= n;
+            left -= n;
+        }
+    }
+}
+
+/// A defending platoon below the threshold is resupplied in its position by the free supply
+/// trucks once it is set and nothing is in contact; a full platoon is left alone.
+#[test]
+fn the_commander_sends_the_trucks_to_a_platoon_low_on_rounds() {
+    let trucks = vec![
+        unit("SUP-1", "carter_c", [400.0, 300.0], 90.0, Some("SUP")),
+        unit("SUP-2", "carter_f", [430.0, 300.0], 90.0, Some("SUP")),
+    ];
+    let (mut sim, _) = ai_defence(trucks.clone(), vec![]);
+    let quiet = run(&mut sim, 600.0);
+    assert!(
+        !quiet.iter().any(|e| matches!(e, Event::PlatoonReport { report: PlatoonReport::Resupplied { .. }, .. })),
+        "a full platoon is not resupplied"
+    );
+    let (mut sim, _) = ai_defence(trucks, vec![]);
+    half_empty(&mut sim);
+    run(&mut sim, 200.0);
+    let set = tank_centre(&sim);
+    let before = tank_rounds(&sim);
+    let mut done = None;
+    for s in 0..2400 {
+        for e in run(&mut sim, 1.0) {
+            if let Event::PlatoonReport { report: PlatoonReport::Resupplied { complete }, .. } = e {
+                done = Some((s, complete));
+            }
+        }
+        if done.is_some() {
+            break;
+        }
+    }
+    let (_, complete) = done.expect("the commander had the platoon resupplied");
+    assert!(complete);
+    assert!(tank_rounds(&sim) > before, "rounds handed over: {before} -> {}", tank_rounds(&sim));
+    assert!(dist(tank_centre(&sim), set) < 30.0, "the platoon stayed in its position");
+}
+
+/// Without trucks the platoon goes to the nearest stocked supply point and comes back to its post.
+#[test]
+fn without_trucks_the_platoon_goes_to_the_supply_point_and_back_to_its_post() {
+    let sp = SupplyPointDef {
+        callsign: "SP 1".into(),
+        position: [700.0, 1600.0],
+        unlimited: true,
+        fuel_l: 0.0,
+        rounds: vec![],
+        smoke_salvos: 0,
+    };
+    let (mut sim, _) = ai_defence(vec![], vec![sp]);
+    half_empty(&mut sim);
+    // The battle position of the task.
+    let post = [690.0, 620.0];
+    let (mut resupplied, mut away) = (false, 0.0f64);
+    for _ in 0..3600 {
+        for e in run(&mut sim, 1.0) {
+            resupplied |=
+                matches!(e, Event::PlatoonReport { report: PlatoonReport::Resupplied { complete: true }, .. });
+        }
+        away = away.max(dist(tank_centre(&sim), post));
+        if resupplied && dist(tank_centre(&sim), post) < 100.0 {
+            break;
+        }
+    }
+    assert!(resupplied, "resupplied at the point");
+    assert!(away > 700.0, "went to the point ({away:.0} m away at most)");
+    assert!(dist(tank_centre(&sim), post) < 100.0, "back at its post");
+    assert_eq!(tank_rounds(&sim), 160);
+}
+
+/// An immobilised tank of a task, clear of the enemy, is recovered by the free recovery platoon.
+#[test]
+fn the_commander_has_an_immobilised_tank_recovered() {
+    let (mut sim, _) = ai_defence(vec![unit("R-1", "hawser_a1", [400.0, 300.0], 90.0, Some("R"))], vec![]);
+    run(&mut sim, 150.0);
+    immobilise(&mut sim, &[2]);
+    let mut complete = None;
+    for _ in 0..2400 {
+        for e in run(&mut sim, 1.0) {
+            if let Event::PlatoonReport { report: PlatoonReport::RecoveryComplete { recovered }, .. } = e {
+                complete = Some(recovered);
+            }
+        }
+        if complete.is_some() {
+            break;
+        }
+    }
+    assert_eq!(complete, Some(1), "the commander sent the recovery platoon");
+    assert!(dist(sim.truth().transform[2].pos, [400.0, 300.0]) < 40.0, "towed to the collection point");
+}
+
+/// Slice 9: a unit that has already fought starts with a fraction of its rounds, smoke salvos and
+/// fuel; its capacity stays the full load, so resupply fills it up again.
+#[test]
+fn a_scenario_unit_can_start_short_of_rounds_and_fuel() {
+    let ds = data();
+    let m = map(&ds, 600, 600, "cropland", |_, _| 0.0);
+    let mut sc = trucks_scenario(vec![]);
+    sc.sides[0].units[0].ammo_fraction = Some(0.25);
+    sc.sides[0].units[0].fuel_fraction = Some(0.5);
+    let sim = Sim::new(&sc, ds.clone(), m.clone()).unwrap();
+    let w = sim.truth();
+    let g = w.gun[0].as_ref().unwrap();
+    assert_eq!((g.rounds(), g.capacity.iter().sum::<u32>()), (10, 40), "{:?}", g.stock);
+    assert_eq!(w.gun[1].as_ref().unwrap().rounds(), 40, "the others are full");
+    let cap = ds.vehicle("bulwark_a1").unwrap().mobility.fuel_capacity_l.get();
+    assert!((w.mobility[0].as_ref().unwrap().fuel_l - cap * 0.5).abs() < 1e-9);
+    sc.sides[0].units[0].ammo_fraction = Some(1.5);
+    assert!(Sim::new(&sc, ds, m).err().expect("refused").contains("fractions"));
+}
