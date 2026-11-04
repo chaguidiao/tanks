@@ -12,9 +12,9 @@ shot play --screen play --frames 10
 shot play-cw --screen play --keys down,down,wait5 --frames 12
 shot options --screen options
 shot database --screen database --frames 8
-shot database-ammo --screen database --keys right,wait3 --frames 10
-shot database-terrain --screen database --keys right,right,wait3 --frames 10
-shot database-doctrine --screen database --keys right,right,right,wait3 --frames 10
-shot database-models --screen database --keys right,right,right,right,wait3 --frames 10
+shot database-ammo --screen database --keys right,right,wait3 --frames 10
+shot database-terrain --screen database --keys right,right,right,wait3 --frames 10
+shot database-doctrine --screen database --keys right,right,right,right,wait3 --frames 10
+shot database-models --screen database --keys right,right,right,right,right,wait3 --frames 10
 shot edit-terrain-list --screen edit-terrain --frames 10
 true

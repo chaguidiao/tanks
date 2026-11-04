@@ -205,6 +205,10 @@ IFVs (WARD M2, SKIF M1) carry squads; the roster lists the men aboard. The squad
 - **MOUNT** (<kbd>U</kbd> again): the squads walk back and board.
 - A move or plan given to the dismount platoon while its squads still ride starts once they are out.
 
+::fig i-dismount | crop=560,420,480,170 | w=60 | Platoon 1 has dismounted: each squad (1-1A, 1-2A, 1-3A, with its strength in men) has taken up security behind its carrier.
+
+::fig i-dismount | crop=1272,36,322,180 | w=40 | The card of the dismount platoon 1-D: men, effective squads, how many still ride, and one row per squad.
+
 Squads move on foot: slowly, through woods and over ground no vehicle can cross, and into buildings only through their doors. A dismount platoon moves on line.
 
 ## Buildings
@@ -410,13 +414,13 @@ The simulation runs at 20 steps per second. The same scenario, seed and orders a
 
 # The database
 
-The **DATABASE** (main menu, screen menu, or **DATA**/<kbd>I</kbd> on a selected vehicle) shows everything the simulation loads, in five tabs: **VEHICLES**, **AMMUNITION**, **TERRAIN**, **DOCTRINE**, **COMBAT MODELS**.
+The **DATABASE** (main menu, screen menu, or **DATA**/<kbd>I</kbd> on a selected vehicle) shows everything the simulation loads, in six tabs: **VEHICLES**, **INFANTRY**, **AMMUNITION**, **TERRAIN**, **DOCTRINE**, **COMBAT MODELS**.
 
-::fig database-ammo | crop=0,100,1600,710 | pins=1@200,121;2@1527,263;3@1527,397;4@600,530;5@700,121 | The ammunition tab.
+::fig database-ammo | crop=0,100,1600,710 | pins=1@200,121;2@1527,263;3@1527,397;4@600,530;5@800,121 | The ammunition tab.
 
 | | |
 |---|---|
-| <span class="pinref">1</span> | Tabs (<kbd>←</kbd>/<kbd>→</kbd> or <kbd>1</kbd>–<kbd>5</kbd>) |
+| <span class="pinref">1</span> | Tabs (<kbd>←</kbd>/<kbd>→</kbd> or <kbd>1</kbd>–<kbd>6</kbd>) |
 | <span class="pinref">2</span> | Every value has a **confidence**: **HIGH**, **MED**, **LOW** or **EST** (estimate). Hover a value to see its source and notes at the bottom |
 | <span class="pinref">3</span> | **CALC** values are computed with the simulation's own formulas: velocity, flight time, drop and penetration by range |
 | <span class="pinref">4</span> | "Defeats frontal armour of": the range out to which this round penetrates each vehicle's turret and hull front |

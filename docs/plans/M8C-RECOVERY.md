@@ -1,6 +1,6 @@
 # M8c slice 7: recovery of immobilised vehicles
 
-Status: **2026-11-04, defaults taken, built for review** (TODO C2, plan `M8C-LOGISTICS.md` §2 "Recovery", §5 step 7). The user was away; the recommendations in §8 were built as written so the slice can be reviewed working. Any of them can be changed before merge.
+Status: **2026-11-04, built; §8 defaults accepted** (TODO C2, plan `M8C-LOGISTICS.md` §2 "Recovery", §5 step 7). The user was away; the recommendations in §8 were built as written so the slice can be reviewed working. Any of them can be changed before merge.
 
 Goal: a mobility-killed vehicle is not lost for good. A recovery vehicle drives to it, hooks up, tows it to the collection point and, after a repair time from data, it is operational again. Recovery costs time and exposes the recovery vehicle; losing it loses the side's ability to recover.
 
@@ -55,7 +55,7 @@ A recovery vehicle that is destroyed or immobilised drops its tow where it is (t
 
 No randomness; who is taken first is platoon slot order, recovery vehicles in their platoon order. Tow and repair state hashed only when present, so the golden hash and every existing scenario (none has a recovery vehicle) are unchanged; balance batch not affected. `SIM_VERSION` bump (new command).
 
-## 8. Decisions (defaults built; review)
+## 8. Decisions (defaults built; accepted by the user 2026-11-04)
 
 | # | Question | Options | Default built |
 |---|---|---|---|
