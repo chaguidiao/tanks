@@ -154,6 +154,9 @@ impl PlanState {
                 h.u8(l.on_ambush.map_or(255, |r| r as u8));
                 h.u8(l.built_up.map_or(255, |b| b as u8));
             }
+            if let Some(f) = l.shift_fire {
+                h.u8(f as u8);
+            }
         }
     }
 }
@@ -324,6 +327,9 @@ fn apply_leg(st: &PlanState, p: &mut Platoon, ctx: &mut Ctx, idx: usize) {
     }
     if let Some(b) = leg.built_up {
         p.built_up = b;
+    }
+    if let Some(f) = leg.shift_fire {
+        crate::platoon::set_shift_fire(p, ctx.world, f);
     }
 }
 

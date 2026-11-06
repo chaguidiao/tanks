@@ -1,6 +1,6 @@
 //! Platoons: membership, order state and the platoon view. Behaviour is in `platoon_ai.rs`.
 
-use ai::picture::{AmbushReaction, BuiltUp, ContactReaction, PlatoonId, PlatoonView, SideId};
+use ai::picture::{AmbushReaction, BuiltUp, ContactReaction, PlatoonId, PlatoonView, ShiftFire, SideId};
 use ai::position::Candidate;
 use sim_data::{Formation, Technique};
 
@@ -136,6 +136,7 @@ pub struct Platoon {
     pub contact_reaction: ContactReaction,
     pub ambush_reaction: AmbushReaction,
     pub built_up: BuiltUp,
+    pub shift_fire: ShiftFire,
     /// Rockets or missiles last fired at a member from inside the doctrine's close-ambush range:
     /// (tick, launch point). The crew sees the launch at that range.
     pub ambush: Option<(u64, Vec2)>,
@@ -296,6 +297,7 @@ impl Platoon {
             contact_reaction: self.contact_reaction,
             ambush_reaction: self.ambush_reaction,
             built_up: self.built_up,
+            shift_fire: self.shift_fire,
             ambushed_tick: (self.ambush_handled > 0).then_some(self.ambush_handled),
             queued: self.queue.len() as u8,
             resupply_at: match &self.order {
@@ -325,5 +327,15 @@ impl Platoon {
                 .iter()
                 .filter(|&&k| w.can_move(k))
                 .all(|&k| w.ai[k].as_ref().is_none_or(|a| a.order == crate::world::Order::Idle))
+    }
+}
+
+/// Set whether the platoon's crews shift off a target their rounds do not hurt.
+pub fn set_shift_fire(p: &mut Platoon, world: &mut crate::world::World, f: ShiftFire) {
+    p.shift_fire = f;
+    for &k in &p.members {
+        if let Some(g) = world.gun[k].as_mut() {
+            g.stay_on_target = f == ShiftFire::Stay;
+        }
     }
 }

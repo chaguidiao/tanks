@@ -151,7 +151,7 @@ Evidence and context: `docs/PLAYTEST-2026-11-06.md`. Worked through 2026-11-06, 
 - [x] PT12 Briefing: `HOLD <objective>` shown for attack missions (`menu.rs:582`); squads shown as `UNKNOWN`, which also reveals Red's strength (`menu.rs:93`)
 - [x] PT13 Consistent order UI: the resupply source list ignores number keys and shows no hints; RECOVER has no card button and is missing from F7 help
 - [x] PT14 GO/NO-GO layer legend (green, red hatching, amber are unexplained)
-- [ ] PT15 Map clarity. Done: labels step clear of each other, group roster rows, heading ticks, viewshed observer marker, LOS label, editor default stock. Open: the selection panel covers the north-east and grows with a draft, eating map clicks
+- [x] PT15 Map clarity. Done: labels step clear of each other, group roster rows, heading ticks, viewshed observer marker, LOS label, editor default stock, and (2026-11-06) a HIDE button that folds the selection panel to one line, so the map under it takes clicks
 - [x] PT16 Plan draft starts from the old route, including a break-contact destination, with no clear way to start fresh
 - [x] PT17 Radio `n EXPOSED` includes tanks the roster shows as `MASKED`, which need a different fix; platoon reads `HALTED` after resupply instead of `SET IN BP`
 - [ ] PT18 Key taps shorter than a frame now also read raylib's key queue (not reproduced under load: **check** on slow hardware). Open **check**: a right click on a checkpoint once opened no menu, not reproduced
@@ -170,9 +170,9 @@ Evidence and context: `docs/PLAYTEST-2026-11-06.md`. Worked through 2026-11-06, 
 **PT-E — Guide and names**
 - [x] PT26 Refresh the user guide: version 0.1.1 and October on the cover, two maps (now three), "six scenarios", first-battle figures (contact 06:10 on the north road, 19 rounds, 16 hits, 9 kills; the playtest got 06:06 from the north-east, 58, 51, 7), GO/NO-GO description, editor key table missing `I` and `S`; warn that clicking an already selected platoon recentres the map (step 2 of the first battle)
 - [x] PT27 Real vehicle names in player text: briefings and guide hints say M1, T-72A, BRADLEY while the game shows BULWARK and KURGAN (CLAUDE.md: fictional names)
-- [ ] PT29 Decision: should penetration scatter? It is a hard threshold, so a fixed geometry fails every time: 221 at 35 degrees was 5 mm short (586 mm against 581 mm) for 35 rounds. PT20 stops crews wasting ammunition on it but not the cliff. Needs a source and a re-run of the validation harness
-- [ ] PT30 Decision: leg setting for shifting fire (see the AI-defaults rule), and whether to rank immobilised targets lower (not done: one that can still shoot is still a threat; crews cannot tell a mobility kill from a halt)
-- [ ] PT31 Service-station resupply still serves in platoon order (the tailgate serves the emptiest first); selection is per tick there, so a change must not swap vehicles mid-service
+- [x] PT29 Should penetration scatter? **Decided 2026-11-06: no, it stays a hard threshold.** No usable public source for shot-to-shot spread on tank armour: the Lanz-Odermatt error figures (about 5 %, over 14 % in a later check) are model against test, not scatter; V50 work shows a mixed zone, but the one figure found is about 5 m/s for simple steel plate. PT20 already stops the waste. Revisit if a source turns up
+- [x] PT30 **Done 2026-11-06**: NO EFFECT setting, per leg and for the platoon now (`ShiftFire`: SHIFT FIRE by default, STAY ON), under ON CONTACT. No branch condition: it is not an event. Immobilised targets are not ranked lower (one that can still shoot is still a threat; crews cannot tell a mobility kill from a halt)
+- [x] PT31 **Done 2026-11-06**: a supply point calls the emptiest gun forward first; a vehicle called keeps its station, so nothing swaps mid-service
 - [ ] PT32 Regenerate the guide's screenshots (still from 0.1.1): start-up framing, radio, legend, briefing and the scenario list have changed
 - [ ] PT28 Still untested by hand: RECOVER (`O`), tank smoke rounds, engine smoke, contingency firing, branches, night and fog in the client, MARKET TOWN and the delay scenarios, terrain editor save, GL 2.1 build, fullscreen, edge pan
 

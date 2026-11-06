@@ -399,6 +399,7 @@ impl Sim {
                                 contact_reaction: Default::default(),
                                 ambush_reaction: Default::default(),
                                 built_up: Default::default(),
+                                shift_fire: Default::default(),
                                 ambush: None,
                                 ambush_handled: 0,
                                 drive_through_until: 0,
@@ -1730,6 +1731,16 @@ impl Sim {
                     events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
                 }
             }
+            Command::SetShiftFire { platoon, shift_fire } => {
+                let f = *shift_fire;
+                if let Some(p) = self.platoon_mut(c.side, *platoon) {
+                    p.rewrite_leg(|l| l.shift_fire = Some(f));
+                    events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
+                }
+                if let Some(pi) = self.platoons.iter().position(|p| p.side == c.side && p.id == *platoon) {
+                    platoon::set_shift_fire(&mut self.platoons[pi], &mut self.world, f);
+                }
+            }
             Command::CodeWord { word } => {
                 let s = &mut self.sides[c.side.0 as usize];
                 s.picture.code_words.retain(|w| w.word != *word);
@@ -1836,7 +1847,7 @@ impl Sim {
                 p.order = platoon::PlatoonOrder::Resupply {
                     point: pi,
                     approach,
-                    members: vec![logistics::ServiceState::new(); p.members.len()],
+                    members: vec![logistics::ServiceState::waiting(); p.members.len()],
                 };
                 p.plan = None;
                 p.held = None;
@@ -2180,6 +2191,10 @@ impl Sim {
                 h.u8(p.built_up as u8);
                 h.u64(p.ambush.map_or(0, |a| a.0));
                 h.u64(p.ambush_handled);
+            }
+            if p.shift_fire != Default::default() {
+                h.u32(p.id.0);
+                h.u8(p.shift_fire as u8);
             }
         }
         for b in &self.batteries {

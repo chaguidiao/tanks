@@ -8,8 +8,8 @@
 use std::collections::BTreeMap;
 
 use sim::view::{
-    AmbushReaction, Branch, BuiltUp, ConditionSet, ContactReaction, LegSettings, Plan, PlanStep, SpeedSetting,
-    StepAction,
+    AmbushReaction, Branch, BuiltUp, ConditionSet, ContactReaction, LegSettings, Plan, PlanStep, ShiftFire,
+    SpeedSetting, StepAction,
 };
 use terrain::path::{Pathfinder, segment_time};
 
@@ -182,6 +182,7 @@ pub enum PlanEdit {
     OnContact(u16, Option<ContactReaction>),
     OnAmbush(u16, Option<AmbushReaction>),
     BuiltUp(u16, Option<BuiltUp>),
+    ShiftFire(u16, Option<ShiftFire>),
     /// Add an action at the checkpoint (`true` = on release).
     Act(u16, bool, ActKind),
     ClearActs(u16, bool),
@@ -265,6 +266,15 @@ pub(super) fn built_up_name(b: BuiltUp) -> &'static str {
         BuiltUp::Enter => "ENTER",
     }
 }
+
+pub(super) fn shift_fire_name(f: ShiftFire) -> &'static str {
+    match f {
+        ShiftFire::Shift => "SHIFT FIRE",
+        ShiftFire::Stay => "STAY ON",
+    }
+}
+
+pub(super) const NO_EFFECT_TIP: &str = "ROUNDS HIT WITHOUT EFFECT: SHIFT TO ANOTHER TARGET (DEFAULT) OR STAY ON IT";
 
 pub(super) fn reaction_short(r: ContactReaction) -> &'static str {
     match r {
@@ -777,6 +787,13 @@ impl Game {
                     .checked(leg.built_up == Some(b)),
             );
         }
+        let mut no_effect = vec![keep(leg.shift_fire.is_some(), PlanEdit::ShiftFire(id, None))];
+        for f in [ShiftFire::Shift, ShiftFire::Stay] {
+            no_effect.push(
+                MenuItem::new(shift_fire_name(f), Self::pa(PlanEdit::ShiftFire(id, Some(f))))
+                    .checked(leg.shift_fire == Some(f)),
+            );
+        }
         let or_keep = |s: Option<String>| s.unwrap_or_else(|| "KEEP".into());
         vec![
             MenuItem::submenu("SPEED", speed).key("S").value(or_keep(leg.speed.map(speed_text))),
@@ -796,6 +813,10 @@ impl Game {
                 .key("U")
                 .value(or_keep(leg.built_up.map(|b| built_up_name(b).into())))
                 .tip("TANK ROUTES AVOID BUILT-UP GROUND WITHOUT DISMOUNTS (DEFAULT) OR ENTER IT"),
+            MenuItem::submenu("NO EFFECT", no_effect)
+                .key("N")
+                .value(or_keep(leg.shift_fire.map(|f| shift_fire_name(f).into())))
+                .tip(NO_EFFECT_TIP),
         ]
     }
 
@@ -1074,6 +1095,7 @@ impl Game {
                     | PlanEdit::OnContact(id, _)
                     | PlanEdit::OnAmbush(id, _)
                     | PlanEdit::BuiltUp(id, _)
+                    | PlanEdit::ShiftFire(id, _)
                     | PlanEdit::Act(id, ..)
                     | PlanEdit::ClearActs(id, _)
                     | PlanEdit::Wait(id, _)
@@ -1092,6 +1114,7 @@ impl Game {
                     PlanEdit::OnContact(_, v) => s.leg.on_contact = v,
                     PlanEdit::OnAmbush(_, v) => s.leg.on_ambush = v,
                     PlanEdit::BuiltUp(_, v) => s.leg.built_up = v,
+                    PlanEdit::ShiftFire(_, v) => s.leg.shift_fire = v,
                     PlanEdit::Act(_, release, k) => {
                         let a = match k {
                             ActKind::SmokeScreen => StepAction::SmokeScreen,
@@ -1537,6 +1560,9 @@ fn leg_text(l: &sim::view::LegSettings) -> String {
     }
     if let Some(b) = l.built_up {
         v.push(format!("BUILT-UP {}", built_up_name(b)));
+    }
+    if let Some(f) = l.shift_fire {
+        v.push(format!("NO EFFECT {}", shift_fire_name(f)));
     }
     if v.is_empty() { "KEEP".into() } else { v.join(" · ") }
 }

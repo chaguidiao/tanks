@@ -263,6 +263,7 @@ pub struct PlatoonView {
     pub contact_reaction: ContactReaction,
     pub ambush_reaction: AmbushReaction,
     pub built_up: BuiltUp,
+    pub shift_fire: ShiftFire,
     /// Tick of the last close ambush the platoon reacted to.
     pub ambushed_tick: Option<u64>,
     /// Orders waiting in the queue.
@@ -420,6 +421,8 @@ pub struct LegSettings {
     pub on_ambush: Option<AmbushReaction>,
     #[serde(default)]
     pub built_up: Option<BuiltUp>,
+    #[serde(default)]
+    pub shift_fire: Option<ShiftFire>,
 }
 
 /// What a platoon does when rockets or missiles are fired at it from close range (plan
@@ -443,6 +446,17 @@ pub enum BuiltUp {
     #[default]
     Avoid,
     Enter,
+}
+
+/// What a crew does when its rounds hit a target without effect (TC 3-20.31: observe effect,
+/// re-engage or shift).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShiftFire {
+    /// After the doctrine's number of hits without effect, take another target if there is one.
+    #[default]
+    Shift,
+    /// Stay on the target, for instance to hold its head down or wait for it to turn.
+    Stay,
 }
 
 /// What a platoon does when it meets the enemy (battle drills, ATP 3-20.15 App. F).

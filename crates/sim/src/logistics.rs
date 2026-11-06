@@ -124,6 +124,11 @@ impl ServiceState {
         Self { done: false, short: false, credit: [0.0; 4], goal: [f64::NAN, f64::NAN], stage: ServiceStage::ToPoint }
     }
 
+    /// In the queue at a supply point, until a station falls free.
+    pub fn waiting() -> Self {
+        Self { stage: ServiceStage::Waiting, ..Self::new() }
+    }
+
     pub(crate) fn hash_into(&self, h: &mut StableHasher) {
         h.u8(self.done as u8 | (self.short as u8) << 1);
         for c in self.credit {

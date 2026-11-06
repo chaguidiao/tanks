@@ -184,6 +184,11 @@ pub enum Command {
         platoon: PlatoonId,
         built_up: ai::picture::BuiltUp,
     },
+    /// Set whether the platoon's crews shift off a target their rounds do not hurt.
+    SetShiftFire {
+        platoon: PlatoonId,
+        shift_fire: ai::picture::ShiftFire,
+    },
     /// Send a pre-arranged code word to every platoon of the side at once (FM 6-0 execution
     /// matrix; no radio delay, never missed in v1).
     CodeWord {

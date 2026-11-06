@@ -60,6 +60,8 @@ pub struct GunState {
     pub loading_until: u64,
     /// Targets this crew has hit without effect (`note_hit`).
     pub no_effect: Vec<NoEffect>,
+    /// The platoon's order: stay on a target even if rounds do not hurt it.
+    pub stay_on_target: bool,
 }
 
 /// Non-penetrating hits in a row on one target, as the crew saw them land.
@@ -95,6 +97,7 @@ impl GunState {
             coax_target: None,
             loading_until: 0,
             no_effect: Vec::new(),
+            stay_on_target: false,
         }
     }
 
@@ -116,9 +119,10 @@ impl GunState {
 
     /// Has the crew recently seen rounds fail on this target often enough to look for another?
     pub fn futile(&self, target: usize, rule: NoEffectRule, tick: u64) -> bool {
-        self.no_effect
-            .iter()
-            .any(|n| n.target == target && n.hits >= rule.hits && tick.saturating_sub(n.last_tick) <= rule.forget_ticks)
+        !self.stay_on_target
+            && self.no_effect.iter().any(|n| {
+                n.target == target && n.hits >= rule.hits && tick.saturating_sub(n.last_tick) <= rule.forget_ticks
+            })
     }
 
     /// Rounds left, all types.

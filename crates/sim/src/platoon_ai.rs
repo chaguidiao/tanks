@@ -948,7 +948,19 @@ fn resupply_step(p: &mut Platoon, ctx: &mut Ctx) {
         let d = radius + 40.0 + 25.0 * j as f64;
         [sp_pos[0] + sa * d, sp_pos[1] + ca * d]
     };
-    let mut serving = 0;
+    // A vehicle called forward keeps its station; a free station goes to the emptiest gun waiting,
+    // so that the fight goes on if the service is cut short (ties in platoon order).
+    let filled = |k: usize| {
+        ctx.world.gun[k]
+            .as_ref()
+            .map_or(1.0, |g| f64::from(g.rounds()) / f64::from(g.capacity.iter().sum::<u32>().max(1)))
+    };
+    let waiting = |i: usize| !members[i].done && ctx.world.can_move(p.members[i]);
+    let called = |i: usize| matches!(members[i].stage, ServiceStage::ToPoint | ServiceStage::Served);
+    let mut queue: Vec<usize> = (0..members.len()).filter(|&i| waiting(i) && !called(i)).collect();
+    queue.sort_by(|&a, &b| filled(p.members[a]).total_cmp(&filled(p.members[b])));
+    let held = (0..members.len()).filter(|&i| waiting(i) && called(i));
+    let active_now: Vec<usize> = held.chain(queue).take(stations).collect();
     for (i, &k) in p.members.iter().enumerate() {
         let st = &mut members[i];
         if !ctx.world.can_move(k) {
@@ -956,10 +968,7 @@ fn resupply_step(p: &mut Platoon, ctx: &mut Ctx) {
             st.stage = ServiceStage::Done;
             continue;
         }
-        let active = !st.done && serving < stations;
-        if active {
-            serving += 1;
-        }
+        let active = active_now.contains(&i);
         let pos = ctx.world.transform[k].pos;
         let at_point = dist(pos, sp_pos) <= radius;
         let slow = ctx.world.mobility[k].as_ref().is_some_and(|m| m.speed.abs() < 0.5);

@@ -4,10 +4,13 @@
 //! the leg in progress, see `sim::plan::PlanState::rewrite_leg`).
 
 use super::ctx::{MenuAct, reaction_name};
-use super::planedit::{AMBUSH_REACTIONS, PlanEdit, ambush_name, ambush_short, built_up_name, reaction_short};
+use super::planedit::{
+    AMBUSH_REACTIONS, NO_EFFECT_TIP, PlanEdit, ambush_name, ambush_short, built_up_name, reaction_short,
+    shift_fire_name,
+};
 use super::*;
 use crate::hud::{MenuItem, PopupMenu};
-use ai::picture::{AmbushReaction, BuiltUp, ContactReaction, SpeedSetting};
+use ai::picture::{AmbushReaction, BuiltUp, ContactReaction, ShiftFire, SpeedSetting};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Posture {
@@ -20,6 +23,8 @@ pub enum Posture {
     OnAmbush,
     /// Sub-list of ON CONTACT (plan M8F1-INFANTRY-AI §3).
     BuiltUp,
+    /// Sub-list of ON CONTACT.
+    ShiftFire,
     Ammo,
 }
 
@@ -32,6 +37,7 @@ pub enum PostureVal {
     OnContact(ContactReaction),
     OnAmbush(AmbushReaction),
     BuiltUp(BuiltUp),
+    ShiftFire(ShiftFire),
     Ammo(Option<AmmoKind>),
     /// Leg scope: the leg does not set this; the platoon keeps what it has.
     Keep(Posture),
@@ -56,6 +62,7 @@ impl Posture {
             Posture::OnContact => "ON CONTACT",
             Posture::OnAmbush => "ON AMBUSH",
             Posture::BuiltUp => "BUILT-UP",
+            Posture::ShiftFire => "NO EFFECT",
             Posture::Ammo => "AMMUNITION",
         }
     }
@@ -67,7 +74,7 @@ impl Posture {
             Posture::Technique => 9,
             Posture::Speed => 10,
             Posture::Weapons => 11,
-            Posture::OnContact | Posture::OnAmbush | Posture::BuiltUp => 12,
+            Posture::OnContact | Posture::OnAmbush | Posture::BuiltUp | Posture::ShiftFire => 12,
             Posture::Ammo => 13,
         }
     }
@@ -75,7 +82,12 @@ impl Posture {
     fn needs_platoon(self) -> bool {
         matches!(
             self,
-            Posture::Formation | Posture::Technique | Posture::OnContact | Posture::OnAmbush | Posture::BuiltUp
+            Posture::Formation
+                | Posture::Technique
+                | Posture::OnContact
+                | Posture::OnAmbush
+                | Posture::BuiltUp
+                | Posture::ShiftFire
         )
     }
 }
@@ -156,6 +168,10 @@ impl Game {
                     let Addressee::Platoon(p) = to else { return None };
                     self.picture().platoon(p).map(|v| PostureVal::BuiltUp(v.built_up))
                 }
+                Posture::ShiftFire => {
+                    let Addressee::Platoon(p) = to else { return None };
+                    self.picture().platoon(p).map(|v| PostureVal::ShiftFire(v.shift_fire))
+                }
                 Posture::Ammo => self.ammo_choice(to).map(|(c, _)| PostureVal::Ammo(c)),
             },
             Scope::Leg(p, id) => {
@@ -173,6 +189,7 @@ impl Game {
                     Posture::OnContact => leg.on_contact.map(PostureVal::OnContact),
                     Posture::OnAmbush => leg.on_ambush.map(PostureVal::OnAmbush),
                     Posture::BuiltUp => leg.built_up.map(PostureVal::BuiltUp),
+                    Posture::ShiftFire => leg.shift_fire.map(PostureVal::ShiftFire),
                     Posture::Ammo => None,
                 }
             }
@@ -188,6 +205,7 @@ impl Game {
             PostureVal::OnContact(r) => reaction_name(r).into(),
             PostureVal::OnAmbush(r) => ambush_name(r).into(),
             PostureVal::BuiltUp(b) => built_up_name(b).into(),
+            PostureVal::ShiftFire(f) => shift_fire_name(f).into(),
             PostureVal::Ammo(k) => k.map_or("AUTO", |k| k.label()).into(),
             PostureVal::Keep(_) => "KEEP".into(),
         }
@@ -231,6 +249,7 @@ impl Game {
             .collect(),
             Posture::OnAmbush => AMBUSH_REACTIONS.into_iter().map(PostureVal::OnAmbush).collect(),
             Posture::BuiltUp => [BuiltUp::Avoid, BuiltUp::Enter].into_iter().map(PostureVal::BuiltUp).collect(),
+            Posture::ShiftFire => [ShiftFire::Shift, ShiftFire::Stay].into_iter().map(PostureVal::ShiftFire).collect(),
             Posture::Ammo => {
                 let kinds = match scope {
                     Scope::Now(to) => self.ammo_choice(to).map(|(_, k)| k).unwrap_or_default(),
@@ -282,6 +301,12 @@ impl Game {
                     .key("U")
                     .value(value(Posture::BuiltUp))
                     .tip("TANK ROUTES AVOID BUILT-UP GROUND WITHOUT DISMOUNTS (DEFAULT) OR ENTER IT"),
+            );
+            items.push(
+                MenuItem::submenu("NO EFFECT", self.posture_items(Posture::ShiftFire, scope))
+                    .key("N")
+                    .value(value(Posture::ShiftFire))
+                    .tip(NO_EFFECT_TIP),
             );
         }
         items
@@ -376,6 +401,7 @@ impl Game {
                     PostureVal::OnContact(r) => PlanEdit::OnContact(id, Some(r)),
                     PostureVal::OnAmbush(r) => PlanEdit::OnAmbush(id, Some(r)),
                     PostureVal::BuiltUp(b) => PlanEdit::BuiltUp(id, Some(b)),
+                    PostureVal::ShiftFire(f) => PlanEdit::ShiftFire(id, Some(f)),
                     PostureVal::Keep(Posture::Formation) => PlanEdit::Formation(id, None),
                     PostureVal::Keep(Posture::Technique) => PlanEdit::Technique(id, None),
                     PostureVal::Keep(Posture::Speed) => PlanEdit::Speed(id, None),
@@ -383,6 +409,7 @@ impl Game {
                     PostureVal::Keep(Posture::OnContact) => PlanEdit::OnContact(id, None),
                     PostureVal::Keep(Posture::OnAmbush) => PlanEdit::OnAmbush(id, None),
                     PostureVal::Keep(Posture::BuiltUp) => PlanEdit::BuiltUp(id, None),
+                    PostureVal::Keep(Posture::ShiftFire) => PlanEdit::ShiftFire(id, None),
                     PostureVal::Ammo(_) | PostureVal::Keep(Posture::Ammo) => return,
                 };
                 self.run_plan_edit(e, [0.0, 0.0]);
@@ -440,6 +467,10 @@ impl Game {
             (PostureVal::BuiltUp(built_up), Addressee::Platoon(platoon)) => {
                 self.order(Command::SetBuiltUp { platoon, built_up });
                 self.radio(format!("TO {cs}: BUILT-UP AREAS, {}.", built_up_name(built_up)));
+            }
+            (PostureVal::ShiftFire(shift_fire), Addressee::Platoon(platoon)) => {
+                self.order(Command::SetShiftFire { platoon, shift_fire });
+                self.radio(format!("TO {cs}: ON NO EFFECT, {}.", shift_fire_name(shift_fire)));
             }
             (PostureVal::Ammo(kind), _) => {
                 self.order(Command::SelectAmmo { to, kind });

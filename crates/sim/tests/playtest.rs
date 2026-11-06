@@ -120,6 +120,28 @@ fn a_crew_shifts_off_a_target_it_cannot_penetrate() {
     assert!(far_pen > control_pen, "penetrations on the far tank: {far_pen}, control {control_pen}");
 }
 
+/// PT30: the shift is a default the player can turn off, by order or for a leg of a plan.
+#[test]
+fn a_platoon_ordered_to_stay_on_keeps_firing_at_the_target() {
+    let (mut sim, near, far) = shift_fire_sim(None);
+    let side = BLUE;
+    let platoon = sim.perceived(side).platoons[0].id;
+    sim.submit_immediate(side, Command::SetShiftFire { platoon, shift_fire: ai::picture::ShiftFire::Stay });
+    let (near_id, far_id) = (sim.truth().id[near], sim.truth().id[far]);
+    let (mut near_hits, mut far_hits) = (0, 0);
+    for _ in 0..(200.0 / sim::DT) as u32 {
+        for e in sim.step() {
+            if let Event::Hit { unit, .. } = e {
+                near_hits += u32::from(unit == near_id);
+                far_hits += u32::from(unit == far_id);
+            }
+        }
+    }
+    assert_eq!(sim.perceived(side).platoons[0].shift_fire, ai::picture::ShiftFire::Stay);
+    assert!(near_hits >= 8, "stays on the near tank: {near_hits} hits");
+    assert_eq!(far_hits, 0, "and leaves the far one alone");
+}
+
 /// The fire plan gives the platoon's only tank the near target; an ENGAGE order on the far one
 /// must last against it (it used to be overwritten within a second).
 #[test]

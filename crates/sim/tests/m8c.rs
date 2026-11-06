@@ -125,6 +125,36 @@ fn a_short_point_reports_partial_and_cannot_serve_the_other_side() {
     assert_eq!(sim.perceived(blue).supply_points[0].fuel_l, 0.0);
 }
 
+/// PT31: the supply point calls the emptiest gun forward first and leaves it there once called.
+#[test]
+fn the_supply_point_serves_the_emptiest_gun_first() {
+    let (mut sim, _) = setup(600.0);
+    let blue = SideId(0);
+    let pl = sim.perceived(blue).platoons[0].id;
+    let sp = sim.perceived(blue).supply_points[0].clone();
+    let w = sim.truth_mut();
+    let n = w.len();
+    for k in 0..n {
+        let g = w.gun[k].as_mut().unwrap();
+        g.stock.iter_mut().for_each(|s| *s = 0);
+        g.stock[1] = if k >= n - 2 { 1 } else { 30 };
+    }
+    sim.submit(blue, Command::Resupply { platoon: pl, point: sp.id });
+    run(&mut sim, 10.0);
+    let stages: Vec<_> = sim.perceived(blue).own.iter().map(|u| u.service).collect();
+    let (full, empty) = stages.split_at(n - 2);
+    assert!(empty.iter().all(|s| *s == Some(ai::picture::ServiceStage::ToPoint)), "{stages:?}");
+    assert!(full.iter().all(|s| *s == Some(ai::picture::ServiceStage::Waiting)), "{stages:?}");
+    // Topping up a called vehicle does not hand its place to one that is now emptier.
+    let w = sim.truth_mut();
+    for k in 0..n - 2 {
+        w.gun[k].as_mut().unwrap().stock[1] = 0;
+    }
+    run(&mut sim, 5.0);
+    let again: Vec<_> = sim.perceived(blue).own.iter().map(|u| u.service).collect();
+    assert_eq!(again, stages, "no swap once called");
+}
+
 /// Two Blue platoons ("1" and "2") of two tanks each, a battery with 10 HE, and the given re-arm
 /// events.
 fn logpac_scenario(events: Vec<LogisticsEventDef>) -> ScenarioDef {
