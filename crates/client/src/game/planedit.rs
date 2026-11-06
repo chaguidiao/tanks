@@ -453,6 +453,14 @@ impl Game {
         self.plan_revert();
     }
 
+    /// Empty the draft to plan from scratch; CTRL+Z brings the checkpoints back.
+    pub(super) fn plan_clear(&mut self) {
+        if let Some(d) = &mut self.plan {
+            d.plan.steps.clear();
+            (d.sel, d.running, d.start) = (None, None, None);
+        }
+    }
+
     pub(super) fn plan_revert(&mut self) {
         self.revert_armed = false;
         self.plan = None;
@@ -463,6 +471,10 @@ impl Game {
     }
 
     pub(super) fn plan_add_cp(&mut self, at: [f64; 2]) {
+        if !self.on_map(at) {
+            self.radio(super::OFF_MAP.into());
+            return;
+        }
         if !self.ensure_draft() {
             return;
         }
@@ -1723,6 +1735,100 @@ mod tests {
         assert!(g.plan.is_some() && g.revert_armed, "two edits: the first REVERT only asks");
         g.press(Cmd::PlanRevert);
         assert!(g.plan.is_none());
+    }
+
+    #[test]
+    fn nothing_is_selected_at_the_start_and_esc_then_opens_the_menu() {
+        let mut g = game();
+        assert!(g.sel_platoon.is_none() && g.sel_unit.is_none());
+        assert!(!g.esc_in_use());
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        assert!(g.esc_in_use(), "a selection is something for Esc to step back from");
+        g.press(Cmd::Cancel);
+        assert!(g.sel_platoon.is_none() && !g.esc_in_use());
+    }
+
+    #[test]
+    fn esc_goes_to_the_menu_in_the_after_action_review() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        g.act_now(GameAction::Aar);
+        assert!(g.arrows_in_use());
+        assert!(!g.esc_in_use(), "the review takes no game hotkeys: Esc must not be swallowed");
+    }
+
+    #[test]
+    fn orders_off_the_map_are_refused_and_followers_stay_on_it() {
+        let mut g = game();
+        let (a, b) = platoons(&g);
+        select(&mut g, Some(a));
+        g.issue_move(Vec::new(), [-100.0, 500.0]);
+        assert_eq!(g.log.back().map(|l| l.1.as_str()), Some(OFF_MAP));
+        assert!(g.graphics.iter().all(|x| x.platoon != Some(a)), "no X in the void");
+        g.plan_add_cp([500.0, -1.0]);
+        assert!(g.plan.is_none(), "no draft for a checkpoint off the map");
+        let cmd = Command::PlatoonMove {
+            platoon: a,
+            destination: [500.0, 50.0],
+            via: Vec::new(),
+            formation: None,
+            technique: Technique::Traveling,
+            speed_limit_mps: None,
+        };
+        let Some(Command::PlatoonMove { destination, .. }) =
+            Game::for_follower(&cmd, a, b, [0.0, -800.0], [4000.0, 4000.0])
+        else {
+            panic!("a move for the follower")
+        };
+        assert_eq!(destination, [500.0, FOLLOWER_EDGE_M]);
+    }
+
+    #[test]
+    fn auto_pause_stops_for_own_losses_only_and_once_per_engagement() {
+        let mut g = game();
+        g.auto_pause = crate::settings::AutoPause::ContactLoss;
+        let own = g.picture().own[0].id;
+        let lost = |unit| Event::Hit { unit, penetrated: true, kill: Some(KillKind::Catastrophic) };
+        assert_eq!(g.auto_pause_for(&lost(own)), Some("VEHICLE LOST"));
+        assert_eq!(g.auto_pause_for(&lost(sim::view::EntityId(9999))), None, "an enemy's loss is no reason to stop");
+        let spot = Event::SpotReport {
+            side: g.side,
+            reporter: own,
+            contact: sim::view::ContactId(1),
+            level: ContactLevel::Detected,
+            new: true,
+            range_m: 2000.0,
+        };
+        assert_eq!(g.auto_pause_for(&spot), Some("NEW CONTACT"));
+        assert_eq!(g.auto_pause_for(&spot), None, "the same engagement");
+    }
+
+    #[test]
+    fn radio_wraps_on_words_and_scrolls_by_message() {
+        assert_eq!(wrap_radio("ONE TWO THREE", 8), vec!["ONE TWO", "          THREE"]);
+        let mut g = game();
+        g.radio("OLD".into());
+        g.radio_back = 1;
+        g.radio("NEW".into());
+        assert_eq!(g.radio_back, 2, "a new message does not move what is being read");
+        let rows = g.radio_rows([1600.0, 900.0]);
+        assert!(rows.iter().all(|r| !r.1.contains("NEW") && !r.1.contains("OLD")), "{rows:?}");
+    }
+
+    #[test]
+    fn clear_empties_the_draft_and_undo_brings_it_back() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        g.plan_add_cp([500.0, 500.0]);
+        g.sync_drafts();
+        g.press(Cmd::PlanClear);
+        g.sync_drafts();
+        assert!(g.plan.as_ref().is_some_and(|d| d.plan.steps.is_empty()));
+        g.press(Cmd::Undo);
+        assert_eq!(g.plan.as_ref().map(|d| d.plan.steps.len()), Some(1));
     }
 
     #[test]

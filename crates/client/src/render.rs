@@ -295,6 +295,14 @@ impl Gfx {
                 inp.pressed.push(k);
             }
         }
+        // A tap shorter than the frame is gone from the key state, but stays in raylib's queue.
+        while let Some(rk) = rl.get_key_pressed() {
+            if let Some(&(_, k)) = KEYMAP.iter().find(|(m, _)| *m == rk)
+                && !inp.pressed.contains(&k)
+            {
+                inp.pressed.push(k);
+            }
+        }
         for &(rk, k) in HELD {
             if rl.is_key_down(rk) {
                 inp.held.push(k);

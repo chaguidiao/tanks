@@ -312,8 +312,12 @@ impl Game {
         let items = self
             .resupply_sources(p)
             .into_iter()
-            .map(|(src, label, ok)| {
+            .enumerate()
+            .map(|(k, (src, label, ok))| {
                 let mut it = MenuItem::new(label, MenuAct::Resupply(src));
+                if k < DIGITS.len() {
+                    it = it.key(DIGITS[k]);
+                }
                 it.enabled = ok;
                 it
             })
@@ -331,8 +335,12 @@ impl Game {
         let items = self
             .recovery_platoons(p)
             .into_iter()
-            .map(|(by, label, ok)| {
+            .enumerate()
+            .map(|(k, (by, label, ok))| {
                 let mut it = MenuItem::new(label, MenuAct::Recover(by));
+                if k < DIGITS.len() {
+                    it = it.key(DIGITS[k]);
+                }
                 it.enabled = ok;
                 it
             })

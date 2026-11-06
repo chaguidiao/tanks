@@ -1275,7 +1275,7 @@ impl ScenarioEditor {
         };
         let b = &self.def.sides[self.side].fire_support[k];
         let def = ds.fires.battery(&b.battery);
-        let rounds = |n: Option<u32>, stock: u32| n.map_or(format!("TYPE {stock}"), |n| n.to_string());
+        let rounds = |n: Option<u32>, stock: u32| n.map_or(format!("{stock} (TYPE DEFAULT)"), |n| n.to_string());
         match f {
             Field::Battery => b.callsign.clone(),
             Field::BatteryType => def.map_or(b.battery.to_uppercase(), |d| d.name.to_uppercase()),

@@ -12,7 +12,7 @@ use terrain::{AuthoringPackage, BakedMap};
 use crate::editor::{self, BakeEvent, BakeQueue, Editor};
 use crate::game::{Game, GameAction};
 use crate::hud::{self, Button, Look, Rect};
-use crate::render::{Frame, Gfx, Input, Key, P2};
+use crate::render::{Frame, Gfx, Input, Key, P2, Rgba};
 use crate::scenedit::{EdAction, ScenarioEditor};
 use crate::settings::Settings;
 use crate::style;
@@ -105,6 +105,8 @@ pub struct MapScreen {
     pub view: MapView,
     pub cam: Camera,
     pub mode: Mode,
+    /// Fit the map to the free area on the first frame, when the window size is known.
+    pub fit_pending: bool,
 }
 
 fn traffic_class(def: &sim_data::ScenarioDef) -> String {
@@ -118,14 +120,16 @@ impl MapScreen {
         view.grid = settings.grid;
         let mut cam = Camera { centre: [0.0, 0.0], mpp: 1.0, screen: [1600.0, 900.0] };
         cam.fit(map.manifest.width_m(), map.manifest.height_m());
-        Self { map_id, map, view, cam, mode }
+        Self { map_id, map, view, cam, mode, fit_pending: false }
     }
 
     pub fn game(map: Arc<BakedMap>, def: sim_data::ScenarioDef, ctx: &Ctx) -> Result<Self, String> {
         let (id, class) = (def.map.id.clone(), traffic_class(&def));
         let game = Box::new(Game::new(def, ctx.ds.clone(), map.clone())?);
         let mode = Mode::Game { game, from_editor: None, end_closed: false };
-        Ok(Self::new(id, map, &class, mode, ctx.settings))
+        let mut ms = Self::new(id, map, &class, mode, ctx.settings);
+        ms.fit_pending = true;
+        Ok(ms)
     }
 
     pub fn scenario_editor(map: Arc<BakedMap>, def: sim_data::ScenarioDef, ctx: &Ctx) -> Self {
@@ -193,9 +197,9 @@ impl MapScreen {
     /// Scenario editor → play test (the editor is kept for the way back). If the scenario
     /// cannot start, the editor stays and shows why.
     pub fn play_test(self, ctx: &Ctx) -> Self {
-        let Self { map_id, map, view, cam, mode } = self;
+        let Self { map_id, map, view, cam, mode, .. } = self;
         let Mode::Scenario { mut editor } = mode else {
-            return Self { map_id, map, view, cam, mode };
+            return Self { map_id, map, view, cam, mode, fit_pending: false };
         };
         let mode = match Game::new(editor.def.clone(), ctx.ds.clone(), map.clone()) {
             Ok(mut g) => {
@@ -207,18 +211,18 @@ impl MapScreen {
                 Mode::Scenario { editor }
             }
         };
-        Self { map_id, map, view, cam, mode }
+        Self { map_id, map, view, cam, mode, fit_pending: false }
     }
 
     /// Play test → scenario editor.
     pub fn back_to_editor(self) -> Self {
-        let Self { map_id, map, mut view, cam, mode } = self;
+        let Self { map_id, map, mut view, cam, mode, .. } = self;
         let mode = match mode {
             Mode::Game { from_editor: Some(editor), .. } => Mode::Scenario { editor },
             m => m,
         };
         view.overlay = None;
-        Self { map_id, map, view, cam, mode }
+        Self { map_id, map, view, cam, mode, fit_pending: false }
     }
 
     /// Esc would cancel something on this screen rather than open the menu.
@@ -343,7 +347,7 @@ impl MapScreen {
                 "         SINGLE TANK: STATUS CARD   I VEHICLE DATA (DATABASE)",
                 "ORDERS   RMB MOVE HERE   SHIFT+RMB ADD A CHECKPOINT (RELEASE SHIFT TO SEND)   HOLD RMB: CONTEXT MENU",
                 "         M MOVE  H HALT / RESUME  B BATTLE POSITION ([ ] RADIUS)  A ENGAGE  D REVERSE  X BREAK CONTACT  Z SMOKE",
-                "         U DISMOUNT / MOUNT (CARRIER PLATOON OR ITS DISMOUNTS; RMB A BUILDING WITH SQUADS SELECTED: OCCUPY)",
+                "         U DISMOUNT / MOUNT (CARRIER PLATOON OR ITS DISMOUNTS; RMB A BUILDING WITH SQUADS SELECTED: OCCUPY)  O RECOVER",
                 "POSTURE  F FORMATION  T TECHNIQUE  S SPEED  W WEAPONS  C ON CONTACT  Q AMMO  E ENGINE SMOKE (LISTS: 1-9 OR ENTER)",
                 "         WITH A CHECKPOINT SELECTED A POSTURE PICK SETS THAT LEG; OTHERWISE IT ORDERS THE SELECTION NOW",
                 "PLAN     P CHECKPOINT PLAN: LMB ADDS CPS, DRAG A CP, RMB A CP / LEG FOR ITS SETTINGS   , . PREV / NEXT CP   DEL",
@@ -494,6 +498,9 @@ impl MapScreen {
     /// One frame of input. Returns what the app should do (menu, help, screen change).
     pub fn update(&mut self, inp: &Input, gfx: &mut Gfx, ctx: &Ctx) -> Option<Request> {
         self.cam.screen = inp.screen;
+        if std::mem::take(&mut self.fit_pending) {
+            self.cam.fit_free(self.map.manifest.width_m(), self.map.manifest.height_m());
+        }
         if inp.hit(Key::F(10)) || (inp.hit(Key::Escape) && !self.esc_in_use()) {
             return Some(Request::Menu);
         }
@@ -538,7 +545,14 @@ impl MapScreen {
         {
             self.cam.centre = m.to_world(inp.mouse);
         }
-        self.camera(inp, ctx.settings);
+        // The wheel zooms only over open map; arrow keys belong to an open list or the AAR timeline.
+        let (over_menu, arrows_taken) = match &self.mode {
+            Mode::Game { game, .. } => {
+                (game.menu_frames(inp.screen).iter().any(|r| r.contains(inp.mouse)), game.arrows_in_use())
+            }
+            _ => (false, false),
+        };
+        self.camera(inp, ctx.settings, !(over_ui || over_menu), !arrows_taken);
 
         // Layers (F1–F4 base, F5 contours, F6 grid), help (F7).
         for (n, b) in
@@ -620,8 +634,8 @@ impl MapScreen {
     }
 
     /// Wheel zooms about the cursor; middle-drag, arrow keys or the screen edge pan.
-    fn camera(&mut self, inp: &Input, settings: &Settings) {
-        if inp.wheel != 0.0 {
+    fn camera(&mut self, inp: &Input, settings: &Settings, wheel: bool, arrows: bool) {
+        if wheel && inp.wheel != 0.0 {
             self.cam.zoom_at(inp.mouse, if inp.wheel > 0.0 { 1.0 / 1.25 } else { 1.25 });
         }
         if inp.middle_down {
@@ -631,7 +645,7 @@ impl MapScreen {
         for (k, d) in
             [(Key::Left, [pan, 0.0]), (Key::Right, [-pan, 0.0]), (Key::Up, [0.0, pan]), (Key::Down, [0.0, -pan])]
         {
-            if inp.down(k) && !inp.ctrl {
+            if arrows && inp.down(k) && !inp.ctrl {
                 self.cam.pan_px(d);
             }
         }
@@ -703,6 +717,9 @@ impl MapScreen {
         hud::draw(f, &game_buttons, inp.mouse);
         hud::draw(f, &scen_buttons, inp.mouse);
         hud::draw(f, &screen_buttons, inp.mouse);
+        if view.base == BaseLayer::Trafficability {
+            traffic_legend(f, inp.screen);
+        }
         status_line(f, inp, cam, map, ds, view.base);
         let menu = match &self.mode {
             Mode::Game { game, .. } => game.menu(),
@@ -715,6 +732,31 @@ impl MapScreen {
             hud::tooltip(f, &game_buttons, inp.mouse, inp.screen);
             hud::tooltip(f, &scen_buttons, inp.mouse, inp.screen);
         }
+    }
+}
+
+/// What the GO/NO-GO layer's fills mean (`terrain::shade::trafficability_view`): hatching as
+/// well as colour, so colour is never the only cue.
+fn traffic_legend(f: &mut render::Frame, screen: P2) {
+    let rows = [
+        (Rgba(38, 60, 44, 255), None, "GO: 60 % OF CROSS-COUNTRY SPEED OR MORE"),
+        (Rgba(96, 84, 40, 255), Some(Rgba(70, 64, 36, 255)), "SLOW-GO: 25-60 %"),
+        (Rgba(118, 40, 38, 255), Some(Rgba(60, 24, 24, 255)), "NO-GO: UNDER 25 %"),
+    ];
+    let (w, h) = (300.0, 12.0 + rows.len() as f32 * 18.0);
+    // Bottom right: clear of the selection panel, above the draft strip.
+    let (x, y) = (screen[0] - w - 8.0, hud::band_y(screen) - h - 34.0);
+    hud::panel(f, hud::Rect::new(x, y, w, h));
+    for (k, (fill, hatch, text)) in rows.iter().enumerate() {
+        let ry = y + 7.0 + k as f32 * 18.0;
+        f.rect(x + 8.0, ry, 22.0, 13.0, *fill);
+        if let Some(c) = hatch {
+            for d in [4.0, 10.0, 16.0] {
+                f.line([x + 8.0 + d, ry + 13.0], [x + 8.0 + d + 5.0, ry], 1.0, *c);
+            }
+        }
+        f.rect_lines(x + 8.0, ry, 22.0, 13.0, style::PANEL_EDGE);
+        f.text(text, x + 38.0, ry + 1.0, style::FONT, style::TEXT);
     }
 }
 

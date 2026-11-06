@@ -58,6 +58,15 @@ impl Camera {
         self.centre = [w_m / 2.0, h_m / 2.0];
         self.mpp = (w_m / self.screen[0] as f64).max(h_m / self.screen[1] as f64) * 1.05;
     }
+
+    /// As `fit`, into the area between the top bar and the bottom band, so nothing of the map
+    /// (and none of the player's force) starts behind the panels.
+    pub fn fit_free(&mut self, w_m: f64, h_m: f64) {
+        let (top, bottom) = (crate::hud::TOP_H, crate::hud::band_y(self.screen));
+        self.mpp = (w_m / self.screen[0] as f64).max(h_m / (bottom - top) as f64) * 1.03;
+        let shift = (self.screen[1] / 2.0 - (top + bottom) / 2.0) as f64 * self.mpp;
+        self.centre = [w_m / 2.0, h_m / 2.0 - shift];
+    }
 }
 
 /// Overview map: the whole terrain fitted (aspect kept) into a screen frame.

@@ -437,9 +437,11 @@ impl App {
         }
         if let Some(z) = o.zoom {
             ms.cam.mpp = z;
+            ms.fit_pending = false;
         }
         if let Some(c) = o.center {
             ms.cam.centre = c;
+            ms.fit_pending = false;
         }
         if let Some(g) = ms.game_mut() {
             script(g, o)?;
@@ -456,15 +458,23 @@ impl App {
                     d.sides
                         .iter()
                         .map(|s| {
-                            menu::force_summary(s.units.iter().map(|u| u.vehicle.as_str()), |v| {
-                                self.ds.vehicle(v).map(|v| v.class)
-                            })
+                            let is_squad = |u: &&sim_data::UnitDef| self.ds.squad(&u.vehicle).is_some();
+                            let squads = s.units.iter().filter(is_squad).count();
+                            let vehicles = s.units.iter().filter(|u| !is_squad(u)).map(|u| u.vehicle.as_str());
+                            let force = menu::force_summary(vehicles, |v| self.ds.vehicle(v).map(|v| v.class));
+                            match (squads, squads == s.units.len()) {
+                                (0, _) => force,
+                                (n, true) => format!("{n} {}", if n == 1 { "SQUAD" } else { "SQUADS" }),
+                                (n, false) => format!("{force} · {n} {}", if n == 1 { "SQUAD" } else { "SQUADS" }),
+                            }
                         })
                         .collect()
                 });
                 ScenarioEntry { id, def, forces }
             })
             .collect();
+        let mut entries: Vec<ScenarioEntry> = entries;
+        menu::sort_scenarios(&mut entries);
         ScenarioList { purpose, entries, sel: 0 }
     }
 

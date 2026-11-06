@@ -32,7 +32,19 @@ pub fn clock(s: f64) -> String {
     format!("{:02}:{:02}:{:02}", t / 3600, t / 60 % 60, t % 60)
 }
 
+/// The first "GRID EEE NNN" in a transmission, as the centre of that 100 m square.
+pub fn parse_grid(msg: &str) -> Option<[f64; 2]> {
+    let digits = |s: &str| (s.len() == 3 && s.bytes().all(|b| b.is_ascii_digit())).then(|| s.parse::<f64>().ok())?;
+    msg.match_indices("GRID ").find_map(|(i, g)| {
+        let rest = msg.get(i + g.len()..)?;
+        let (e, n) = (rest.get(0..3)?, rest.get(4..7)?);
+        (rest.as_bytes().get(3) == Some(&b' ')).then_some(())?;
+        Some([digits(e)? * 100.0 + 50.0, digits(n)? * 100.0 + 50.0])
+    })
+}
+
 pub fn distance(m: f64) -> String {
+    let m = m.max(0.0);
     if m >= 1000.0 { format!("{:.1} KM", m / 1000.0) } else { format!("{:.0} M", m) }
 }
 
@@ -50,5 +62,10 @@ mod tests {
         assert_eq!(kmh(18.5), "67");
         assert_eq!(clock(21600.0 + 83.0), "06:01:23");
         assert_eq!(distance(6012.0), "6.0 KM");
+        assert_eq!(distance(-0.4), "0 M");
+        assert_eq!(parse_grid("1-1: CONTACT AT GRID 043 005, MOVING."), Some([4350.0, 550.0]));
+        assert_eq!(parse_grid("BREAKING CONTACT, THREAT GRID 100 200."), Some([10050.0, 20050.0]));
+        assert_eq!(parse_grid("GRID 04 005"), None);
+        assert_eq!(parse_grid("SET IN BP."), None);
     }
 }

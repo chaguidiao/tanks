@@ -224,6 +224,9 @@ impl Game {
             b(if self.revert_armed { "REVERT: CONFIRM" } else { "REVERT" }, Cmd::PlanRevert)
                 .active(self.revert_armed)
                 .tip("DROP THE WHOLE DRAFT (THE PLATOON KEEPS ITS ORDERS); ASKS AGAIN AFTER SEVERAL EDITS. ESC NEVER DROPS A DRAFT"),
+            b("CLEAR", Cmd::PlanClear)
+                .enabled(n > 0)
+                .tip("REMOVE ALL CHECKPOINTS AND PLAN FROM SCRATCH (A NEW DRAFT STARTS FROM THE CURRENT ROUTE); CTRL+Z RESTORES"),
             b("UNDO", Cmd::Undo).key("CTRL+Z").enabled(d.changes() > 0).tip("UNDO THE LAST DRAFT EDIT"),
         ];
         if d.can_redo() {

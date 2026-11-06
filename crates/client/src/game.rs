@@ -3,7 +3,8 @@
 //! Only `PerceivedWorld` is read for display, selection and orders (CLAUDE.md rule 3).
 //! Ground truth is drawn only with the `debug-truth` feature.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::cell::Cell;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use sim::view::{
@@ -158,6 +159,8 @@ pub enum Cmd {
     PlanNext,
     PlanDelete,
     PlanRevert,
+    /// Remove every checkpoint from the draft, to plan from scratch (undoable).
+    PlanClear,
     /// Ctrl+Z / Ctrl+Y: draft edit history.
     Undo,
     Redo,
@@ -287,6 +290,18 @@ pub struct Game {
     acc: f64,
     prev: Vec<(EntityId, [f64; 2], f64)>,
     pub log: VecDeque<(String, String)>,
+    /// Radio messages scrolled back from the newest (0 = following the net).
+    radio_back: usize,
+    /// Character advance of the radio's font (px), measured while drawing.
+    radio_char_w: Cell<f32>,
+    /// Contacts the side has seen destroyed, kept after they drop out of the picture.
+    kills_seen: BTreeSet<sim::view::ContactId>,
+    /// Sim time of the last event of each AUTO-PAUSE kind: contact, indirect fire.
+    pause_last: [Option<f64>; 2],
+    /// Why the clock last stopped by itself, until it is restarted.
+    pause_reason: Option<&'static str>,
+    /// Observer point of the VIEWSHED shown.
+    viewshed_at: Option<[f64; 2]>,
     bp_count: u32,
     pub ended: Option<String>,
     /// Planning phase: the clock is stopped and orders take effect at H-hour without delay.
@@ -367,6 +382,12 @@ impl Game {
             acc: 0.0,
             prev: Vec::new(),
             log: VecDeque::new(),
+            radio_back: 0,
+            radio_char_w: Cell::new(style::FONT_S as f32 * 0.5),
+            kills_seen: BTreeSet::new(),
+            pause_last: [None; 2],
+            pause_reason: None,
+            viewshed_at: None,
             bp_count: 0,
             ended: None,
             planning: true,
@@ -393,10 +414,6 @@ impl Game {
             menu_request: None,
             eta: Default::default(),
         };
-        if let Some((id, p)) = g.picture().own.first().map(|u| (u.id, u.platoon)) {
-            g.sel_unit = Some(id);
-            g.sel_platoon = p;
-        }
         g.capture_prev();
         let name = g.scenario.name.clone();
         g.radio(format!(
@@ -405,9 +422,22 @@ impl Game {
         Ok(g)
     }
 
-    /// Esc would cancel a tool or a drafted route (otherwise the app opens its menu).
+    /// Esc would step back through a pending click, tool, drafted route, timing or selection
+    /// (`Cmd::Cancel`); otherwise the app opens its menu. The AAR takes no game hotkeys.
     pub fn esc_in_use(&self) -> bool {
-        self.tool != Tool::None || !self.draft.is_empty() || self.menu.is_some() || self.plan.is_some()
+        self.aar.is_none()
+            && (self.tool != Tool::None
+                || !self.draft.is_empty()
+                || self.menu.is_some()
+                || self.plan.is_some()
+                || self.order_mode != OrderMode::Now
+                || self.sel_platoon.is_some()
+                || self.sel_unit.is_some())
+    }
+
+    /// An open list or the AAR timeline uses the arrow keys, so they do not pan the map.
+    pub fn arrows_in_use(&self) -> bool {
+        self.menu.is_some() || self.aar.is_some()
     }
 
     pub fn picture(&self) -> &PerceivedWorld {
@@ -416,8 +446,54 @@ impl Game {
 
     pub fn radio(&mut self, text: String) {
         self.log.push_back((format::clock(self.sim.clock_s()), text));
+        if self.radio_back > 0 {
+            self.radio_back += 1; // keep the same messages in view
+        }
         while self.log.len() > 300 {
             self.log.pop_front();
+        }
+    }
+
+    /// The radio rows in view, top to bottom: (text, message wrapped into it). Newest at the
+    /// bottom; `radio_back` scrolls by whole messages. Drawing and clicks share this layout.
+    fn radio_rows(&self, screen: P2) -> Vec<(String, String)> {
+        let lr = hud::log_frame(screen);
+        let n = ((lr.h - 24.0) / RADIO_ROW_H) as usize;
+        let max_chars = ((lr.w - 16.0) / self.radio_char_w.get()) as usize;
+        let mut rows: Vec<(String, String)> = Vec::new();
+        for (t, msg) in self.log.iter().rev().skip(self.radio_back) {
+            let chunk = wrap_radio(&format!("{t}  {msg}"), max_chars);
+            rows.extend(chunk.into_iter().rev().map(|c| (c, msg.clone())));
+            if rows.len() >= n {
+                break;
+            }
+        }
+        rows.truncate(n);
+        rows.reverse();
+        rows
+    }
+
+    /// Over the radio panel: the wheel scrolls back through the net, a click on a transmission
+    /// with a grid centres the map on it.
+    fn radio_input(&mut self, inp: &Input, over_ui: bool, fx: &mut GameFx) {
+        let lr = hud::log_frame(inp.screen);
+        if !over_ui || self.menu.is_some() || !lr.contains(inp.mouse) {
+            return;
+        }
+        if inp.wheel > 0.0 {
+            self.radio_back = (self.radio_back + 1).min(self.log.len().saturating_sub(1));
+        } else if inp.wheel < 0.0 {
+            self.radio_back = self.radio_back.saturating_sub(1);
+        }
+        if inp.left_pressed {
+            let row = ((inp.mouse[1] - lr.y - 20.0) / RADIO_ROW_H).floor();
+            let rows = self.radio_rows(inp.screen);
+            if row >= 0.0
+                && let Some((_, msg)) = rows.get(row as usize)
+                && let Some(at) = format::parse_grid(msg)
+            {
+                fx.center_on = Some(at);
+            }
         }
     }
 
@@ -489,6 +565,10 @@ impl Game {
 
     /// As `issue_move`, with this order's own speed limit (the platoon's own speed setting is what `issue_move` passes).
     pub fn issue_move_at(&mut self, via: Vec<[f64; 2]>, dest: [f64; 2], speed_limit_mps: Option<f64>) {
+        if !via.iter().chain([&dest]).all(|p| self.on_map(*p)) {
+            self.radio(OFF_MAP.into());
+            return;
+        }
         // Squads sent onto a building occupy it (TODO B7).
         if via.is_empty()
             && self.squads_selected()
@@ -550,11 +630,37 @@ impl Game {
         }
     }
 
+    /// Is this point on the map? Orders to the void are refused.
+    pub(super) fn on_map(&self, p: [f64; 2]) -> bool {
+        let m = &self.sim.map().manifest;
+        (0.0..=m.width_m()).contains(&p[0]) && (0.0..=m.height_m()).contains(&p[1])
+    }
+
     /// Send the drafted route: the last point is the destination.
     fn send_route(&mut self) {
         let mut pts = std::mem::take(&mut self.draft);
         if let Some(dest) = pts.pop() {
             self.issue_move(pts, dest);
+        }
+    }
+
+    /// Scenario objectives; the one victory depends on has a second ring (DESIGN.md §2.1).
+    fn draw_objectives(&self, f: &mut Frame, cam: &Camera) {
+        let decisive = self.scenario.victory.as_ref().and_then(|v| v.objective.as_deref());
+        for o in &self.scenario.objectives {
+            let p = cam.to_screen(o.centre);
+            let r = (o.radius_m / cam.mpp) as f32;
+            f.circle_lines(p, r, style::AMBER);
+            if decisive == Some(o.name.as_str()) {
+                f.circle_lines(p, r + 3.0, style::AMBER);
+            }
+            f.text(
+                &format!("OBJ {}", o.name.to_uppercase()),
+                p[0] - r * 0.7,
+                p[1] - r - 16.0,
+                style::FONT,
+                style::AMBER,
+            );
         }
     }
 
@@ -578,9 +684,15 @@ impl Game {
     }
 
     /// The same order for another platoon of a multi-selection. Destinations keep the platoons'
-    /// current offset from the primary, so they move as a group instead of piling onto one point.
-    fn for_follower(cmd: &Command, primary: PlatoonId, p: PlatoonId, off: [f64; 2]) -> Option<Command> {
-        let shift = |v: [f64; 2]| [v[0] + off[0], v[1] + off[1]];
+    /// current offset from the primary, so they move as a group instead of piling onto one point,
+    /// but stay on the map.
+    fn for_follower(cmd: &Command, primary: PlatoonId, p: PlatoonId, off: [f64; 2], map: [f64; 2]) -> Option<Command> {
+        let shift = |v: [f64; 2]| {
+            [
+                (v[0] + off[0]).clamp(FOLLOWER_EDGE_M, map[0] - FOLLOWER_EDGE_M),
+                (v[1] + off[1]).clamp(FOLLOWER_EDGE_M, map[1] - FOLLOWER_EDGE_M),
+            ]
+        };
         let mut c = cmd.clone();
         match &mut c {
             Command::PlatoonMove { platoon, destination, via, .. } if *platoon == primary => {
@@ -659,7 +771,9 @@ impl Game {
                     (Some(a), Some(b)) => [b[0] - a[0], b[1] - a[1]],
                     _ => [0.0, 0.0],
                 };
-                if let Some(c) = Self::for_follower(&cmd, primary, p, off) {
+                let m = &self.sim.map().manifest;
+                let (w, h) = (m.width_m(), m.height_m());
+                if let Some(c) = Self::for_follower(&cmd, primary, p, off, [w, h]) {
                     self.order_mode = mode;
                     self.follower_note(p, &c);
                     self.order_one(c);
@@ -715,6 +829,8 @@ impl Game {
         }
         self.prune_pending();
         if n > 0 {
+            let seen: Vec<_> = self.picture().contacts.iter().filter(|c| c.destroyed).map(|c| c.id).collect();
+            self.kills_seen.extend(seen);
             self.check_ready();
         }
     }
@@ -741,22 +857,41 @@ impl Game {
                 self.paused = true;
             }
             self.radio(t);
-            if self.auto_pause_for(e) && !self.planning {
+            if let Some(why) = self.auto_pause_for(e)
+                && !self.planning
+            {
                 self.paused = true;
+                self.pause_reason = Some(why);
             }
         }
     }
 
-    /// Whether this event is one the AUTO-PAUSE option stops the clock for.
-    fn auto_pause_for(&self, e: &Event) -> bool {
+    /// Why this event stops the clock under the AUTO-PAUSE option, if it does. Contact and
+    /// indirect fire stop it once per engagement: only after a quiet spell of that kind. Every
+    /// loss of the player's own stops it.
+    fn auto_pause_for(&mut self, e: &Event) -> Option<&'static str> {
         let ap = self.auto_pause;
+        let now = self.sim.time_s();
+        let mut first_of = |kind: usize| {
+            let quiet = self.pause_last[kind].is_none_or(|t| now - t >= AUTO_PAUSE_QUIET_S);
+            self.pause_last[kind] = Some(now);
+            quiet
+        };
         match e {
-            Event::SpotReport { side, new: true, .. } => *side == self.side && ap.on_contact(),
-            Event::Hit { kill: Some(KillKind::Catastrophic), .. } => ap.on_loss(),
-            Event::PlatoonReport { side, report: PlatoonReport::IndirectFire { .. }, .. } => {
-                *side == self.side && ap.on_fire()
+            Event::SpotReport { side, new: true, .. } if *side == self.side && ap.on_contact() => {
+                first_of(0).then_some("NEW CONTACT")
             }
-            _ => false,
+            Event::PlatoonReport { side, report: PlatoonReport::IndirectFire { .. }, .. }
+                if *side == self.side && ap.on_fire() =>
+            {
+                first_of(1).then_some("INDIRECT FIRE")
+            }
+            Event::Hit { unit, kill: Some(KillKind::Catastrophic), .. }
+                if ap.on_loss() && self.picture().unit(*unit).is_some() =>
+            {
+                Some("VEHICLE LOST")
+            }
+            _ => None,
         }
     }
 
@@ -910,6 +1045,7 @@ impl Game {
             return fx;
         }
         self.control_groups(inp);
+        self.radio_input(inp, over_ui, &mut fx);
         if inp.left_released {
             if let Some(start) = self.drag.take()
                 && self.tool == Tool::None
@@ -983,7 +1119,10 @@ impl Game {
                     self.issue_bp(c, facing);
                     self.tool = Tool::None;
                 }
-                Tool::Viewshed => fx.viewshed = Some(self.viewshed(world)),
+                Tool::Viewshed => {
+                    self.viewshed_at = Some(world);
+                    fx.viewshed = Some(self.viewshed(world));
+                }
                 Tool::Los { a: None, .. } | Tool::Los { b: Some(_), .. } => {
                     self.tool = Tool::Los { a: Some(world), b: None, result: None };
                 }
@@ -1081,10 +1220,12 @@ impl Game {
                     self.radio("PLANNING PHASE: EXECUTE (ENTER) TO START THE CLOCK.".into());
                 } else {
                     self.paused = !self.paused;
+                    self.pause_reason = None;
                 }
             }
             GameAction::Speed(k) => {
                 self.speed = k.min(SPEEDS.len() - 1);
+                self.pause_reason = None;
                 if !self.planning && self.ended.is_none() {
                     self.paused = false;
                 }
@@ -1162,6 +1303,7 @@ impl Game {
         let selected = self.addressee().is_some();
         if self.tool == Tool::Viewshed && !matches!(c, Cmd::Viewshed) {
             fx.clear_overlay = true;
+            self.viewshed_at = None;
         }
         match c {
             Cmd::Move if selected => {
@@ -1319,6 +1461,7 @@ impl Game {
             Cmd::Viewshed => {
                 self.tool = if self.tool == Tool::Viewshed { Tool::None } else { Tool::Viewshed };
                 fx.clear_overlay = true;
+                self.viewshed_at = None;
             }
             Cmd::Los => self.toggle_tool(Tool::Los { a: None, b: None, result: None }),
             Cmd::Send => match self.tool.clone() {
@@ -1358,6 +1501,7 @@ impl Game {
                 }
             }
             Cmd::PlanRevert => self.plan_revert_asked(),
+            Cmd::PlanClear => self.plan_clear(),
             Cmd::Undo => self.plan_undo(),
             Cmd::Redo => self.plan_redo(),
             // Esc steps back one level and never discards a draft (it waits parked).
@@ -1796,6 +1940,10 @@ impl Game {
     }
 
     pub fn issue_bp(&mut self, centre: [f64; 2], facing: f64) {
+        if !self.on_map(centre) {
+            self.radio(OFF_MAP.into());
+            return;
+        }
         let Some(p) = self.sel_platoon else { return };
         if std::mem::take(&mut self.append_tool) {
             let act = StepAction::OccupyBp { radius_m: self.bp_radius, facing, kind: PositionKind::HullDown };
@@ -1855,6 +2003,10 @@ impl Game {
     /// Shift+right click: append a checkpoint to the platoon's orders (its plan, its route
     /// promoted to a plan, or a new one), or to a single vehicle's queued route.
     fn shift_append(&mut self, at: [f64; 2]) {
+        if !self.on_map(at) {
+            self.radio(OFF_MAP.into());
+            return;
+        }
         if self.sel_platoon.is_some() {
             self.append_step(at, None);
         } else if self.sel_unit.is_some() {
@@ -2043,7 +2195,7 @@ impl Game {
         let lo = hs.iter().copied().fold(eye.min(tgt), f64::min);
         let hi = hs.iter().copied().fold(eye.max(tgt), f64::max).max(lo + 5.0);
         let (w, h) = (360.0_f32, 110.0_f32);
-        let (x, y) = ((cam.screen[0] - w) * 0.5, cam.screen[1] - h - 40.0);
+        let (x, y) = ((cam.screen[0] - w) * 0.5, hud::band_y(cam.screen) - h - 12.0);
         f.rect(x - 6.0, y - 18.0, w + 12.0, h + 24.0, Rgba(14, 18, 20, 220));
         f.rect_lines(x - 6.0, y - 18.0, w + 12.0, h + 24.0, style::TEXT);
         let pt = |i: usize, z: f64| -> P2 { [x + w * i as f32 / N as f32, y + h - h * ((z - lo) / (hi - lo)) as f32] };
@@ -2074,10 +2226,12 @@ impl Game {
 
     pub fn draw_world(&self, f: &mut Frame, cam: &Camera, mouse: P2) {
         if let Some(a) = &self.aar {
+            self.draw_objectives(f, cam);
             a.draw_world(f, cam, &self.recorder);
             return;
         }
         let pic = self.picture();
+        self.draw_objectives(f, cam);
         let pl = self.last_phase_line().map(|g| g.id);
         for g in &pic.graphics {
             symbols::graphic(f, cam, g, Some(g.id) == pl && self.order_mode == OrderMode::OnEnemyCrossing);
@@ -2181,6 +2335,8 @@ impl Game {
                 f.circle(cam.to_screen(s.to), 3.0, Rgba(250, 230, 160, a));
             }
         }
+        // Labels step down out of each other's way.
+        let mut labels: Vec<P2> = Vec::new();
         // Contacts.
         for c in &pic.contacts {
             let p = cam.to_screen(c.pos);
@@ -2212,7 +2368,7 @@ impl Game {
             f.text(
                 &tag,
                 p[0] + 18.0,
-                p[1] - 5.0,
+                free_label_y(&mut labels, p[0] + 18.0, p[1] - 5.0),
                 style::FONT,
                 Rgba(style::HOSTILE.0, style::HOSTILE.1, style::HOSTILE.2, fade),
             );
@@ -2250,7 +2406,7 @@ impl Game {
                 f.text(
                     &format!("{} ({})", pv.callsign, members.len()),
                     p[0] + 16.0,
-                    p[1] - 5.0,
+                    free_label_y(&mut labels, p[0] + 16.0, p[1] - 5.0),
                     style::FONT,
                     style::FRIENDLY,
                 );
@@ -2302,6 +2458,8 @@ impl Game {
             }
             if u.speed > 0.3 {
                 symbols::heading_staff(f, p, hdg, 14.0, style::FRIENDLY);
+            } else if squad.is_none() && u.condition != Condition::Destroyed {
+                symbols::heading_staff(f, p, hdg, 6.0, style::FRIENDLY);
             }
             // Squads show men fit; carriers the men aboard.
             let aboard: u8 = pic
@@ -2316,7 +2474,8 @@ impl Game {
                 None if aboard > 0 => format!("{} +{aboard}", u.callsign),
                 None => u.callsign.clone(),
             };
-            f.text(&tag, p[0] + 16.0, p[1] - 5.0, style::FONT, style::FRIENDLY);
+            let y = free_label_y(&mut labels, p[0] + 16.0, p[1] - 5.0);
+            f.text(&tag, p[0] + 16.0, y, style::FONT, style::FRIENDLY);
             let selected = self.sel_unit == Some(u.id)
                 || (self.sel_platoon.is_some() && u.platoon == self.sel_platoon)
                 || u.platoon.is_some_and(|p| followers.contains(&p));
@@ -2331,6 +2490,12 @@ impl Game {
 
     fn draw_tool(&self, f: &mut Frame, cam: &Camera, mouse: P2) {
         self.draw_hold_ring(f);
+        if let Some(at) = self.viewshed_at {
+            let p = cam.to_screen(at);
+            f.circle_lines(p, 6.0, style::AMBER);
+            f.line([p[0] - 9.0, p[1]], [p[0] + 9.0, p[1]], 1.0, style::AMBER);
+            f.line([p[0], p[1] - 9.0], [p[0], p[1] + 9.0], 1.0, style::AMBER);
+        }
         if let Some(a) = self.drag
             && self.tool == Tool::None
             && (a[0] - mouse[0]).abs().max((a[1] - mouse[1]).abs()) > BOX_MIN_PX
@@ -2405,11 +2570,11 @@ impl Game {
                 let d = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
                 let txt = match result {
                     Some((ok, t)) => format!(
-                        "{} {} {} MILS  T={:.2}",
+                        "{} {} {} MILS  SEEN THROUGH {:.0} %",
                         if *ok { "LOS" } else { "NO LOS" },
                         format::distance(d),
                         format::mils(ai::drive::bearing(*a, b)),
-                        t
+                        t * 100.0
                     ),
                     None => format!("{} {} MILS", format::distance(d), format::mils(ai::drive::bearing(*a, b))),
                 };
@@ -2480,7 +2645,7 @@ impl Game {
         if self.planning {
             ("PLANNING".into(), style::AMBER)
         } else if self.paused {
-            ("PAUSED".into(), style::AMBER)
+            (self.pause_reason.map_or("PAUSED".into(), |why| format!("PAUSED · {why}")), style::AMBER)
         } else if let Some(why) = self.hold_reason() {
             (format!("PAUSED · {why}"), style::AMBER)
         } else {
@@ -2577,7 +2742,7 @@ impl Game {
                 format!("{} PLT  {}/{}", pv.callsign, n, pv.members.len()),
                 task,
                 GameAction::SelectPlatoon(pv.id),
-                self.sel_platoon == Some(pv.id),
+                self.sel_platoon == Some(pv.id) || self.followers().contains(&pv.id),
             ));
         }
         for u in pic.own.iter().filter(|u| u.platoon.is_none()) {
@@ -2786,12 +2951,23 @@ impl Game {
             ),
             (15, {
                 let t = self.troops_order();
+                let recoverable = self.sel_platoon.map_or(0, |p| {
+                    self.recovery_platoons(p).iter().filter(|s| s.2).count()
+                });
+                if t.is_none() && recoverable > 0 {
+                    // No troops to order, and a vehicle to tow: this cell recovers it.
+                    b("RECOVER", Cmd::Recover)
+                        .key("O")
+                        .value(if recoverable == 1 { String::new() } else { "CHOOSE".into() })
+                        .tip("RECOVER THIS PLATOON'S IMMOBILISED VEHICLES WITH A RECOVERY PLATOON: IT TOWS THEM TO THE UMCP")
+                } else {
                 let label = if t.is_some_and(|t| t.1) { "MOUNT" } else { "DISMOUNT" };
                 b(label, Cmd::Dismount)
                     .key("U")
                     .value(t.map_or(String::new(), |t| format!("{} SQD", t.2)))
                     .enabled(t.is_some())
                     .tip("DISMOUNT THE CARRIERS' SQUADS (CARRIERS HALT FOR THE RAMP DRILL, SQUADS TAKE UP SECURITY), OR MOUNT THEM AGAIN (SQUADS WALK BACK AND BOARD)")
+                }
             }),
             (14, {
                 let state = self.addressee().and_then(|to| self.engine_smoke(to));
@@ -3127,11 +3303,7 @@ impl Game {
         rows.extend(trigger_rows);
         cy = ny;
         foot.push((
-            format!(
-                "CONTACTS {}   KILLS {}",
-                pic.live_contacts().count(),
-                pic.contacts.iter().filter(|c| c.destroyed).count()
-            ),
+            format!("CONTACTS {}   KILLS {}", pic.live_contacts().count(), self.kills_seen.len()),
             style::TEXT_DIM,
         ));
         let h = cy - y + 4.0 + foot.len() as f32 * LINE + 6.0;
@@ -3348,7 +3520,8 @@ impl Game {
                     format!("DISPLACING, {:.0} MIN", (ready_in_s / 60.0).ceil())
                 }
             };
-            out.push((format!("HE {}  SMK {}  {status}", b.he_rounds, b.smoke_rounds), style::TEXT_DIM));
+            out.push((format!("HE {}  SMK {}", b.he_rounds, b.smoke_rounds), style::TEXT_DIM));
+            out.push((status, style::TEXT_DIM));
             if let Some(s) = b.restock_in_s {
                 out.push((
                     format!("RESUPPLY IN {:.0} MIN, {} LEFT", (s / 60.0).ceil(), b.resupplies_left),
@@ -3443,37 +3616,17 @@ impl Game {
         }
 
         // Radio log.
+        self.radio_char_w.set(f.text_width("ETAOINSRHL", style::FONT_S) / 10.0);
         let lr = hud::log_frame(screen);
         hud::panel(f, lr);
         f.text("RADIO NET", lr.x + 8.0, lr.y + 5.0, style::FONT, style::TEXT_DIM);
-        let n = ((lr.h - 24.0) / 16.0) as usize;
-        let max_chars = ((lr.w - 16.0) / (style::FONT_S as f32 * 0.62)) as usize;
-        let mut lines: Vec<String> = Vec::new();
-        for (t, msg) in self.log.iter().rev() {
-            // Wrap long transmissions; newest at the bottom.
-            let full = format!("{t}  {msg}");
-            let mut chunk: Vec<String> = Vec::new();
-            let mut cur = String::new();
-            for w in full.split(' ') {
-                if !cur.is_empty() && cur.len() + 1 + w.len() > max_chars {
-                    chunk.push(std::mem::take(&mut cur));
-                    cur.push_str("          ");
-                }
-                if !cur.is_empty() && !cur.ends_with(' ') {
-                    cur.push(' ');
-                }
-                cur.push_str(w);
-            }
-            chunk.push(cur);
-            for c in chunk.into_iter().rev() {
-                lines.push(c);
-            }
-            if lines.len() >= n {
-                break;
-            }
+        if self.radio_back > 0 {
+            let back = format!("{} NEWER BELOW · WHEEL", self.radio_back);
+            let w = f.text_width(&back, style::FONT);
+            f.text(&back, lr.x + lr.w - w - 8.0, lr.y + 5.0, style::FONT, style::AMBER);
         }
-        for (k, l) in lines.iter().take(n).rev().enumerate() {
-            f.text(l, lr.x + 8.0, lr.y + 20.0 + k as f32 * 16.0, style::FONT_S, style::TEXT);
+        for (k, (l, _)) in self.radio_rows(screen).iter().enumerate() {
+            f.text(l, lr.x + 8.0, lr.y + 20.0 + k as f32 * RADIO_ROW_H, style::FONT_S, style::TEXT);
         }
 
         // Command card frame and title.
@@ -3514,6 +3667,9 @@ impl Game {
             return;
         }
         let pic = self.picture();
+        for o in &self.scenario.objectives {
+            f.circle_lines(m.to_px(o.centre), (o.radius_m / m.w_m) as f32 * m.r.w, style::AMBER);
+        }
         for g in &pic.graphics {
             if let SimGraphic::PhaseLine { points } = &g.kind {
                 for w in points.windows(2) {
@@ -3540,6 +3696,41 @@ impl Game {
 }
 
 const ROSTER_W: f32 = 236.0;
+const OFF_MAP: &str = "UNABLE: GRID IS OFF THE MAP.";
+/// A follower platoon's kept offset stops this far inside the map edge (m).
+const FOLLOWER_EDGE_M: f64 = 100.0;
+/// Radio log row height (px).
+const RADIO_ROW_H: f32 = 16.0;
+/// AUTO-PAUSE: a contact or fire event stops the clock only after this long without one (s).
+const AUTO_PAUSE_QUIET_S: f64 = 60.0;
+
+/// The y for a map label at (x, y) clear of those already placed: at most a few rows down, so a
+/// big stack stays near its symbols rather than walking off down the map.
+fn free_label_y(taken: &mut Vec<P2>, x: f32, y: f32) -> f32 {
+    const ROW: f32 = 11.0;
+    let clash = |y: f32| taken.iter().any(|t| (t[0] - x).abs() < 60.0 && (t[1] - y).abs() < ROW);
+    let y = (0..5).map(|k| y + k as f32 * ROW).find(|&y| !clash(y)).unwrap_or(y);
+    taken.push([x, y]);
+    y
+}
+
+/// Wrap a transmission at word boundaries; continuation rows are indented under the text.
+fn wrap_radio(full: &str, max_chars: usize) -> Vec<String> {
+    let mut rows = Vec::new();
+    let mut cur = String::new();
+    for w in full.split(' ') {
+        if !cur.is_empty() && cur.chars().count() + 1 + w.chars().count() > max_chars {
+            rows.push(std::mem::take(&mut cur));
+            cur.push_str("          ");
+        }
+        if !cur.is_empty() && !cur.ends_with(' ') {
+            cur.push(' ');
+        }
+        cur.push_str(w);
+    }
+    rows.push(cur);
+    rows
+}
 
 /// Polyline in world coordinates; dashed for orders not yet acknowledged / drafts.
 fn route_line(f: &mut Frame, cam: &Camera, pts: &[[f64; 2]], c: Rgba, dashed: bool) {
@@ -3779,7 +3970,10 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
             let u = unit(*u)?;
             match left {
                 0 => format!("{}: SQUAD DESTROYED AT GRID {}.", u.callsign, format::grid(u.pos)),
-                _ => format!("{}: {lost} CASUALTIES, {left} FIT TO FIGHT.", u.callsign),
+                _ => {
+                    let men = if *lost == 1 { "CASUALTY" } else { "CASUALTIES" };
+                    format!("{}: {lost} {men}, {left} FIT TO FIGHT.", u.callsign)
+                }
             }
         }
         Event::TriggerFired { side, id } if *side == pic.side => {
@@ -3834,6 +4028,9 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                 ),
                 PlatoonReport::BreakingContact { threat: Some(threat) } => {
                     format!("{cs}: BREAKING CONTACT, THREAT GRID {}. SMOKE, WITHDRAWING.", format::grid(*threat))
+                }
+                PlatoonReport::BreakingContact { threat: None } => {
+                    format!("{cs}: BREAKING CONTACT, NO THREAT SEEN. WITHDRAWING.")
                 }
                 PlatoonReport::ContinuingMission => format!("{cs}: CONTACT LOST. CONTINUING MISSION."),
                 PlatoonReport::IndirectFire { at, clearing } => format!(
@@ -3929,6 +4126,3 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
         _ => return None,
     })
 }
-                PlatoonReport::BreakingContact { threat: None } => {
-                    format!("{cs}: BREAKING CONTACT, NO THREAT SEEN. WITHDRAWING.")
-                }

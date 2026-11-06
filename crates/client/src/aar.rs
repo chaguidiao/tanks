@@ -314,10 +314,8 @@ impl AarView {
                 style::TEXT,
             ));
             if s.volleys > 0 || s.men_lost > 0 || s.men_hit > 0 {
-                lines.push((
-                    format!("  MG/SMALL ARMS VOLLEYS {}  MEN HIT {}  MEN LOST {}", s.volleys, s.men_hit, s.men_lost),
-                    style::TEXT,
-                ));
+                lines.push((format!("  MG/SMALL ARMS VOLLEYS {}", s.volleys), style::TEXT));
+                lines.push((format!("  MEN HIT {}  MEN LOST {}", s.men_hit, s.men_lost), style::TEXT));
             }
             let bands: Vec<String> = s
                 .by_range
@@ -325,7 +323,11 @@ impl AarView {
                 .map(|(b, (sh, h))| format!("{:.1}KM {}/{}", (*b as f64 + 0.5) * 0.5, h, sh))
                 .collect();
             if !bands.is_empty() {
-                lines.push((format!("  HITS BY RANGE {}", bands.join(" ")), style::TEXT_DIM));
+                // HITS/SHOTS per band, three to a row: the panel is narrow.
+                lines.push(("  HITS BY RANGE".into(), style::TEXT_DIM));
+                for row in bands.chunks(3) {
+                    lines.push((format!("  {}", row.join("  ")), style::TEXT_DIM));
+                }
             }
         }
         let ph = lines.len() as f32 * 18.0 + 16.0;

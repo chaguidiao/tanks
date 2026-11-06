@@ -60,6 +60,17 @@ pub enum Purpose {
     Edit,
 }
 
+/// The scenario the guide's first battle plays: first in the list.
+const TUTORIAL: &str = "m5-hold-the-village";
+
+/// List order: the tutorial, then by date, then by name; unreadable files last.
+pub fn sort_scenarios(entries: &mut [ScenarioEntry]) {
+    entries.sort_by_key(|e| match &e.def {
+        Ok(d) => (d.id != TUTORIAL, false, d.date, d.name.clone()),
+        Err(_) => (true, true, (0, 0, 0), e.id.clone()),
+    });
+}
+
 pub struct ScenarioEntry {
     pub id: String,
     pub def: Result<ScenarioDef, String>,
@@ -422,7 +433,11 @@ pub fn main_buttons(screen: P2, suspended: Option<&str>) -> Vec<Button<MenuActio
 }
 
 fn short(s: &str, n: usize) -> String {
-    if s.chars().count() <= n { s.to_owned() } else { format!("{}…", s.chars().take(n - 1).collect::<String>()) }
+    if s.chars().count() <= n {
+        s.to_owned()
+    } else {
+        format!("{}...", s.chars().take(n.saturating_sub(3)).collect::<String>())
+    }
 }
 
 pub fn draw_main(f: &mut Frame, bd: &Backdrop, screen: P2, status: &str) {
@@ -489,6 +504,7 @@ impl ScenarioList {
             .entries
             .iter()
             .map(|e| match &e.def {
+                Ok(d) if d.id == TUTORIAL => (d.name.to_uppercase(), format!("START HERE · {}", d.date.0)),
                 Ok(d) => (d.name.to_uppercase(), format!("{}", d.date.0)),
                 Err(_) => (e.id.to_uppercase(), "ERROR".into()),
             })
@@ -564,7 +580,12 @@ impl ScenarioList {
                 format!(
                     "{} · {} · {} · {}",
                     s.name,
-                    e.forces.get(k).map_or("", String::as_str),
+                    // The enemy's strength is for the player to find out.
+                    if k > 0 && self.purpose == Purpose::Play {
+                        "STRENGTH UNKNOWN"
+                    } else {
+                        e.forces.get(k).map_or("", String::as_str)
+                    },
                     s.doctrine.to_uppercase(),
                     role
                 ),
@@ -579,7 +600,9 @@ impl ScenarioList {
                     "{:.0} MIN LIMIT · {:.0} % LOSSES LOSE{}",
                     v.time_limit_s / 60.0,
                     v.destroyed_fraction * 100.0,
-                    v.objective.as_ref().map_or(String::new(), |o| format!(" · HOLD {}", o.to_uppercase()))
+                    v.objective.as_ref().map_or(String::new(), |o| {
+                        format!(" · {} {}", if v.attacker == 0 { "SEIZE" } else { "HOLD" }, o.to_uppercase())
+                    })
                 ),
                 None => "OPEN-ENDED (NO CONDITIONS)".into(),
             },
