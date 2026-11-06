@@ -47,7 +47,7 @@ A release package (`tanks-<version>-<platform>.tar.gz` or `.zip`) holds:
 | `tanks` | The game, using OpenGL 3.3 (any graphics card from about 2010 on) |
 | `tanks-gl21` | The same game for older graphics (OpenGL 2.1, roughly 2006–2012 hardware). Use it if `tanks` fails to open a window |
 | `tanks-headless` | A command-line tool for map generation, batch runs and replay checks. You don't need it to play |
-| `data/` | Vehicles, ammunition, doctrine, scenarios and the two pre-generated maps (`demo`, `uplands`) |
+| `data/` | Vehicles, ammunition, doctrine, scenarios and the three pre-generated maps (`demo`, `uplands`, `town`) |
 
 Unpack it anywhere and run `tanks` (`tanks.exe` on Windows). The game finds `data/` next to the executable. The packages are unsigned, so Windows SmartScreen and macOS Gatekeeper will warn the first time.
 
@@ -89,7 +89,7 @@ When you leave a running game for the main menu, it is suspended and a **RESUME*
 Options are stored in a small text file: `~/.config/tanks/settings.cfg` on Linux, the equivalent configuration folder elsewhere, or the path in the `TANKS_CONFIG` environment variable. The path is shown at the bottom of the options screen.
 
 <div class="tip" markdown="1">
-For your first games, set **AUTO-PAUSE** to **CONTACT, LOSS**. The game then stops whenever something important happens, so you can look at the situation and react calmly.
+For your first games, set **AUTO-PAUSE** to **CONTACT, LOSS**. The game then stops when a fight starts or you lose a vehicle, so you can look at the situation and react calmly; the top bar says why it stopped. New contacts stop the clock only after a quiet minute, not for every tank of the same attack.
 </div>
 
 ## Choosing a scenario
@@ -114,7 +114,7 @@ The first time a map is used, the game may generate and "bake" it (precompute li
 
 <div class="tip" markdown="1">
 <span class="label">Which scenario first?</span>
-Start with **HOLD THE VILLAGE** (1990): two tank platoons defend a crossroads village against a Red tank company. It is the easiest scenario, and {{ch:Your first battle}} walks through it. **M1 - MOVEMENT** has no fighting at all and is good for practising movement orders. The six scenarios from 1986, 1987 and 2005 are the real campaign-grade content. See {{ch:Scenario hints}} and {{ch:Scenarios}}.
+Start with **HOLD THE VILLAGE** (1990): two tank platoons defend a crossroads village against a Red tank company. It is the easiest scenario, and {{ch:Your first battle}} walks through it. It comes first in the list. **MOVEMENT PRACTICE** has no fighting at all and is good for practising movement orders. The scenarios from 1985, 1986, 1987 and 2005 are the real campaign-grade content. See {{ch:Scenario hints}} and {{ch:Scenarios}}.
 </div>
 
 ## Help, the screen menu and quitting
@@ -175,7 +175,7 @@ Roads are thin double lines. Tracks and roads are faster to move on, but they ar
 <kbd>F1</kbd>–<kbd>F4</kbd> (or the top-bar buttons) switch the base map. <kbd>F5</kbd> toggles contours and <kbd>F6</kbd> the grid.
 
 ::fig g-layer-slope | crop=0,30,1270,660 | w=48 | **SLOPE** (<kbd>F2</kbd>): darker means steeper.
-::fig g-layer-traffic | crop=0,30,1270,660 | w=48 | **GO/NO-GO** (<kbd>F3</kbd>): how fast tracked vehicles can cross the ground. Fast going is light, slow is darker, impassable is marked.
+::fig g-layer-traffic | crop=0,30,1270,660 | w=48 | **GO/NO-GO** (<kbd>F3</kbd>): how fast tracked vehicles can cross the ground: green for GO, amber hatching for SLOW-GO, red hatching for NO-GO. A legend appears on the map.
 
 ::fig g-layer-cover | crop=0,30,1270,660 | w=48 | **COVER** (<kbd>F4</kbd>): land cover (crops, grass, forest, marsh, village …).
 ::fig g-night | crop=0,30,1270,660 | w=48 | **RELIEF** (<kbd>F1</kbd>), the default. The map is drawn the same by day and by night; the top bar tells you the light.
@@ -338,7 +338,7 @@ A **battle position** (BP) is an area where a platoon sets up to fight, facing t
 
 ::fig x-bp-tool | crop=560,30,700,300 | w=75 | Placing a battle position: centre clicked, the arrow shows the threat direction. <kbd>[</kbd> and <kbd>]</kbd> change the radius (100–800 m, default 250 m).
 
-The platoon leader then searches the circle for the best spot for each tank: hull hidden from the threat but gun and sights able to see it (**hull-down**), spread out, with the gun able to depress far enough. When all tanks are in place the radio says, for example:
+The platoon leader then searches the circle for the best spot for each tank: hull hidden from the threat but gun and sights able to see it (**hull-down**), spread out as far as the ground allows (good spots can bring tanks as close as about 40 m), with the gun able to depress far enough. `MASKED` in the report means a tank cannot see the threat from its spot at all: move it or use a bigger circle. When all tanks are in place the radio says, for example:
 
 `2: SET IN BP. 0 HULL-DOWN, 4 TURRET-DOWN, 0 EXPOSED. ORIENTED 0800 MILS.`
 
@@ -454,7 +454,7 @@ The radio net is your eyes and ears. Reports follow military brevity: who is spe
 | `1-2: BLACK ON FUEL AT GRID …` | Out of fuel |
 | `ENDEX. RED COMBAT INEFFECTIVE. BLUE WINS.` | End of exercise: the scenario is over |
 
-Older messages scroll up; the panel keeps the last 300.
+Roll the mouse wheel over the panel to read back through the last 300 messages, and click a message with a grid to centre the map on it.
 
 # Your first battle: Hold the Village
 
@@ -470,7 +470,7 @@ The briefing's notes say: *occupy battle positions (B) facing NE, draw a phase l
 
 ## Step 2: Put each platoon in a battle position
 
-1. Click **1 PLT** in the order of battle.
+1. Click **1 PLT** in the order of battle. (Clicking a platoon that is already selected centres the map on it.)
 2. Press <kbd>B</kbd>, click a centre point just north-east of the village, then click towards the north-east.
 3. Press <kbd>Tab</kbd> for 2nd Platoon, and do the same on the north-west side, so both platoons can fire into the open ground north of the village from different angles.
 
@@ -494,7 +494,7 @@ Press <kbd>Enter</kbd> (**EXECUTE**). The platoons move into their positions. Us
 
 ## Step 5: Wait, and drop to X1 when contact comes
 
-Red approaches in column along the road from the north. Around 06:10 the first spot reports arrive. Switch to **X1** so you can follow the fight.
+Red approaches from the north and north-east, partly in column along the road. The first spot reports arrive between about 06:05 and 06:10, depending on where your tanks can see. Switch to **X1** so you can follow the fight.
 
 ::fig f660 | crop=0,30,1600,850 | pins=1@690,160;2@545,780 | 06:10. Destroyed and burning Red tanks on the road north of PL RED <span class="pinref">1</span>; the radio net <span class="pinref">2</span> lists contacts, updates and kills.
 
@@ -512,7 +512,7 @@ When Red has lost 70 % of its vehicles it is **combat ineffective** and the scen
 
 ## Step 7: Look at what really happened
 
-Open the **AFTER-ACTION REVIEW** (<kbd>F8</kbd>). It shows the ground truth: where every vehicle really was, every shot, and statistics per side. In this run, Blue fired 19 rounds, hit 16 and destroyed 9 vehicles without loss. Blue's first contact report came 411 seconds after H-hour, Red's at 420 s.
+Open the **AFTER-ACTION REVIEW** (<kbd>F8</kbd>). It shows the ground truth: where every vehicle really was, every shot, and statistics per side. In this run, Blue fired 19 rounds, hit 16 and destroyed 9 vehicles without loss, and Blue's first contact report came 411 seconds after H-hour, Red's at 420 s. Your figures will differ: other positions meet Red at other ranges and angles, and at long range against a tank turned at an angle many rounds may hit without getting through.
 
 ::fig g-aar | crop=0,0,1600,900 | pins=1@160,44;2@1430,135;3@640,830 | The after-action review: playback controls <span class="pinref">1</span>, statistics <span class="pinref">2</span>, timeline with event marks <span class="pinref">3</span>. <kbd>Space</kbd> plays, <kbd>←</kbd>/<kbd>→</kbd> jump 10 s, drag the timeline, <kbd>Ctrl</kbd>+<kbd>R</kbd> saves a replay file.
 

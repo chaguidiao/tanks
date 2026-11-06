@@ -109,7 +109,7 @@ A **delay** trades ground for time: you fight from a forward position, inflict l
 
 ## Modern (2005)
 
-- **BULWARK A2** has second-generation thermals and an independent thermal viewer for the commander, and very strong frontal armour. **KURGAN-C** (T-90A-like) has heavy reactive armour that degrades even sabot rounds, a thermal sight, and **gun-launched missiles that reach 5 km**.
+- **BULWARK A2** has second-generation thermals and an independent thermal viewer for the commander, and very strong frontal armour. **KURGAN-C** (KURGAN-C-like) has heavy reactive armour that degrades even sabot rounds, a thermal sight, and **gun-launched missiles that reach 5 km**.
 - Both sides see at night. Fights start at long range; open ground is deadly for whoever moves.
 - **Aim for the sides of the KURGAN-C.** Its front is very hard to defeat.
 
@@ -135,19 +135,19 @@ The top bar always shows the light, the preset and the visibility.
 | Scenario | Year | Situation | Hints |
 |---|---|---|---|
 | **HOLD THE VILLAGE** | 1990 | Two tank platoons hold a crossroads village against a tank company from the north-east | The tutorial ({{ch:Your first battle}}). Battle positions either side of the village facing north-east, a phase line, execute |
-| **M1 - MOVEMENT** | 1990 | One platoon, no enemy to speak of | Practise routes, checkpoints, formations and the GO/NO-GO layer |
+| **MOVEMENT PRACTICE** | 1990 | One platoon, no enemy to speak of | Practise routes, checkpoints, formations and the GO/NO-GO layer |
 | **MIXED FORCE** | 1990 | As Hold the Village, but Red has fighting vehicles too | Red tanks have reactive armour. Crews choose sabot against tanks and HEAT against IFVs; leave AMMO on AUTO |
 | **FOG AT DAWN** (1990) | 1990 | Defend in dense fog at first light | Contact at 250 m. Set up overlapping fields of fire close in; expect flank shots |
 | **NIGHT ATTACK** | 1990 | Defend at 02:00 under a half moon | Your thermals see much further than Red's active IR. Engage at long range |
 | **FIRE SUPPORT** | 1990 | Hold the village with a 155 mm battery | Call HE on the Red axis *early*: the FDC needs about a minute and the shells another 20–40 s. Smoke rounds screen a position |
-| **HASTY ATTACK** | 1986 | Two M1 platoons and a Bradley platoon seize a village held by tanks and IFVs, with a Red reserve behind | Bound from cover to cover; the T-72A can kill an M1 from the front at 2 km. Smoke and artillery on the village before the assault; consolidate against the counter-attack |
-| **NIGHT DELAY** | 1987 | Delay from forward positions at night, then hold the village; Bradleys in reserve | Engage at ranges Red's active IR can't answer, break contact before Red closes to 1 km. Expect artillery on your first positions. Commit the reserve when the village is contested |
+| **HASTY ATTACK** | 1986 | Two BULWARK platoons and a WARD platoon seize a village held by tanks and IFVs, with a Red reserve behind | Bound from cover to cover; the KURGAN-A can kill a BULWARK from the front at 2 km. Smoke and artillery on the village before the assault; consolidate against the counter-attack |
+| **NIGHT DELAY** | 1987 | Delay from forward positions at night, then hold the village; WARDs in reserve | Engage at ranges Red's active IR can't answer, break contact before Red closes to 1 km. Expect artillery on your first positions. Commit the reserve when the village is contested |
 | **VILLAGE DEFENCE** | 1987 | Hold a village in wooded hills against 25 Red vehicles | The forest cuts sight lines to a few hundred metres. Hull-down positions on the forest edge, keep the TOW vehicles behind the tanks until Red deploys |
-| **DELAY IN DEPTH** | 2005 | Delay with M1A2s against an advance guard led by reconnaissance, then hold the village; M2A2 reserve | Don't let the forward platoons be fixed; move on the trigger. Forested slopes are your best cover |
-| **DUSK ATTACK** | 2005 | Seize a village on open farmland held by T-90As and T-72Bs with missiles to 5 km | No cover on the approach. Use smoke to break the missile engagement, move in bounds, aim for the sides of the T-90A |
-| **FOG MEETING** (2005) | 2005 | Hold the crossroads in fog with an M1A2 platoon and an M2A2 platoon | Thermals don't see through fog. Overlapping fields of fire; the T-90A front is hard, so aim for its sides |
-| **CLEARING THE VILLAGE** | 1987 | Clear a village held by RPG squads and a missile team | Dismount the Bradleys short of the village and send the squads in first (OCCUPY BUILDINGS FACING...). Bring the tanks in behind them; alone, they drive into the rockets |
-| **THE MARKET TOWN** | 1987 | Hold the north edge of a town against a motor-rifle attack through the woods | Squads in the edge blocks see the approach; tanks in the streets don't. Keep the tanks on the flanks of the town where they see the wood line, and expect the BMP squads to come in on foot
+| **DELAY IN DEPTH** | 2005 | Delay with BULWARK A2s against an advance guard led by reconnaissance, then hold the village; WARD M2 reserve | Don't let the forward platoons be fixed; move on the trigger. Forested slopes are your best cover |
+| **DUSK ATTACK** | 2005 | Seize a village on open farmland held by KURGAN-Cs and KURGAN-Bs with missiles to 5 km | No cover on the approach. Use smoke to break the missile engagement, move in bounds, aim for the sides of the KURGAN-C |
+| **FOG MEETING** (2005) | 2005 | Hold the crossroads in fog with a BULWARK A2 platoon and an WARD M2 platoon | Thermals don't see through fog. Overlapping fields of fire; the KURGAN-C front is hard, so aim for its sides |
+| **CLEARING THE VILLAGE** | 1987 | Clear a village held by RPG squads and a missile team | Dismount the WARDs about 1 km short of the village (squads walk at about 3 km/h at best) and send the squads in first (OCCUPY BUILDINGS FACING...). Bring the tanks in behind them; alone, they drive into the rockets |
+| **THE MARKET TOWN** | 1987 | Hold the north edge of a town against a motor-rifle attack through the woods | Squads in the edge blocks see the approach; tanks in the streets don't. Keep the tanks on the flanks of the town where they see the wood line, and expect the SKIF squads to come in on foot
 | **LONG DEFENCE** | 1987 | Hold the village crossroads against three tank companies, one after another, with 10 rounds a tank | Ammunition decides. Resupply in the lull after each attack, one platoon at a time: the trucks (R, tailgate) keep it in position. Send R to the immobilised tanks (O) once the enemy is beaten off |
 
 # A primer on armoured doctrine

@@ -20,6 +20,7 @@ Added 2026-10-21. Remove a line when it is decided, and record the decision on t
 | M8f1 / M8g1 | AI vs infantry, use of buildings; full mount/dismount controls, editor placement | M8b-b |
 | M8h1b | Towns: town blocks, streets, settlement interiors | M8f1 |
 | M8c | Logistics: resupply, recovery | none (placed here by priority) |
+| PT | Newcomer playtest findings (2026-11-06): bugs, UX, balance checks | none; order not agreed |
 | M8d | Engineers, obstacles, minefields, bridges, destruction | M8b, M8c optional |
 | M8e | Recon, UAS, communications, identification | M8b |
 | M8f2 | Commander AI proper (COA, OPFOR plans, auto-commander, fire-support AI, cross/depth fire, hides) | M8b–e |
@@ -129,6 +130,51 @@ Plan: `docs/plans/M8B-AT-TEAMS.md`. Agreed 2026-10-24, with all 12 recommendatio
 - Note: no hard dependency on infantry (trucks and recovery vehicles are vehicles); placed here by priority and could move earlier.
 - [ ] C7 (2026-11-04) Scenario editor: `ammo_fraction` / `fuel_fraction` per unit (plain RON for now). (The guide's Infantry figures from the slice 9 note: done 2026-11-04, figures from `i-dismount`)
 - Exit: a long scenario where ammunition decides the outcome; stock accounting tests. (Met 2026-11-04: `m8c-long-defence`, DESIGN.md §13.1 slice 9; stock accounting tests in `m8c.rs`. C1 stays open for its client follow-ups.)
+
+## PT — Newcomer playtest findings (2026-11-06, version 0.1.3)
+Evidence and context: `docs/PLAYTEST-2026-11-06.md`. Worked through 2026-11-06, regression tests in `crates/sim/tests/playtest.rs`, `m8c.rs` and the client's `planedit` tests. Still open: the unticked items below.
+
+**PT-A — Quick client fixes (suggested next)**
+- [x] **PT1** Input leaks through the UI to the map: the wheel over any panel zooms, and arrow keys pan while navigating a list, a context menu or the AAR timeline. `MapScreen::camera` runs unconditionally (`mapscreen.rs:541`, `:623`)
+- [x] **PT2** Esc never deselects, contrary to the guide (pending click, tool, timing, then selection): with a selection and no tool it opens the screen menu. `Game::esc_in_use` ignores selection and timing (`game.rs:409`)
+- [x] **PT3** `KILLS` on the selection panel is not cumulative (7 → 0 → 2 in LONG DEFENCE): it counts destroyed contacts still in the picture (`game.rs:3131`)
+- [x] **PT4** The LOS height profile is drawn under the radio panel and is almost unreadable (`game.rs:2046`)
+- [x] **PT5** Status card lists out-of-service rounds (`APFSDS 0 · APFSDS 24`; `sim/src/lib.rs:252` stocks them at 0), and two types share one label
+- [x] **PT6** Text and layout: `1 CASUALTIES` plural (`game.rs:3782`); `…` missing from the font, so truncated titles end in `?` (`menu.rs:425`); AAR `HITS BY RANGE` clipped at the panel edge; FIRE SUPPORT status overflows its box; `MOVING -0 M`; radio wraps early and leaves a lone word
+
+**PT-B — Newcomer experience**
+- [x] PT7 Draw scenario objectives on the game map (the editor does; HASTY ATTACK has at least five built-up patches and nothing marks the target)
+- [x] PT8 Radio scrollback: wheel over the panel scrolls by message; a click on a line with a grid centres the map
+- [x] PT9 Open each scenario centred on the player's force, within the area free of panels: in M1 - MOVEMENT no own unit is visible at start, HASTY ATTACK is nearly as bad
+- [x] PT10 AUTO-PAUSE: the top bar shows why; contact and fire stop the clock only after 60 s without one; enemy losses no longer count as a LOSS (they did: no side check). With CONTACT, LOSS (the guide's advice) LONG DEFENCE took 10 resumes from 05:36:24 to 05:40:14 at X8
+- [x] PT11 Scenario list: open on the tutorial and put it first, sort consistently (years are out of order today). Difficulty labels are I4
+- [x] PT12 Briefing: `HOLD <objective>` shown for attack missions (`menu.rs:582`); squads shown as `UNKNOWN`, which also reveals Red's strength (`menu.rs:93`)
+- [x] PT13 Consistent order UI: the resupply source list ignores number keys and shows no hints; RECOVER has no card button and is missing from F7 help
+- [x] PT14 GO/NO-GO layer legend (green, red hatching, amber are unexplained)
+- [ ] PT15 Map clarity. Done: labels step clear of each other, group roster rows, heading ticks, viewshed observer marker, LOS label, editor default stock. Open: the selection panel covers the north-east and grows with a draft, eating map clicks
+- [x] PT16 Plan draft starts from the old route, including a break-contact destination, with no clear way to start fresh
+- [x] PT17 Radio `n EXPOSED` includes tanks the roster shows as `MASKED`, which need a different fix; platoon reads `HALTED` after resupply instead of `SET IN BP`
+- [ ] PT18 Key taps shorter than a frame now also read raylib's key queue (not reproduced under load: **check** on slow hardware). Open **check**: a right click on a checkpoint once opened no menu, not reproduced
+
+**PT-C — Order safety**
+- [x] PT19 Refuse or clamp move destinations outside the map, including group moves whose kept offsets push a platoon off the edge. Today the X is drawn in the void and the platoon stays `MOVING` at the edge indefinitely. Also check break contact and plan checkpoints
+
+**PT-D — Sim and balance (doctrine citation, hash update, duel and batch re-run)**
+- [x] PT20 Crews fixate on a target they cannot penetrate: 1-2 and 1-4 fired at immobilised 221 for about 139 s at 2.6–2.7 km, 35 of Blue's 58 rounds at that tank, nearly all non-penetrating, while others closed. Penetration is deterministic for a fixed geometry and `choose_target` keeps the current target (`gunnery.rs:597`). Prefer another target after repeated no-effect hits; rank immobilised targets below mobile ones. Find out why `duel` shows P(pen|hit) = 1.0 at 3 km for this pairing
+- [x] PT21 Tailgate serves by callsign, not need: 1-1 went from 5 to 36 rounds while 1-4 sat at 1–2. Serve the emptiest first, or share out evenly
+- [ ] PT22 Objective taken without a fight, **confirmed** on seeds 1-3: a road march wins HASTY ATTACK in 14-15 min for 0-1 Blue vehicles while Red fires 1-4 rounds. Defenders displace to the alternate (830 m from the objective, `commander.rs`: `bp_index` only goes forward) and never come back. Decision needed: should defenders return, or should the alternate stay in reach of the objective? Red crews also have no tracks at about 1 km while under fire; detection is symmetric on flat open ground (2-3 s both ways), so look at sight lines on the real map next
+- [ ] PT23 **check** The 1990 variants may not get harder: autopilot Blue finished MIXED FORCE, FOG AT DAWN, NIGHT ATTACK and FIRE SUPPORT with 0 losses and 7/9 kills on seeds 1–2, the same as HOLD THE VILLAGE (Blue was AI-run; try by hand)
+- [ ] PT24 **check** (guide now says dismount about 1 km out) Squads made about 3 km/h at best and two lagged at about 1.4 km/h, not on line: dismounted 1.9 km out they barely reach the village in the 40 minutes of CLEARING THE VILLAGE. Is the lag right? Otherwise give a dismount distance in the guide
+- [x] PT25 Battle positions: about 50 m is by design (`position::assign` relaxes spacing down to 35 % to keep good spots); the guide says so. Break contact with nothing seen now fires no smoke and names no threat; column/travel for the withdrawal stays
+
+**PT-E — Guide and names**
+- [x] PT26 Refresh the user guide: version 0.1.1 and October on the cover, two maps (now three), "six scenarios", first-battle figures (contact 06:10 on the north road, 19 rounds, 16 hits, 9 kills; the playtest got 06:06 from the north-east, 58, 51, 7), GO/NO-GO description, editor key table missing `I` and `S`; warn that clicking an already selected platoon recentres the map (step 2 of the first battle)
+- [x] PT27 Real vehicle names in player text: briefings and guide hints say M1, T-72A, BRADLEY while the game shows BULWARK and KURGAN (CLAUDE.md: fictional names)
+- [ ] PT29 Decision: should penetration scatter? It is a hard threshold, so a fixed geometry fails every time: 221 at 35 degrees was 5 mm short (586 mm against 581 mm) for 35 rounds. PT20 stops crews wasting ammunition on it but not the cliff. Needs a source and a re-run of the validation harness
+- [ ] PT30 Decision: leg setting for shifting fire (see the AI-defaults rule), and whether to rank immobilised targets lower (not done: one that can still shoot is still a threat; crews cannot tell a mobility kill from a halt)
+- [ ] PT31 Service-station resupply still serves in platoon order (the tailgate serves the emptiest first); selection is per tick there, so a change must not swap vehicles mid-service
+- [ ] PT32 Regenerate the guide's screenshots (still from 0.1.1): start-up framing, radio, legend, briefing and the scenario list have changed
+- [ ] PT28 Still untested by hand: RECOVER (`O`), tank smoke rounds, engine smoke, contingency firing, branches, night and fog in the client, MARKET TOWN and the delay scenarios, terrain editor save, GL 2.1 build, fullscreen, edge pan
 
 ## M8d — Engineers and obstacles
 - [ ] D1 Obstacles (ditch, wire, traps, abatis) as map features with run-time passage cost — §11, TERRAIN.md §5.7

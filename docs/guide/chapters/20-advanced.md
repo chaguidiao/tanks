@@ -391,7 +391,7 @@ A crew's detection becomes a **spot report** after 3–12 s (Western) or 5–20 
 
 A tank's gunnery is a timeline: traverse the turret, lay the gun, lase the range, let the fire-control computer solve, fire, observe, reload. Times depend on the vehicle's equipment and the crew. Each round's error is the combination of ammunition dispersion, ranging error, residual ballistic error, stabilisation, lead error against moving targets, crosswind and cant. It is sampled and compared with the target's *actual visible silhouette*, so a hull-down target really is harder to hit. Follow-up rounds correct for the first one's error.
 
-The crew chooses its own target from its tracks, according to weapons control ({{ch:Posture}}), and the platoon spreads targets so fire is distributed.
+The crew chooses its own target from its tracks, according to weapons control ({{ch:Posture}}), and the platoon spreads targets so fire is distributed. A crew that sees three rounds in a row hit without effect (armour too thick from that angle) shifts to another target if it has one, and may come back to the first after a minute. **ENGAGE** overrides all of this: an ordered crew stays on its target until that target is dead.
 
 ## Penetration and armour
 
@@ -472,6 +472,8 @@ Anything that would stop the scenario from starting (a side with no units, a veh
 | Key | Action |
 |---|---|
 | <kbd>P</kbd> | Place a unit at the cursor |
+| <kbd>I</kbd> | Place a squad at the cursor (over a carrier: aboard it) |
+| <kbd>S</kbd> | Place a supply point at the cursor |
 | LMB / drag | Select / move a unit |
 | <kbd>R</kbd> | Rotate 45° |
 | <kbd>Del</kbd> | Remove |

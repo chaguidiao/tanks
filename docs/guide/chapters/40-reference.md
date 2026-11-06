@@ -200,17 +200,17 @@ All vehicles are fictional names for designs that mirror real ones. Numbers are 
 | Scenario | File | Year, time | Map | You command | Enemy |
 |---|---|---|---|---|---|
 | HOLD THE VILLAGE | `m5-hold-the-village` | 1990, 06:00 | demo | 8 BULWARK A1 | 9 KURGAN-B |
-| M1 - MOVEMENT | `m1-move` | 1990, 06:00 | demo | 1 platoon | — |
+| MOVEMENT PRACTICE | `m1-move` | 1990, 06:00 | demo | 1 platoon | — |
 | MIXED FORCE | `m7b-mixed-force` | 1990, 06:00 | demo | Tanks and a recon section | Tank platoon, 2 IFV platoons |
 | FOG AT DAWN | `m7c-fog-at-dawn` | 1990, 06:30, fog | demo | Tanks | Tank company |
 | NIGHT ATTACK | `m7c-night-attack` | 1990, 02:00 | demo | Tanks | Tank company |
 | FIRE SUPPORT | `m7d-fire-support` | 1990, 06:00 | demo | 8 BULWARK A1, 155 mm battery | Tank company |
-| HASTY ATTACK | `cw-hasty-attack` | 1986, 08:00 | uplands | 2 M1 platoons, 1 Bradley platoon, 155 mm battery | Tanks and IFVs in a village, reserve |
-| NIGHT DELAY | `cw-night-delay` | 1987, 01:30 | uplands | 2 tank platoons, Bradley reserve | Recon-led attack with 152 mm artillery |
+| HASTY ATTACK | `cw-hasty-attack` | 1986, 08:00 | uplands | 2 BULWARK platoons, 1 WARD platoon, 155 mm battery | Tanks and IFVs in a village, reserve |
+| NIGHT DELAY | `cw-night-delay` | 1987, 01:30 | uplands | 2 tank platoons, WARD reserve | Recon-led attack with 152 mm artillery |
 | VILLAGE DEFENCE | `cw-village-defence` | 1987, 06:00 | uplands | 8 BULWARK A0, 3 WARD M2 | 25 vehicles |
-| DELAY IN DEPTH | `mod-delay-in-depth` | 2005, 10:00, haze | uplands | 2 M1A2 platoons, M2A2 reserve | 24 vehicles, recon, 152 mm artillery |
-| DUSK ATTACK | `mod-dusk-attack` | 2005, 17:30 | demo | 2 M1A2 platoons, 1 M2A2 platoon, 155 mm battery | T-90A, T-72B, IFVs, T-90A reserve |
-| FOG MEETING | `mod-fog-meeting` | 2005, 06:30, fog | demo | 1 M1A2 platoon, 1 M2A2 platoon | T-90A, T-72B, IFVs |
+| DELAY IN DEPTH | `mod-delay-in-depth` | 2005, 10:00, haze | uplands | 2 BULWARK A2 platoons, WARD M2 reserve | 24 vehicles, recon, 152 mm artillery |
+| DUSK ATTACK | `mod-dusk-attack` | 2005, 17:30 | demo | 2 BULWARK A2 platoons, 1 WARD M2 platoon, 155 mm battery | KURGAN-C, KURGAN-B, IFVs, KURGAN-C reserve |
+| FOG MEETING | `mod-fog-meeting` | 2005, 06:30, fog | demo | 1 BULWARK A2 platoon, 1 WARD M2 platoon | KURGAN-C, KURGAN-B, IFVs |
 | DISMOUNTS IN THE VILLAGE | `m8b-dismounts` | 1985, 10:00 | demo | 3 WARD M2 with rifle squads | 3 KURGAN A, 3 SKIF M0 with squads |
 | AMBUSH IN THE VILLAGE | `m8b-ambush` | 1987, 10:00 | demo | 4 BULWARK A1 | RPG squads and a missile team in the houses |
 | CLEARING THE VILLAGE | `m8f-ambush` | 1987, 10:00 | demo | 4 BULWARK A1, 3 WARD M2 with rifle squads | Infantry with RPGs and a missile team in the houses |
