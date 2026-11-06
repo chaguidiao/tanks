@@ -935,3 +935,65 @@ fn a_scenario_unit_can_start_short_of_rounds_and_fuel() {
     sc.sides[0].units[0].ammo_fraction = Some(1.5);
     assert!(Sim::new(&sc, ds, m).err().expect("refused").contains("fractions"));
 }
+
+/// Playtest 2026-11-06: 1-1 went from 5 to 36 rounds while 1-4 sat at 1-2 and the next wave came.
+#[test]
+fn trucks_serve_the_emptiest_gun_first() {
+    let (mut sim, tanks, trucks, _) = depleted_platoon();
+    let w = sim.truth_mut();
+    for (k, left) in [(0, 30), (1, 20), (2, 10), (3, 1)] {
+        let g = w.gun[k].as_mut().unwrap();
+        g.stock.iter_mut().for_each(|s| *s = 0);
+        g.stock[1] = left;
+    }
+    sim.submit(SideId(0), Command::Tailgate { platoon: tanks, trucks });
+    let before: Vec<u32> = (0..4).map(|k| sim.truth().gun[k].as_ref().unwrap().rounds()).collect();
+    for _ in 0..1200 {
+        run(&mut sim, 1.0);
+        // Rounds, not fuel: the fuel truck may reach its vehicle first.
+        let first = (0..4).find(|&k| sim.truth().gun[k].as_ref().unwrap().rounds() > before[k]);
+        if let Some(k) = first {
+            assert_eq!(k, 3, "the tank with one round left gets rounds first");
+            return;
+        }
+    }
+    panic!("no vehicle ever got rounds");
+}
+
+/// Playtest 2026-11-06: a platoon set in its battle position read HALTED after a tailgate.
+#[test]
+fn after_tailgate_resupply_the_platoon_is_still_set_in_its_position() {
+    let (mut sim, tanks, trucks, _) = depleted_platoon();
+    sim.submit(
+        SideId(0),
+        Command::OccupyPosition {
+            platoon: tanks,
+            centre: [700.0, 620.0],
+            radius_m: 100.0,
+            facing: 0.0,
+            kind: ai::picture::PositionKind::HullDown,
+        },
+    );
+    let task = |sim: &Sim| sim.perceived(SideId(0)).platoon(tanks).unwrap().task.clone();
+    for _ in 0..300 {
+        run(&mut sim, 1.0);
+        if task(&sim).contains("SET") {
+            break;
+        }
+    }
+    let set = task(&sim);
+    assert!(set.contains("SET"), "{set}");
+    sim.submit(SideId(0), Command::Tailgate { platoon: tanks, trucks });
+    let mut done = false;
+    for _ in 0..2400 {
+        done |= run(&mut sim, 1.0)
+            .iter()
+            .any(|e| matches!(e, Event::PlatoonReport { report: PlatoonReport::Resupplied { .. }, .. }));
+        if done {
+            break;
+        }
+    }
+    assert!(done);
+    run(&mut sim, 2.0);
+    assert_eq!(task(&sim), set);
+}

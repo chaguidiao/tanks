@@ -43,6 +43,8 @@ pub struct GunState {
     pub target: Option<usize>,
     /// Target given by the platoon fire plan or a micro-order.
     pub assigned: Option<usize>,
+    /// `assigned` is an ENGAGE order: the fire plan leaves it alone until that target is dead.
+    pub ordered: bool,
     pub phase: Phase,
     /// Rounds fired at the current target (first round vs. adjusted fire).
     pub rounds_at_target: u32,
@@ -56,6 +58,16 @@ pub struct GunState {
     /// The crew is stowing main-gun rounds from a resupply until this tick: the main gun does not
     /// fire (plan M8C-TAILGATE-TRUCKS §8 #6). 0 = never.
     pub loading_until: u64,
+    /// Targets this crew has hit without effect (`note_hit`).
+    pub no_effect: Vec<NoEffect>,
+}
+
+/// Non-penetrating hits in a row on one target, as the crew saw them land.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NoEffect {
+    pub target: usize,
+    pub hits: u32,
+    pub last_tick: u64,
 }
 
 /// A smoke fire mission (point target), FM 3-11.50.
@@ -75,13 +87,38 @@ impl GunState {
             mission: None,
             target: None,
             assigned: None,
+            ordered: false,
             phase: Phase::Ready,
             rounds_at_target: 0,
             bias: (0.0, 0.0),
             crew_loss: 0,
             coax_target: None,
             loading_until: 0,
+            no_effect: Vec::new(),
         }
+    }
+
+    /// The crew observes the effect of its round: a penetration ends the count for that target.
+    pub fn note_hit(&mut self, target: usize, penetrated: bool, tick: u64) {
+        let i = self.no_effect.iter().position(|n| n.target == target);
+        match (i, penetrated) {
+            (Some(i), true) => {
+                self.no_effect.remove(i);
+            }
+            (Some(i), false) => {
+                self.no_effect[i].hits += 1;
+                self.no_effect[i].last_tick = tick;
+            }
+            (None, true) => {}
+            (None, false) => self.no_effect.push(NoEffect { target, hits: 1, last_tick: tick }),
+        }
+    }
+
+    /// Has the crew recently seen rounds fail on this target often enough to look for another?
+    pub fn futile(&self, target: usize, rule: NoEffectRule, tick: u64) -> bool {
+        self.no_effect
+            .iter()
+            .any(|n| n.target == target && n.hits >= rule.hits && tick.saturating_sub(n.last_tick) <= rule.forget_ticks)
     }
 
     /// Rounds left, all types.
@@ -554,6 +591,7 @@ const LAUNCH_THREAT: u64 = 60 * crate::TICK_HZ as u64;
 /// ATGM: engage the launch point): a squad seen launching a rocket or missile, or identified as
 /// an anti-tank missile team (plan M8B-AT-TEAMS §5), then infantry inside `close_infantry`
 /// (anti-tank weapons at close range), then the nearest vehicle, then the nearest infantry.
+#[allow(clippy::too_many_arguments)]
 fn choose_target(
     world: &World,
     squads: &[sim_data::SquadDef],
@@ -561,6 +599,7 @@ fn choose_target(
     max_range: f64,
     reach: f64,
     close_infantry: f64,
+    no_effect: NoEffectRule,
     tick: u64,
 ) -> Option<usize> {
     let s = world.sensors[k].as_ref()?;
@@ -594,9 +633,14 @@ fn choose_target(
             });
         squad(tr) && (launched || missile_team)
     };
+    // TC 3-20.31: the crew observes the effect of each round. Hits that do nothing (armour too
+    // thick from this aspect) are a reason to shift to a target the gun can hurt, if there is one.
+    let futile = |t: usize| g.futile(t, no_effect, tick);
+    let other = s.tracks.iter().any(|tr| ok(tr.target) && !futile(tr.target));
     // Keep the current target unless an anti-tank threat has appeared since.
     if let Some(cur) = g.target
         && ok(cur)
+        && !(futile(cur) && other)
         && (s.track(cur).is_some_and(anti_tank) || !s.tracks.iter().any(|tr| ok(tr.target) && anti_tank(tr)))
     {
         return Some(cur);
@@ -604,7 +648,7 @@ fn choose_target(
     let nearest = |pred: &dyn Fn(&crate::world::LocalTrack) -> bool| {
         s.tracks
             .iter()
-            .filter(|tr| ok(tr.target) && pred(tr))
+            .filter(|tr| ok(tr.target) && (!other || !futile(tr.target)) && pred(tr))
             .min_by(|a, b| a.range_m.total_cmp(&b.range_m).then(a.target.cmp(&b.target)))
             .map(|tr| tr.target)
     };
@@ -634,8 +678,23 @@ pub fn select_infantry_round(g: &GunState, loadout: &[usize], ammo: &[AmmoDef], 
         .find(|&li| usable(li) && ammo[loadout[li]].preferred_vs.contains(&sim_data::TargetClass::Infantry))
 }
 
+/// When a crew gives up on a target its rounds do not hurt (doctrine `no_effect_*`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NoEffectRule {
+    pub hits: u32,
+    pub forget_ticks: u64,
+}
+
+impl NoEffectRule {
+    pub fn of(d: &sim_data::DoctrinePack) -> Self {
+        Self { hits: d.no_effect_hits.get() as u32, forget_ticks: (d.no_effect_forget_s.get() / DT) as u64 }
+    }
+}
+
 /// What the gunners need to know about infantry targets.
 pub struct InfantryGunnery<'a> {
+    /// Per side: when to shift fire off a target rounds do not hurt.
+    pub no_effect: &'a [NoEffectRule],
     /// Per side: infantry inside this range comes before vehicles (doctrine).
     pub close_infantry: &'a [f64],
     /// Squad types (anti-tank missile teams are a first threat).
@@ -694,7 +753,7 @@ pub fn step(
         let target = if tick.is_multiple_of(crate::VEHICLE_AI_EVERY)
             || world.gun[k].as_ref().is_some_and(|g| g.target.is_none())
         {
-            choose_target(world, inf.squads, k, max_range, reach, inf.close_infantry[side], tick)
+            choose_target(world, inf.squads, k, max_range, reach, inf.close_infantry[side], inf.no_effect[side], tick)
         } else {
             world.gun[k].as_ref().and_then(|g| g.target).filter(|&t| world.alive(t) && !world.mounted(t))
         };

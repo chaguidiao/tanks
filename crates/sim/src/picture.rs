@@ -327,10 +327,18 @@ impl SideState {
             };
             let (turret, ammo) = w.gun[k].as_ref().map_or((t.heading, 0), |g| (g.turret, g.rounds()));
             let (rounds, ammo_selected) = match (w.vehicle[k], w.gun[k].as_ref()) {
-                (Some(vi), Some(g)) => (
-                    round_labels[vi].iter().zip(&g.stock).map(|(&l, &n)| (l.to_owned(), n)).collect(),
-                    g.selected.map(|k| k.label().to_owned()),
-                ),
+                (Some(vi), Some(g)) => {
+                    // By type, without the rounds not carried at this date (no load capacity).
+                    let mut rounds: Vec<(String, u32)> = Vec::new();
+                    for ((&l, &n), &cap) in round_labels[vi].iter().zip(&g.stock).zip(&g.capacity) {
+                        match rounds.iter_mut().find(|r| r.0 == l) {
+                            Some(r) => r.1 += n,
+                            None if cap > 0 => rounds.push((l.to_owned(), n)),
+                            None => {}
+                        }
+                    }
+                    (rounds, g.selected.map(|k| k.label().to_owned()))
+                }
                 _ => (Vec::new(), None),
             };
             let establishment = w.vehicle[k].map_or(0, |vi| vehicles[vi].crew);

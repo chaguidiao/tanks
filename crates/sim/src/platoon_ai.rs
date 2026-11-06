@@ -249,6 +249,7 @@ fn fire_distribution(p: &Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
             && let Some(g) = ctx.world.gun[k].as_mut()
         {
             g.assigned = None;
+            g.ordered = false;
         }
     }
     let shooters: Vec<usize> = p
@@ -257,6 +258,11 @@ fn fire_distribution(p: &Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
         .copied()
         .filter(|&k| ctx.world.alive(k) && ctx.world.condition[k] != Condition::FirepowerKill)
         .filter(|&k| ctx.world.weapons[k] != ai::picture::WeaponsStatus::Hold)
+        // A crew ordered onto a target stays on it while it lives.
+        .filter(|&k| {
+            let order = ctx.world.gun[k].as_ref().filter(|g| g.ordered).and_then(|g| g.assigned);
+            !order.is_some_and(|t| ctx.world.alive(t))
+        })
         .collect();
     let c = centroid(ctx.world, &shooters);
     let range = d.engagement_range_m.get();
@@ -268,6 +274,7 @@ fn fire_distribution(p: &Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
         for &k in &shooters {
             if let Some(g) = ctx.world.gun[k].as_mut() {
                 g.assigned = None;
+                g.ordered = false;
             }
         }
         return;
@@ -287,8 +294,13 @@ fn fire_distribution(p: &Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
                 })
                 .map(|t| t.target)
         });
+        // A target this crew has seen shrug off its rounds is not handed to it again: it picks
+        // its own (`gunnery::choose_target`), which stays on it only if nothing else is in sight.
+        let rule = crate::gunnery::NoEffectRule::of(d);
+        let tick = ctx.tick;
         if let Some(g) = ctx.world.gun[k].as_mut() {
-            g.assigned = track;
+            g.assigned = track.filter(|&t| !g.futile(t, rule, tick));
+            g.ordered = false;
         }
     }
 }
@@ -488,7 +500,10 @@ fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
         }
         // Slots are measured along the route, so trailing vehicles stay on it through bends and
         // village streets (TODO Z4: heading-rotated offsets put them off the street).
-        route_slot(&route, s, off)
+        // A slot past the map edge could never be reached, and the platoon would wait for it.
+        let (sp, h) = route_slot(&route, s, off);
+        let (m, e) = (&ctx.map.manifest, 2.0 * ctx.map.manifest.cell_size_m);
+        ([sp[0].clamp(e, m.width_m() - e), sp[1].clamp(e, m.height_m() - e)], h)
     };
     // Laggards slow the platoon down.
     let mut max_lag: f64 = 0.0;
@@ -654,12 +669,21 @@ fn deliver_step(p: &mut Platoon, ctx: &mut Ctx) {
                     let taken: Vec<usize> = jobs.iter().filter_map(|j| j.serving).collect();
                     let stock = ctx.world.cargo[k].as_ref().expect("a truck");
                     let fin = &jobs[i].finished;
-                    jobs[i].serving = (0..targets.len()).find(|&v| {
-                        !taken.contains(&v)
-                            && !fin.contains(&v)
-                            && ctx.world.alive(targets[v])
-                            && can_give(ctx.world, targets[v], stock, &t)
-                    });
+                    // The emptiest gun first, so that the fight goes on if the trucks are cut short
+                    // (ties in platoon order; a vehicle without a gun counts as full).
+                    let filled = |v: usize| {
+                        ctx.world.gun[targets[v]]
+                            .as_ref()
+                            .map_or(1.0, |g| f64::from(g.rounds()) / f64::from(g.capacity.iter().sum::<u32>().max(1)))
+                    };
+                    jobs[i].serving = (0..targets.len())
+                        .filter(|&v| {
+                            !taken.contains(&v)
+                                && !fin.contains(&v)
+                                && ctx.world.alive(targets[v])
+                                && can_give(ctx.world, targets[v], stock, &t)
+                        })
+                        .min_by(|&a, &b| filled(a).total_cmp(&filled(b)));
                     jobs[i].st.credit = [0.0; 4];
                 }
                 let Some(v) = jobs[i].serving else {
@@ -876,7 +900,7 @@ fn tailgate_link(platoons: &mut [Platoon], ctx: &mut Ctx) {
         let live: Vec<(usize, usize)> =
             platoons[ti].members.iter().copied().enumerate().filter(|&(_, k)| ctx.world.can_move(k)).collect();
         let w = &*ctx.world;
-        let PlatoonOrder::Tailgate { members, .. } = &mut platoons[si].order else { continue };
+        let PlatoonOrder::Tailgate { members, after, .. } = &mut platoons[si].order else { continue };
         for (v, st) in members.iter_mut().enumerate() {
             let k = targets[v];
             let any_truck = live.iter().any(|&(i, q)| {
@@ -897,7 +921,7 @@ fn tailgate_link(platoons: &mut [Platoon], ctx: &mut Ctx) {
         if let DeliverPhase::Return { withdraw } = phase {
             // Withdrawn trucks leave vehicles unserved: partial.
             let complete = !members.iter().any(|m| m.short || (withdraw && !m.done));
-            platoons[si].order = PlatoonOrder::None;
+            platoons[si].order = after.take().map_or(PlatoonOrder::None, |o| *o);
             ctx.report(&platoons[si], PlatoonReport::Resupplied { complete });
         }
     }
@@ -1037,11 +1061,12 @@ fn occupy_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
     }
     let all_set = p.bp.iter().all(|(k, _)| !ctx.world.can_move(*k) || ctx.world.ai[*k].as_ref().is_some_and(|a| a.set));
     if all_set {
-        let (mut hd, mut td, mut ex) = (0u8, 0u8, 0u8);
+        let (mut hd, mut td, mut ex, mut masked) = (0u8, 0u8, 0u8, 0u8);
         for (k, c) in &p.bp {
             match c.note() {
                 "HULL-DOWN" => hd += 1,
                 "TURRET-DOWN" => td += 1,
+                "MASKED" => masked += 1,
                 _ => ex += 1,
             }
             if let Some(ai) = ctx.world.ai[*k].as_mut() {
@@ -1049,6 +1074,6 @@ fn occupy_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
             }
         }
         p.order = PlatoonOrder::Occupy { centre, radius, facing, kind, assigned: true, reported: true };
-        ctx.report(p, PlatoonReport::SetInPosition { hull_down: hd, turret_down: td, exposed: ex, facing });
+        ctx.report(p, PlatoonReport::SetInPosition { hull_down: hd, turret_down: td, exposed: ex, masked, facing });
     }
 }

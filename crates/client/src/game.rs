@@ -3809,10 +3809,13 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                     format!("{cs}: RECOVERY COMPLETE, {recovered} AT UMCP.")
                 }
                 PlatoonReport::Repaired { vehicle } => format!("{vehicle}: REPAIRED AT UMCP, OPERATIONAL."),
-                PlatoonReport::SetInPosition { hull_down, turret_down, exposed, facing } => format!(
-                    "{cs}: SET IN BP. {hull_down} HULL-DOWN, {turret_down} TURRET-DOWN, {exposed} EXPOSED. ORIENTED {} MILS.",
-                    format::mils(*facing)
-                ),
+                PlatoonReport::SetInPosition { hull_down, turret_down, exposed, masked, facing } => {
+                    let masked = if *masked > 0 { format!(", {masked} MASKED") } else { String::new() };
+                    format!(
+                        "{cs}: SET IN BP. {hull_down} HULL-DOWN, {turret_down} TURRET-DOWN, {exposed} EXPOSED{masked}. ORIENTED {} MILS.",
+                        format::mils(*facing)
+                    )
+                }
                 PlatoonReport::Contact { at, toward } => format!(
                     "{cs}: CONTACT, DIRECTION {}, {}.{} ACTION, ENGAGING.",
                     format::mils(ai::drive::bearing(*at, *toward)),
@@ -3829,7 +3832,7 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                         ai::picture::AmbushReaction::Halt => " ENGAGING.",
                     }
                 ),
-                PlatoonReport::BreakingContact { threat } => {
+                PlatoonReport::BreakingContact { threat: Some(threat) } => {
                     format!("{cs}: BREAKING CONTACT, THREAT GRID {}. SMOKE, WITHDRAWING.", format::grid(*threat))
                 }
                 PlatoonReport::ContinuingMission => format!("{cs}: CONTACT LOST. CONTINUING MISSION."),
@@ -3926,3 +3929,6 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
         _ => return None,
     })
 }
+                PlatoonReport::BreakingContact { threat: None } => {
+                    format!("{cs}: BREAKING CONTACT, NO THREAT SEEN. WITHDRAWING.")
+                }

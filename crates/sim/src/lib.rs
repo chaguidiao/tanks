@@ -986,7 +986,10 @@ impl Sim {
         // 6. Gunnery.
         let engage: Vec<f64> = self.sides.iter().map(|s| s.doctrine.engagement_range_m.get()).collect();
         let close: Vec<f64> = self.sides.iter().map(|s| s.doctrine.infantry.close_infantry_m.get()).collect();
+        let no_effect: Vec<gunnery::NoEffectRule> =
+            self.sides.iter().map(|s| gunnery::NoEffectRule::of(&s.doctrine)).collect();
         let inf = gunnery::InfantryGunnery {
+            no_effect: &no_effect,
             close_infantry: &close,
             squads: &self.squads,
             map: &self.map,
@@ -1114,6 +1117,11 @@ impl Sim {
             } else {
                 o
             };
+            if o.hit
+                && let Some(g) = self.world.gun[p.shooter].as_mut()
+            {
+                g.note_hit(target, o.penetrated, tick);
+            }
             if self.world.alive(target) {
                 let sup = &self.data.fires.suppression;
                 let add = if !o.hit {
@@ -1266,14 +1274,13 @@ impl Sim {
             alive.iter().map(|&k| self.world.transform[k].pos[1]).sum::<f64>() / n,
         ];
         let pic = &self.pictures[side.0 as usize];
-        let threat = pic
-            .live_contacts()
-            .min_by(|a, b| dist(a.pos, centre).total_cmp(&dist(b.pos, centre)))
-            .map(|c| c.pos)
-            .unwrap_or_else(|| {
-                let h = self.platoons[pi].heading;
-                [centre[0] + libm::sin(h) * 1000.0, centre[1] + libm::cos(h) * 1000.0]
-            });
+        let seen =
+            pic.live_contacts().min_by(|a, b| dist(a.pos, centre).total_cmp(&dist(b.pos, centre))).map(|c| c.pos);
+        // With nothing seen, the platoon falls back from the way it was facing.
+        let threat = seen.unwrap_or_else(|| {
+            let h = self.platoons[pi].heading;
+            [centre[0] + libm::sin(h) * 1000.0, centre[1] + libm::cos(h) * 1000.0]
+        });
         let away = ai::drive::bearing(threat, centre);
         let distance = self.sides[side.0 as usize].doctrine.break_contact_distance_m.get();
         let Some(vi) = self.world.vehicle[lead] else { return };
@@ -1293,7 +1300,8 @@ impl Sim {
             }
         }
         let year = self.years[side.0 as usize];
-        for &k in &alive {
+        // Smoke screens against someone: none without a threat in the picture.
+        for &k in alive.iter().filter(|_| seen.is_some()) {
             if smoke::launch(
                 &mut self.smoke,
                 &mut self.world,
@@ -1321,7 +1329,18 @@ impl Sim {
         p.contact_reported = false;
         p.withdraw = true;
         events.push(Event::OrderReceived { side, to: Addressee::Platoon(id) });
-        events.push(Event::PlatoonReport { side, platoon: id, report: PlatoonReport::BreakingContact { threat } });
+        events.push(Event::PlatoonReport {
+            side,
+            platoon: id,
+            report: PlatoonReport::BreakingContact { threat: seen },
+        });
+    }
+
+    /// A point inside the map: orders cannot send anyone over the edge, where no route ends.
+    fn on_map(&self, p: Vec2) -> Vec2 {
+        let m = &self.map.manifest;
+        let e = 2.0 * m.cell_size_m;
+        [p[0].clamp(e, m.width_m() - e), p[1].clamp(e, m.height_m() - e)]
     }
 
     fn members(&self, side: SideId, to: Addressee) -> Vec<usize> {
@@ -1411,6 +1430,8 @@ impl Sim {
                 }
             }
             Command::Move { unit, destination, via, speed_limit_mps } => {
+                let destination = &self.on_map(*destination);
+                let via: &Vec<Vec2> = &via.iter().map(|&v| self.on_map(v)).collect();
                 let Some(k) = self.world.index_of(*unit) else { return };
                 if self.world.side[k] != c.side || !self.world.can_move(k) || self.world.mounted(k) {
                     return;
@@ -1536,20 +1557,22 @@ impl Sim {
                 });
                 if let Some(g) = self.world.gun[k].as_mut() {
                     g.assigned = best;
+                    g.ordered = best.is_some();
                 }
                 if self.world.weapons[k] == WeaponsStatus::Hold {
                     self.world.weapons[k] = WeaponsStatus::Tight;
                 }
             }
             Command::PlatoonMove { platoon, destination, via, formation, technique, speed_limit_mps } => {
-                let (dest, f, t) = (*destination, *formation, *technique);
+                let (dest, f, t) = (self.on_map(*destination), *formation, *technique);
+                let via: Vec<Vec2> = via.iter().map(|&v| self.on_map(v)).collect();
                 if let Some(p) = self.platoon_mut(c.side, *platoon) {
                     if let Some(f) = f {
                         p.formation = f;
                     }
                     p.technique = t;
                     p.speed_limit = *speed_limit_mps;
-                    p.order = platoon::PlatoonOrder::new_move(dest, via.clone());
+                    p.order = platoon::PlatoonOrder::new_move(dest, via);
                     p.plan = None;
                     p.held = None;
                     p.withdraw = false;
@@ -1609,6 +1632,11 @@ impl Sim {
                 self.break_contact(c.side, *platoon, events)
             }
             Command::SetPlan { platoon, plan, start } => {
+                let mut on_map = plan.clone();
+                for s in &mut on_map.steps {
+                    s.at = self.on_map(s.at);
+                }
+                let plan = &on_map;
                 let Some(p) = self.platoon_mut(c.side, *platoon) else { return };
                 p.finished.clear();
                 if plan.steps.is_empty() {
@@ -1851,9 +1879,13 @@ impl Sim {
                     self.world.halt(k);
                 }
                 let p = self.platoons.iter_mut().find(|p| p.side == c.side && p.id == *platoon).expect("found above");
+                // A platoon set in its position stays set in it after the trucks leave.
+                let after = matches!(p.order, platoon::PlatoonOrder::Occupy { reported: true, .. })
+                    .then(|| Box::new(p.order.clone()));
                 p.order = platoon::PlatoonOrder::Tailgate {
                     trucks: *trucks,
                     members: vec![logistics::ServiceState::new(); targets.len()],
+                    after,
                 };
                 p.plan = None;
                 p.held = None;
@@ -1984,7 +2016,7 @@ impl Sim {
             }
             Command::OccupyPosition { platoon, centre, radius_m, facing, kind } => {
                 let o = platoon::PlatoonOrder::Occupy {
-                    centre: *centre,
+                    centre: self.on_map(*centre),
                     radius: *radius_m,
                     facing: *facing,
                     kind: *kind,
@@ -2165,7 +2197,7 @@ impl Sim {
                     m.hash_into(&mut h);
                 }
             }
-            if let platoon::PlatoonOrder::Tailgate { trucks, members } = &p.order {
+            if let platoon::PlatoonOrder::Tailgate { trucks, members, .. } = &p.order {
                 h.u32(p.id.0);
                 h.u32(trucks.0);
                 for m in members {
@@ -2222,7 +2254,7 @@ impl Sim {
 /// Behaviour version of the simulation. A replay records it and is only played back by a build
 /// with the same version: bump it whenever a change makes an old command log play out
 /// differently (plan M8B-INFANTRY §8, DESIGN.md §14 #29). Replays from before versioning read as 0.
-pub const SIM_VERSION: u32 = 9;
+pub const SIM_VERSION: u32 = 10;
 
 /// A recorded game: scenario id plus the external command log. Re-simulating it reproduces the
 /// game exactly (determinism), which is what the after-action review and replays rely on.

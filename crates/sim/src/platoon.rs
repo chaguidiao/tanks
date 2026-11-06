@@ -45,6 +45,8 @@ pub enum PlatoonOrder {
     Tailgate {
         trucks: PlatoonId,
         members: Vec<crate::logistics::ServiceState>,
+        /// The position order to go back to when the trucks leave.
+        after: Option<Box<PlatoonOrder>>,
     },
     /// Supply trucks serving platoon `to` (plan M8C-TAILGATE-TRUCKS §3). `targets` = its members'
     /// world indices in platoon order; `release` = gathering point behind it; `home` = where each

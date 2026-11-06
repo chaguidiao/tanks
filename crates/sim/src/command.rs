@@ -465,6 +465,8 @@ pub enum PlatoonReport {
     },
     NoRoute,
     SetInPosition {
+        /// Not hull-down and with no view of the threat: needs moving, unlike `exposed`.
+        masked: u8,
         hull_down: u8,
         turret_down: u8,
         exposed: u8,
@@ -484,8 +486,9 @@ pub enum PlatoonReport {
         reaction: ai::picture::AmbushReaction,
     },
     /// Break-contact drill: screening and withdrawing away from `threat`.
+    /// `threat`: the nearest contact in the picture; None when falling back with none seen.
     BreakingContact {
-        threat: Vec2,
+        threat: Option<Vec2>,
     },
     Bounding {
         section: u8,

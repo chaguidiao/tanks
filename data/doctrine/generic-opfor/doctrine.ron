@@ -25,6 +25,8 @@
     engagement_range_m: (value: 2500.0, source: "estimate", confidence: estimate),
     halt_on_contact: false,
     bp_dispersion_m: (value: 90.0, source: "estimate", confidence: estimate),
+    no_effect_hits: (value: 3.0, source: "estimate", confidence: estimate, notes: "TC 3-20.31: the crew observes target effect and re-engages or shifts; the number of tries is ours. One or two can be bad luck (a hit on the thickest spot); three from an unchanged aspect show the round will not get through."),
+    no_effect_forget_s: (value: 60.0, source: "estimate", confidence: estimate, notes: "A target may have turned by then, and a new aspect may expose a weaker face."),
     prebattle_distance_m: (value: 4000.0, source: "FM 100-2-1 (1984): pre-battle formation ~4-6 km from the enemy", confidence: low),
     battle_distance_m: (value: 1500.0, source: "FM 100-2-1 (1984): battle formation ~1-2 km from the enemy", confidence: low),
     march_formation: column,

@@ -70,6 +70,10 @@ pub struct DoctrinePack {
     pub halt_on_contact: bool,
     /// Lateral spacing between vehicles in a battle position (m).
     pub bp_dispersion_m: Stat<f64>,
+    /// Hits without effect on one target before the crew shifts to another it can hurt.
+    pub no_effect_hits: Stat<f64>,
+    /// After this long without firing at it, the crew would try that target again (s).
+    pub no_effect_forget_s: Stat<f64>,
     /// Commander-level templates (OPFOR attack): distances to the objective at which the
     /// march column deploys to pre-battle and then battle formation (m).
     pub prebattle_distance_m: Stat<f64>,
