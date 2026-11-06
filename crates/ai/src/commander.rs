@@ -12,7 +12,9 @@
 //!
 //! Defend template (ATP 3-20.15 ch. 5): occupy the battle position oriented on the threat; with
 //! alternate positions the platoons displace to the next one when a fresh contact closes on the
-//! current one or the task has lost too many vehicles.
+//! current one or the task has lost too many vehicles. With a `counterattack` objective, a task
+//! on its last position goes back when the enemy reaches the objective (FM 3-90: counterattack to
+//! retake lost ground), so that giving ground does not give up the objective.
 //!
 //! Reserve (FM 3-90): hold an assembly position; committed as a counter-attack on the objective
 //! when the objective is contested or the side has lost too much.
@@ -414,7 +416,7 @@ impl Commander {
             }
             t.squad_plans = keep;
             match t.mission.clone() {
-                Mission::Defend { centre, radius_m, facing_deg, alternates } => {
+                Mission::Defend { centre, radius_m, facing_deg, alternates, counterattack } => {
                     let position = |i: usize| -> BattlePosition {
                         if i == 0 { BattlePosition { centre, radius_m, facing_deg } } else { alternates[i - 1].clone() }
                     };
@@ -430,6 +432,22 @@ impl Commander {
                                 _ => out.push(Order::Occupy { platoon: p, centre: c, radius: pos.radius_m, facing: f }),
                             }
                         }
+                    } else if let Some(def) = d.defence.as_ref()
+                        && let Some(name) = counterattack.as_ref()
+                        && t.bp_index > 0
+                        && t.bp_index == alternates.len()
+                        && pic.time_s - t.bp_since_s >= def.counterattack_hold_s.get()
+                        && objectives.iter().any(|o| {
+                            o.name == *name
+                                && fresh
+                                    .iter()
+                                    .any(|c| dist(*c, o.centre) < o.radius_m + def.counterattack_range_m.get())
+                        })
+                    {
+                        // FM 3-90: counterattack to retake lost ground. From here on, as with a
+                        // committed reserve, the task is an attack onto the objective.
+                        t.mission = Mission::Attack { axis: Vec::new(), objective: name.clone() };
+                        t.phase = Phase::Waiting;
                     } else if let Some(def) = d.defence.as_ref()
                         && t.bp_index < alternates.len()
                         && pic.time_s - t.bp_since_s >= def.displace_hold_s.get()

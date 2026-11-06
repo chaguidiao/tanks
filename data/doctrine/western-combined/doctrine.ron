@@ -52,6 +52,8 @@
         displace_hold_s: (value: 120.0, source: "estimate", confidence: estimate, notes: "Time to occupy the new position and re-orient before the next displacement."),
         reserve_commit_range_m: (value: 500.0, source: "estimate", confidence: estimate, notes: "Enemy on or just short of the objective: the reserve's decisive point."),
         reserve_commit_losses: (value: 0.25, source: "estimate", confidence: estimate, notes: "A quarter of the side out of action: the main effort is faltering."),
+        counterattack_range_m: (value: 150.0, source: "estimate", confidence: estimate, notes: "FM 3-90: counterattack to retake lost ground. The attacker is about to take the objective; he must be met before he has held it for two minutes (victory.rs). Narrower than the reserve's range, because the task has just fallen back on purpose."),
+        counterattack_hold_s: (value: 60.0, source: "estimate", confidence: estimate, notes: "Stops a task turning straight round when the trigger that made it displace is still true."),
     ),
     // Commander AI resupply and recovery (M8c; FM 17-15 (1996) / ATP 3-20.15 (2025) sustainment).
     logistics: (

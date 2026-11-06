@@ -55,6 +55,7 @@ fn defend_with_alternate() -> Mission {
         radius_m: 220.0,
         facing_deg: 0.0,
         alternates: vec![BattlePosition { centre: ALTERNATE, radius_m: 220.0, facing_deg: 0.0 }],
+        counterattack: None,
     }
 }
 
@@ -104,6 +105,61 @@ fn defenders_displace_after_losses_and_only_once_per_loss() {
     // No further alternate exists, and the same losses do not trigger a second move.
     run(&mut sim, 200.0);
     assert!(dist(centroid(&sim, BLUE, "1"), ALTERNATE) < 250.0);
+}
+
+/// Blue defends `PRIMARY` (the objective) with an alternate; a Red platoon drives onto the objective.
+fn counterattack_scenario(counterattack: Option<String>) -> Sim {
+    let ds = data();
+    let m = map(&ds, 500, 1000, "cropland", |_, _| 0.0);
+    let blue = blue_platoon(4, [PRIMARY[0] - 135.0, PRIMARY[1] - 100.0], "1");
+    let red = (0..2).map(|i| unit(&format!("R{i}"), "kurgan_b", [950.0 + i as f64 * 100.0, 2400.0], 180.0, Some("21")));
+    let mut sc = scenario(10 * 3600, blue, red.collect());
+    sc.objectives = vec![ObjectiveDef { name: "OBJ".into(), centre: PRIMARY, radius_m: 250.0 }];
+    let Mission::Defend { centre, radius_m, facing_deg, alternates, .. } = defend_with_alternate() else { panic!() };
+    let mission = Mission::Defend { centre, radius_m, facing_deg, alternates, counterattack };
+    sc.sides[0].ai = Some(AiPlan { tasks: vec![task(&["1"], mission)] });
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    hold_fire(&mut sim, BLUE);
+    hold_fire(&mut sim, RED);
+    sim
+}
+
+/// Run until the Blue platoon has fallen back, then put Red on the objective.
+fn displace_then_lose_the_objective(sim: &mut Sim) {
+    run(sim, 300.0);
+    assert!(dist(centroid(sim, BLUE, "1"), ALTERNATE) < 250.0, "displaced first");
+    let platoon = sim.perceived(RED).platoons[0].id;
+    sim.submit(
+        RED,
+        sim::Command::PlatoonMove {
+            platoon,
+            destination: PRIMARY,
+            via: vec![],
+            formation: None,
+            technique: sim_data::Technique::Traveling,
+            speed_limit_mps: None,
+        },
+    );
+    run(sim, 240.0);
+}
+
+#[test]
+fn a_displaced_task_counter_attacks_when_the_enemy_reaches_its_objective() {
+    // FM 3-90: counterattack to retake lost ground (PT22: defenders fell back and never returned).
+    let mut sim = counterattack_scenario(Some("OBJ".into()));
+    displace_then_lose_the_objective(&mut sim);
+    assert_ne!(sim.commander_phases(BLUE)[0], Phase::Defending, "the task has gone over to the attack");
+    let c = centroid(&sim, BLUE, "1");
+    assert!(dist(c, PRIMARY) < 300.0, "back on the objective: {c:?}");
+}
+
+#[test]
+fn without_a_counterattack_objective_the_task_stays_on_its_last_position() {
+    let mut sim = counterattack_scenario(None);
+    displace_then_lose_the_objective(&mut sim);
+    assert_eq!(sim.commander_phases(BLUE)[0], Phase::Defending);
+    let c = centroid(&sim, BLUE, "1");
+    assert!(dist(c, ALTERNATE) < 250.0, "stays: {c:?}");
 }
 
 fn reserve_scenario(red: Vec<sim_data::UnitDef>) -> Sim {
@@ -174,7 +230,13 @@ fn the_reserve_is_committed_by_losses_elsewhere() {
             ),
             task(
                 &["1"],
-                Mission::Defend { centre: [1000.0, 1300.0], radius_m: 200.0, facing_deg: 0.0, alternates: vec![] },
+                Mission::Defend {
+                    centre: [1000.0, 1300.0],
+                    radius_m: 200.0,
+                    facing_deg: 0.0,
+                    alternates: vec![],
+                    counterattack: None,
+                },
             ),
         ],
     });

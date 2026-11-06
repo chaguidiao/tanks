@@ -152,6 +152,11 @@ pub struct DefenceDoctrine {
     pub reserve_commit_range_m: Stat<f64>,
     /// ... or when the side has lost this fraction of its vehicles.
     pub reserve_commit_losses: Stat<f64>,
+    /// A displaced task with a `counterattack` objective goes back when a fresh contact is within
+    /// this distance of the objective's edge (m) ...
+    pub counterattack_range_m: Stat<f64>,
+    /// ... but not until this long after it was ordered to that position (s).
+    pub counterattack_hold_s: Stat<f64>,
 }
 
 /// When the commander AI calls its batteries (FM 6-20-30 / ATP 3-09.42: fire support is

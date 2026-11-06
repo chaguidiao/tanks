@@ -35,7 +35,13 @@ fn opfor_attack_against_a_defended_ridge_plays_to_endex() {
     sc.sides[0].ai = Some(AiPlan {
         tasks: vec![AiTask {
             platoons: vec!["1".into()],
-            mission: Mission::Defend { centre: [1000.0, 1420.0], radius_m: 250.0, facing_deg: 0.0, alternates: vec![] },
+            mission: Mission::Defend {
+                centre: [1000.0, 1420.0],
+                radius_m: 250.0,
+                facing_deg: 0.0,
+                alternates: vec![],
+                counterattack: None,
+            },
             start_s: 0.0,
             release_on_contact: false,
             latest_s: None,

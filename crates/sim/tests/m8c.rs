@@ -793,6 +793,7 @@ fn ai_defence(support: Vec<sim_data::UnitDef>, supply: Vec<SupplyPointDef>) -> (
                 radius_m: 150.0,
                 facing_deg: 0.0,
                 alternates: vec![],
+                counterattack: None,
             },
             start_s: 0.0,
             release_on_contact: false,

@@ -55,7 +55,8 @@
             ],
             ai: (tasks: [
                 (platoons: ["21", "22", "24"], mission: Defend(centre: (4500.0, 1000.0), radius_m: 250.0, facing_deg: 270.0,
-                    alternates: [(centre: (5100.0, 1400.0), radius_m: 220.0, facing_deg: 270.0)])),
+                    alternates: [(centre: (4300.0, 400.0), radius_m: 220.0, facing_deg: 340.0)],
+                    counterattack: "VILLAGE")),
                 (platoons: ["23"], mission: Reserve(assembly: (centre: (5700.0, 1500.0), radius_m: 150.0, facing_deg: 270.0), objective: "VILLAGE")),
             ]),
         ),

@@ -290,6 +290,7 @@ fn m2_defence() -> Sim {
                 radius_m: 150.0,
                 facing_deg: 0.0,
                 alternates: vec![],
+                counterattack: None,
             },
         )],
     });

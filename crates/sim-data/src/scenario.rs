@@ -171,6 +171,11 @@ pub enum Mission {
         facing_deg: f64,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         alternates: Vec<BattlePosition>,
+        /// Objective this task holds: once it has displaced to its last position and the enemy
+        /// reaches the objective, it counter-attacks onto it (FM 3-90: counterattack to retake
+        /// lost ground). None: it stays on its last position, as in a delay.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        counterattack: Option<String>,
     },
     /// Reconnaissance: move ahead of the main body along the axis, stop at the first contact (or
     /// at the end of the axis) and observe from the position (FM 3-98).
