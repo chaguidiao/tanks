@@ -157,7 +157,7 @@ The game screen is busy, but every part has one job. This chapter names each par
 
 ## Terrain
 
-::fig g-uplands-zoom | crop=0,30,1270,660 | pins=1@497,105;2@380,280;3@260,450;4@580,620;5@818,200;6@683,38 | Wooded uplands at 2.4 m per pixel.
+::fig g-uplands-zoom | crop=0,30,1270,660 | pins=1@497,105;2@120,520;3@380,280;4@580,620;5@818,200;6@683,38 | Wooded uplands at 2.4 m per pixel.
 
 | | Feature | How it is drawn |
 |---|---|---|
@@ -207,7 +207,7 @@ The symbols follow the NATO standard (APP-6 / MIL-STD-2525) in simplified form. 
 | Cross over a symbol | Destroyed. A single slash means damaged (mobility or firepower kill) |
 | Grey discs | Smoke clouds. They drift with the wind and thin out |
 
-::fig g-contacts-zoom | crop=560,180,480,260 | w=70 | Contacts after a Red column was engaged: destroyed tanks (crossed diamonds) labelled `KURGAN-B` and `TANK`, a yellow unknown contact (`UNK`), and grey smoke from the crews' self-screening grenades.
+::fig g-contacts-zoom | crop=560,180,480,260 | w=70 | Contacts after a Red column was engaged: destroyed tanks (crossed diamonds) labelled `KURGAN-B` and `TANK`, and grey smoke clouds beside them.
 
 Your own orders and control measures are drawn too: routes as lines with numbered checkpoints and an **X** at the destination, battle positions as circles with an arrow towards the threat, phase lines as long lines labelled **PL RED**, **PL BLUE** …. **Dashed** means "ordered, not yet acknowledged" (or a draft); **solid** means "being carried out".
 
@@ -304,7 +304,7 @@ The vehicle **status card** shows:
 
 Hover over a button for its tooltip, which repeats the scope:
 
-::fig x-tooltip | crop=996,752,552,22 | The tooltip of BATTLE POS.
+::fig x-tooltip | crop=842,752,756,22 | The tooltip of BATTLE POS.
 
 ## Move: right click
 

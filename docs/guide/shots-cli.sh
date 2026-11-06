@@ -21,7 +21,7 @@ true
 SEL="--select 1"
 shot g-overview $S $BPS $V $SEL
 for l in slope traffic cover; do shot g-layer-$l $S $V --layer $l; done
-shot g-contacts-zoom $S $BPS --advance 660 --zoom 1.1 --center 4600,5800 --select 2
+shot g-contacts-zoom $S $BPS --advance 620 --zoom 1.1 --center 4600,5800 --select 2
 shot g-status-card $S $BPS --advance 690 --zoom 2.4 --center 4700,5000 --select 2-2
 shot g-route-sent $S --order 1:4300,4000,4250,4500,4600,5000 --advance 2 --zoom 2.0 --center 4500,4400
 shot g-route-moving $S --order 1:4300,4000,4250,4500,4600,5000 --advance 45 --zoom 2.0 --center 4500,4400

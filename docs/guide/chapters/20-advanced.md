@@ -145,7 +145,7 @@ A code word counts only if it is sent *after* the platoon started waiting. Sendi
 | **Objective** (OBJ A, OBJ B …) | LMB the centre, LMB again for the radius | An area to attack or watch; plan waits can trigger on "enemy in OBJ A" |
 | **TRP** (TRP 1, 2 …) | LMB once | A *target reference point*: a recognisable spot used to describe targets and to trigger on |
 
-::fig x-pl-tool | crop=380,30,960,340 | w=80 | Drawing a phase line: three points placed, the fourth follows the mouse.
+::fig x-pl-tool | crop=380,30,890,340 | w=80 | Drawing a phase line: three points placed, the fourth follows the mouse.
 
 RMB on a graphic opens its menu: **MOVE TO** (orders the selection there), **CALL FOR FIRE ON**, **LOS FROM HERE**, **MOVE GRAPHIC** (the next left click puts it down there), **RADIUS +100 M** / **RADIUS -100 M** (objectives and battle positions), **TURN 45°** (battle positions), **DELETE**. A changed graphic keeps its name, and contingencies and plan waits that use it follow it.
 
@@ -314,7 +314,7 @@ Resupply one platoon at a time, behind cover, while the others hold.
 
 Some scenarios give a side a **supply platoon** (`SUP`): a cargo truck with ammunition and a fuel truck, shown with the supply symbol (a frame with a bar across its lower part). With trucks, resupply can come to the platoon instead (the **tailgate** method): select the platoon and press **RESUPPLY** (<kbd>R</kbd>); when there is more than one source, a short list asks which (**AT SP 1 (SERVICE STATION)** or **BY SUP (TAILGATE)**).
 
-::fig l-sources | crop=1360,615,240,260 | w=35 | RESUPPLY (R) with a supply point and a supply platoon: the source list opens above the card cell.
+::fig l-sources | crop=1340,615,260,260 | w=35 | RESUPPLY (R) with a supply point and a supply platoon: the source list opens above the card cell.
 
 The platoon holds where it is. The trucks drive to a point about 300 m behind it, then go from vehicle to vehicle, park close behind each one and hand over rounds and fuel at the same rates as a supply point. The platoon card shows `RESUPPLY BY SUP: 1 SERVED, 2 WAITING, 1 DONE`. A tank does not fire its main gun while its rounds are being loaded, but the rest of the platoon fights on. When they are done the trucks report what they have left and drive back: `SUP: RESUPPLY DONE, RETURNING. 120 RDS, 8300 L LEFT.`
 
@@ -342,7 +342,7 @@ A scenario can also bring a **LOGPAC** (logistics package) at a set time: `LOGPA
 
 Press **LOS** (<kbd>L</kbd>), click the observer point, then the target point. A green line means clear; a red line means **NO LOS**, with the range and bearing. A height profile of the ground between the points appears near the bottom of the screen.
 
-::fig x-los | crop=600,100,640,460 | w=70 | NO LOS over 1.1 km at 0746 mils: the village blocks the line.
+::fig x-los | crop=600,100,670,590 | w=70 | NO LOS over 1.1 km at 0746 mils: the village blocks the line.
 
 The observer's eye height is the selected vehicle's sight height (about 2.3 m for a tank); the target height is 2.4 m (a tank's turret roof). Trees, buildings and smoke are taken into account.
 

@@ -173,7 +173,7 @@ Evidence and context: `docs/PLAYTEST-2026-11-06.md`. Worked through 2026-11-06, 
 - [x] PT29 Should penetration scatter? **Decided 2026-11-06: no, it stays a hard threshold.** No usable public source for shot-to-shot spread on tank armour: the Lanz-Odermatt error figures (about 5 %, over 14 % in a later check) are model against test, not scatter; V50 work shows a mixed zone, but the one figure found is about 5 m/s for simple steel plate. PT20 already stops the waste. Revisit if a source turns up
 - [x] PT30 **Done 2026-11-06**: NO EFFECT setting, per leg and for the platoon now (`ShiftFire`: SHIFT FIRE by default, STAY ON), under ON CONTACT. No branch condition: it is not an event. Immobilised targets are not ranked lower (one that can still shoot is still a threat; crews cannot tell a mobility kill from a halt)
 - [x] PT31 **Done 2026-11-06**: a supply point calls the emptiest gun forward first; a vehicle called keeps its station, so nothing swaps mid-service
-- [ ] PT32 Regenerate the guide's screenshots (still from 0.1.1): start-up framing, radio, legend, briefing and the scenario list have changed
+- [x] PT32 Guide screenshots retaken 2026-11-07 for start-up framing, radio, legend, briefing and the scenario list. The shot scripts no longer rely on a platoon being selected at start; pins and crops checked on every figure
 - [ ] PT28 Still untested by hand: RECOVER (`O`), tank smoke rounds, engine smoke, contingency firing, branches, night and fog in the client, MARKET TOWN and the delay scenarios, terrain editor save, GL 2.1 build, fullscreen, edge pan
 
 ## M8d — Engineers and obstacles
