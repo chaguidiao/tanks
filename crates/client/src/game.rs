@@ -3311,16 +3311,18 @@ impl Game {
             format!("CONTACTS {}   KILLS {}", pic.live_contacts().count(), self.kills_seen.len()),
             style::TEXT_DIM,
         ));
-        let toggle = |label: &'static str| {
-            Button::new(Rect::new(x + W - 124.0, y + 5.0, 54.0, 20.0), Look::Bar, label, GameAction::ToggleInfo)
+        // Beside the second line when open, as the first can be as wide as the panel.
+        let toggle = |label: &'static str, row: f32| {
+            let r = Rect::new(x + W - 64.0, y + 5.0 + row * 22.0, 58.0, 20.0);
+            Button::new(r, Look::Bar, label, GameAction::ToggleInfo)
         };
         if self.info_hidden {
             // The map under the panel is clickable again; hotkeys and the plan still work.
             head.truncate(1);
-            let show = toggle("SHOW").tip("SHOW THE SELECTION PANEL");
+            let show = toggle("SHOW", 0.0).tip("SHOW THE SELECTION PANEL");
             return (Rect::new(x, y, W, 8.0 + LINE + 8.0), head, vec![show], Vec::new());
         }
-        rows.push(toggle("HIDE").tip("FOLD THIS PANEL TO REACH THE MAP UNDER IT"));
+        rows.push(toggle("HIDE", 1.0).tip("FOLD THIS PANEL TO REACH THE MAP UNDER IT"));
         let h = cy - y + 4.0 + foot.len() as f32 * LINE + 6.0;
         (Rect::new(x, y, W, h), head, rows, foot)
     }
