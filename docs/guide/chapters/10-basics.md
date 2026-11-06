@@ -265,6 +265,8 @@ With several platoons selected, the command card reads `PLATOON 1 + 2`. Orders g
 
 ## The selection panel
 
+**HIDE** folds the panel to its first line when you need the map under it, and **SHOW** opens it again.
+
 ::fig tour | crop=1274,36,322,290 | w=48 | A platoon selected: task (**OCCUPYING BATTLE POSITION**), formation, technique, speed, strength (`UP 4/4`), main-gun rounds, lowest fuel, then one row per vehicle, then the plan's checkpoints.
 ::fig g-status-card | crop=1274,36,322,300 | w=48 | One vehicle selected: its status card, which shows what the crew reports.
 

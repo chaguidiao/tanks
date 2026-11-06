@@ -177,6 +177,8 @@ pub enum GameAction {
     SelectUnit(EntityId),
     /// DATABASE on the selected vehicle's type.
     VehicleData,
+    /// Fold the selection panel to its first line, to reach the map under it.
+    ToggleInfo,
     Cmd(Cmd),
     /// Plan step list: select checkpoint `id`.
     PlanSelect(u16),
@@ -254,6 +256,7 @@ pub struct Game {
     /// Control groups 1..9 (Ctrl+Shift+N sets, Shift+N recalls): platoons, primary first.
     groups: Vec<Vec<PlatoonId>>,
     pub sel_unit: Option<EntityId>,
+    pub info_hidden: bool,
     pub paused: bool,
     pub speed: usize,
     pub tool: Tool,
@@ -360,6 +363,7 @@ impl Game {
             reticle: None,
             groups: vec![Vec::new(); 9],
             sel_unit: None,
+            info_hidden: false,
             paused: true,
             speed: 0,
             tool: Tool::None,
@@ -1250,6 +1254,7 @@ impl Game {
                     self.draft.clear();
                 }
             }
+            GameAction::ToggleInfo => self.info_hidden = !self.info_hidden,
             GameAction::VehicleData => {
                 fx.vehicle_data = self.sel_unit.and_then(|u| self.picture().unit(u)).map(|u| u.vehicle_id.clone());
             }
@@ -3306,6 +3311,16 @@ impl Game {
             format!("CONTACTS {}   KILLS {}", pic.live_contacts().count(), self.kills_seen.len()),
             style::TEXT_DIM,
         ));
+        let toggle = |label: &'static str| {
+            Button::new(Rect::new(x + W - 124.0, y + 5.0, 54.0, 20.0), Look::Bar, label, GameAction::ToggleInfo)
+        };
+        if self.info_hidden {
+            // The map under the panel is clickable again; hotkeys and the plan still work.
+            head.truncate(1);
+            let show = toggle("SHOW").tip("SHOW THE SELECTION PANEL");
+            return (Rect::new(x, y, W, 8.0 + LINE + 8.0), head, vec![show], Vec::new());
+        }
+        rows.push(toggle("HIDE").tip("FOLD THIS PANEL TO REACH THE MAP UNDER IT"));
         let h = cy - y + 4.0 + foot.len() as f32 * LINE + 6.0;
         (Rect::new(x, y, W, h), head, rows, foot)
     }

@@ -2097,6 +2097,24 @@ mod tests {
     }
 
     #[test]
+    fn hiding_the_selection_panel_frees_the_map_under_it() {
+        let mut g = game();
+        let (a, _) = platoons(&g);
+        select(&mut g, Some(a));
+        g.plan_add_cp([700.0, 800.0]);
+        g.plan_add_cp([800.0, 800.0]);
+        let screen = [1600.0, 900.0];
+        let open = g.info(screen).0;
+        g.act_now(GameAction::ToggleInfo);
+        let (folded, head, rows, foot) = g.info(screen);
+        assert!(folded.h < open.h / 3.0, "{folded:?} against {open:?}");
+        assert_eq!((head.len(), rows.len(), foot.len()), (1, 1, 0));
+        assert_eq!(g.panels(screen)[0].h, folded.h, "hit-testing follows");
+        g.act_now(GameAction::ToggleInfo);
+        assert_eq!(g.info(screen).0.h, open.h);
+    }
+
+    #[test]
     fn on_contact_now_orders_the_platoon_and_on_a_leg_edits_the_plan() {
         let mut g = game();
         let (a, _) = platoons(&g);
