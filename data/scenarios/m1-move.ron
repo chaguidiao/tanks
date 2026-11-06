@@ -2,7 +2,7 @@
 // the vehicles route across country, along roads and over bridges.
 (
     id: "m1-move",
-    name: "M1 - MOVEMENT",
+    name: "MOVEMENT PRACTICE",
     date: (1990, 6, 15),
     start_time_s: 21600, // 06:00
     map: (id: "demo", recipe: "rolling-farmland", seed: 42, size_m: 8000.0),
