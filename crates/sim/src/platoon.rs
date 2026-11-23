@@ -234,7 +234,8 @@ impl Platoon {
         self.members.iter().copied().filter(|&k| w.alive(k)).collect()
     }
 
-    pub fn view(&self, w: &World) -> PlatoonView {
+    /// `support_radius_m`: the side's built-up doctrine (`unsupported`).
+    pub fn view(&self, w: &World, support_radius_m: f64) -> PlatoonView {
         let task = match &self.order {
             PlatoonOrder::None | PlatoonOrder::Occupy { .. } if matches!(&self.plan, Some(st) if matches!(st.phase, crate::plan::Phase::Waiting { .. })) =>
             {
@@ -297,6 +298,7 @@ impl Platoon {
             contact_reaction: self.contact_reaction,
             ambush_reaction: self.ambush_reaction,
             built_up: self.built_up,
+            unsupported: crate::platoon_ai::unsupported(self, w, support_radius_m),
             shift_fire: self.shift_fire,
             ambushed_tick: (self.ambush_handled > 0).then_some(self.ambush_handled),
             queued: self.queue.len() as u8,

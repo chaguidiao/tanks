@@ -263,6 +263,9 @@ pub struct PlatoonView {
     pub contact_reaction: ContactReaction,
     pub ambush_reaction: AmbushReaction,
     pub built_up: BuiltUp,
+    /// Tanks without dismounted support: routes go round built-up ground unless the leg says
+    /// BUILT-UP ENTER (the planner's raster: `Sim::planning_speed`).
+    pub unsupported: bool,
     pub shift_fire: ShiftFire,
     /// Tick of the last close ambush the platoon reacted to.
     pub ambushed_tick: Option<u64>,

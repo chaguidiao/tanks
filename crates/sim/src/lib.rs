@@ -648,6 +648,15 @@ impl Sim {
         &self.data
     }
 
+    /// The speed raster a side's vehicle type plans routes on: its own, or with `avoid` the one
+    /// round built-up ground (`builtup`), as the platoon AI does. None = no mobility layer.
+    pub fn planning_speed(&self, side: SideId, vehicle_id: &str, avoid: bool) -> Option<&terrain::Grid<u8>> {
+        if avoid && let Some(g) = self.avoid.get(&(side.0, vehicle_id.to_string())) {
+            return Some(g);
+        }
+        Some(&self.map.mobility(vehicle_id)?.speed)
+    }
+
     /// The doctrine pack a side uses (its own data; the UI reads speed presets from it).
     pub fn doctrine(&self, side: SideId) -> Option<&sim_data::DoctrinePack> {
         self.sides.get(side.0 as usize).map(|s| &s.doctrine)
@@ -2048,8 +2057,9 @@ impl Sim {
     fn update_pictures(&mut self) {
         let weather = self.weather.view(&self.weather.at(self.clock_s(), &self.data.detection));
         for side in self.sides.iter_mut() {
+            let r = side.doctrine.infantry.built_up.support_radius_m.get();
             let views: Vec<_> =
-                self.platoons.iter().filter(|p| p.side == side.picture.side).map(|p| p.view(&self.world)).collect();
+                self.platoons.iter().filter(|p| p.side == side.picture.side).map(|p| p.view(&self.world, r)).collect();
             side.rebuild_own(&self.world, &self.vehicles, &self.squads, &self.round_labels, &views, self.tick);
         }
         for (dst, src) in self.pictures.iter_mut().zip(&self.sides) {

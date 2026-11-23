@@ -217,11 +217,12 @@ pub enum Look {
 #[derive(Default)]
 pub struct EtaCache {
     pf: Pathfinder,
-    /// (vehicle type, from and to in 10 m units) → (raster time s, length m); None = no route.
+    /// `LegKey` → (raster time s, length m); None = no route.
     legs: BTreeMap<LegKey, Option<(f64, f64)>>,
 }
 
-type LegKey = (String, [i64; 4]);
+/// (vehicle type, round built-up ground, from and to in 10 m units).
+type LegKey = (String, bool, [i64; 4]);
 
 /// (platoon, plan, step being executed, passed steps, look).
 type ShownPlan<'a> = (PlatoonId, &'a Plan, Option<u16>, &'a [u16], Look);
@@ -1240,8 +1241,16 @@ impl Game {
             return out;
         }
         let map = self.sim.map();
-        let Some(layer) = map.mobility(&lead.vehicle_id) else { return out };
+        // The rasters the platoon AI plans on: round built-up ground for tanks without
+        // dismounted support, unless a leg says BUILT-UP ENTER (sim::builtup).
+        let (Some(own), Some(round)) = (
+            self.sim.planning_speed(pic.side, &lead.vehicle_id, false),
+            self.sim.planning_speed(pic.side, &lead.vehicle_id, true),
+        ) else {
+            return out;
+        };
         let cell = map.manifest.cell_size_m;
+        let mut built_up = v.built_up;
         let dragging = self.plan_drag.is_some_and(|d| d.2);
         let mut cache = self.eta.borrow_mut();
         if cache.legs.len() > 512 {
@@ -1261,24 +1270,27 @@ impl Game {
                 Some(SpeedSetting::Limit(l)) => cap = Some(l),
                 None => {}
             }
+            if let Some(b) = s.leg.built_up {
+                built_up = b;
+            }
+            let avoid = v.unsupported && built_up == BuiltUp::Avoid;
+            let speed = if avoid { round } else { own };
             let vmax = (slowest * sim::platoon_ai::FORMATION_SPEED_FRACTION).min(cap.unwrap_or(f64::INFINITY));
             let leg = if i == first {
                 // From where the platoon is now: a straight line (cheap; it moves every frame).
                 let len = dist(at, s.at);
-                Some((segment_time(&layer.speed, cell, at, s.at).unwrap_or(0.0), len))
+                Some((segment_time(speed, cell, at, s.at).unwrap_or(0.0), len))
             } else {
                 let q = |x: f64| (x / 10.0).round() as i64;
-                let key = (lead.vehicle_id.clone(), [q(at[0]), q(at[1]), q(s.at[0]), q(s.at[1])]);
+                let key = (lead.vehicle_id.clone(), avoid, [q(at[0]), q(at[1]), q(s.at[0]), q(s.at[1])]);
                 match cache.legs.get(&key) {
                     Some(r) => *r,
                     None if dragging => None,
                     None => {
-                        let r = cache.pf.find(&layer.speed, cell, at, s.at).map(|path| {
+                        let r = cache.pf.find(speed, cell, at, s.at).map(|path| {
                             let len: f64 = path.windows(2).map(|w| dist(w[0], w[1])).sum();
-                            let rt: f64 = path
-                                .windows(2)
-                                .map(|w| segment_time(&layer.speed, cell, w[0], w[1]).unwrap_or(0.0))
-                                .sum();
+                            let rt: f64 =
+                                path.windows(2).map(|w| segment_time(speed, cell, w[0], w[1]).unwrap_or(0.0)).sum();
                             (rt, len)
                         });
                         cache.legs.insert(key, r);
@@ -1717,6 +1729,42 @@ mod tests {
         assert!(!squads.iter().any(|(l, _)| l == "FACE..." || l == "SMOKE SCREEN" || l == "DISMOUNT"), "{squads:?}");
         let open = at_cp(&mut g, p1d, [700.0, 1300.0]);
         assert!(open.contains(&("OCCUPY BUILDING".into(), false)), "no house near the CP: {open:?}");
+    }
+
+    #[test]
+    fn eta_legs_go_round_built_up_ground_like_the_sim() {
+        // A strip of village 400 m wide, 40 m deep across the second leg (TODO B35). Tanks without squads plan round
+        // it as the platoon AI does (sim::builtup); a leg set to BUILT-UP ENTER goes straight.
+        let ds = DataSet::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data")).unwrap();
+        let village = ds.terrain.landcover_id("village").unwrap();
+        let mut g = game_with(vec![unit("1-1", 700.0, "1")], |p| {
+            for j in 200..210 {
+                for i in 125..225 {
+                    p.landcover.set(i, j, village);
+                }
+            }
+        });
+        let p = g.picture().platoons[0].id;
+        assert!(g.picture().platoon(p).unwrap().unsupported);
+        select(&mut g, Some(p));
+        g.plan_add_cp([700.0, 500.0]);
+        g.plan_add_cp([700.0, 1500.0]);
+        g.sync_drafts();
+        let mut plan = g.plan.as_ref().unwrap().plan.clone();
+        let leg_len = |g: &Game, plan: &Plan, avoid: bool| {
+            g.eta.borrow_mut().legs.clear();
+            let eta = g.plan_etas(p, plan, None, &[]);
+            assert!(eta[1].starts_with("ETA "), "{eta:?}");
+            let cache = g.eta.borrow();
+            let (k, v) = cache.legs.iter().next().expect("the second leg is pathfound");
+            assert_eq!(k.1, avoid);
+            v.unwrap().1
+        };
+        let round = leg_len(&g, &plan, true);
+        plan.steps[1].leg.built_up = Some(BuiltUp::Enter);
+        let straight = leg_len(&g, &plan, false);
+        assert!(straight < 1020.0, "straight through: {straight:.0} m");
+        assert!(round > straight + 50.0, "round the village: {round:.0} m against {straight:.0} m");
     }
 
     #[test]

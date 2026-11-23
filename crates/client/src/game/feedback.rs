@@ -198,14 +198,17 @@ impl Game {
     /// Straight-line travel time of the selection's lead vehicle (an estimate: no pathfinding).
     fn ghost_time(&self, from: [f64; 2], to: [f64; 2]) -> Option<f64> {
         let pic = self.picture();
-        let id = match (self.sel_platoon, self.sel_unit) {
-            (Some(p), _) => *pic.platoon(p)?.members.first()?,
-            (None, u) => u?,
+        let (id, avoid) = match (self.sel_platoon, self.sel_unit) {
+            (Some(p), _) => {
+                let v = pic.platoon(p)?;
+                (*v.members.first()?, v.unsupported && v.built_up == sim::view::BuiltUp::Avoid)
+            }
+            (None, u) => (u?, false),
         };
         let u = pic.unit(id)?;
-        let map = self.sim.map();
-        let layer = map.mobility(&u.vehicle_id)?;
-        let rt = terrain::path::segment_time(&layer.speed, map.manifest.cell_size_m, from, to)?;
+        // The raster the platoon AI plans on (round built-up ground for unsupported tanks).
+        let speed = self.sim.planning_speed(pic.side, &u.vehicle_id, avoid)?;
+        let rt = terrain::path::segment_time(speed, self.sim.map().manifest.cell_size_m, from, to)?;
         Some(rt)
     }
 

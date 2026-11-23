@@ -104,15 +104,17 @@ impl<'a> Ctx<'a> {
 }
 
 /// Does the platoon route round built-up ground (plan M8F1-INFANTRY-AI §3; FM 3-06.11)? Tanks
-/// without dismounted support do, unless the leg says BUILT-UP ENTER; carriers and platoons with
-/// friendly squads on the ground close by do not.
+/// without dismounted support do, unless the leg says BUILT-UP ENTER.
 fn avoids_built_up(p: &Platoon, ctx: &Ctx) -> bool {
     use ai::picture::BuiltUp;
-    if p.built_up == BuiltUp::Enter || p.dismount {
-        return false;
-    }
-    let w = &ctx.world;
-    if p.members.iter().any(|&k| w.carrier[k].is_some()) {
+    let r = ctx.doctrines[p.side.0 as usize].infantry.built_up.support_radius_m.get();
+    p.built_up != BuiltUp::Enter && unsupported(p, ctx.world, r)
+}
+
+/// Tanks without dismounted support (FM 3-06.11): not a dismount platoon, no carriers, and no
+/// effective friendly squad on the ground within `support_radius_m` of the platoon.
+pub(crate) fn unsupported(p: &Platoon, w: &World, support_radius_m: f64) -> bool {
+    if p.dismount || p.members.iter().any(|&k| w.carrier[k].is_some()) {
         return false;
     }
     let alive = p.alive_members(w);
@@ -120,12 +122,11 @@ fn avoids_built_up(p: &Platoon, ctx: &Ctx) -> bool {
         return false;
     }
     let c = centroid(w, &alive);
-    let r = ctx.doctrines[p.side.0 as usize].infantry.built_up.support_radius_m.get();
     let supported = (0..w.len()).any(|q| {
         w.side[q] == p.side
             && w.alive(q)
             && w.squad[q].as_ref().is_some_and(|s| s.mounted_in.is_none() && !s.ineffective)
-            && dist(w.transform[q].pos, c) <= r
+            && dist(w.transform[q].pos, c) <= support_radius_m
     });
     !supported
 }
