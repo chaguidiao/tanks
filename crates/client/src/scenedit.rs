@@ -85,7 +85,7 @@ impl Page {
     fn fields(self) -> &'static [Field] {
         use Field as F;
         match self {
-            Page::Units => &[F::Side, F::Doctrine, F::TechYear, F::Vehicle, F::Squad, F::Platoon],
+            Page::Units => &[F::Side, F::Doctrine, F::TechYear, F::Vehicle, F::Squad, F::Platoon, F::Ammo, F::Fuel],
             Page::Fires => &[F::Side, F::Battery, F::BatteryType, F::BatteryHe, F::BatterySmoke],
             Page::Victory => &[F::VicOn, F::VicTime, F::VicObjective, F::VicAttacker, F::VicLoss],
             Page::Weather => {
@@ -104,6 +104,10 @@ pub enum Field {
     Vehicle,
     Squad,
     Platoon,
+    /// The selected vehicle's starting ammunition (`UnitDef::ammo_fraction`).
+    Ammo,
+    /// The selected vehicle's starting fuel (`UnitDef::fuel_fraction`).
+    Fuel,
     Year,
     Month,
     Day,
@@ -167,6 +171,16 @@ fn cycle<T: PartialEq>(list: &[T], cur: &T, dir: i8) -> usize {
 }
 
 /// Compass point of a bearing (deg), for the wind row.
+/// A starting ammunition or fuel fraction `dir` 10 % marks on (a value between marks, such as a
+/// hand-written 25 %, goes to the next mark that way): None is full, so a step up from 90 % gives
+/// None again and a step down from full gives 90 %; 0 % is the floor.
+fn step_fraction(v: Option<f64>, dir: i8) -> Option<f64> {
+    let x = v.unwrap_or(1.0) * 10.0;
+    let base = if dir > 0 { (x + 1e-6).floor() } else { (x - 1e-6).ceil() };
+    let tenths = base as i32 + i32::from(dir);
+    (tenths < 10).then(|| f64::from(tenths.max(0)) / 10.0)
+}
+
 fn compass(deg: f64) -> &'static str {
     const P: [&str; 8] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
     P[((deg.rem_euclid(360.0) + 22.5) / 45.0) as usize % 8]
@@ -703,6 +717,18 @@ impl ScenarioEditor {
                 }
                 unit.squad = Some(self.squad.clone());
             }
+            Field::Ammo | Field::Fuel => {
+                let Some(Sel::Unit(s, u)) = self.sel else {
+                    self.status = "SELECT A VEHICLE".into();
+                    return;
+                };
+                let unit = &mut self.def.sides[s].units[u];
+                if unit.squad.is_some() {
+                    return;
+                }
+                let v = if f == Field::Ammo { &mut unit.ammo_fraction } else { &mut unit.fuel_fraction };
+                *v = step_fraction(*v, dir);
+            }
             Field::Platoon => {
                 self.platoon[s] = Some(self.new_platoon());
                 self.status = format!("NEW PLATOON {}", self.platoon[s].as_deref().unwrap_or(""));
@@ -791,6 +817,8 @@ impl ScenarioEditor {
             Field::Vehicle => "VEHICLE",
             Field::Squad => "SQUAD",
             Field::Platoon => "PLATOON",
+            Field::Ammo => "AMMO",
+            Field::Fuel => "FUEL",
             Field::Year => "YEAR",
             Field::Month => "MONTH",
             Field::Day => "DAY",
@@ -822,6 +850,8 @@ impl ScenarioEditor {
                 "SQUAD TYPE I PLACES (ON A CARRIER UNDER THE CURSOR IT RIDES IN IT); ALSO SETS THE SELECTED SQUAD"
             }
             Field::Platoon => "START A NEW PLATOON FOR THE NEXT PLACED VEHICLE",
+            Field::Ammo => "SELECTED VEHICLE'S AMMUNITION AT THE START, 10 % STEPS (A UNIT THAT HAS ALREADY FOUGHT)",
+            Field::Fuel => "SELECTED VEHICLE'S FUEL AT THE START, 10 % STEPS",
             Field::Year => "SCENARIO YEAR: DECIDES WHICH VEHICLES EXIST",
             Field::Month => "SCENARIO MONTH: SUN AND DAY LENGTH",
             Field::Day => "SCENARIO DAY OF THE MONTH",
@@ -857,6 +887,14 @@ impl ScenarioEditor {
             Field::Vehicle => ds.vehicle(&self.vehicle).map_or("-".to_owned(), |v| v.name.to_uppercase()),
             Field::Squad => ds.squad(&self.squad).map_or("-".to_owned(), |q| q.name.to_uppercase()),
             Field::Platoon => self.platoon[self.side].as_deref().unwrap_or("-").to_owned(),
+            Field::Ammo | Field::Fuel => match self.sel {
+                Some(Sel::Unit(s, u)) if self.def.sides[s].units[u].squad.is_none() => {
+                    let unit = &self.def.sides[s].units[u];
+                    let v = if f == Field::Ammo { unit.ammo_fraction } else { unit.fuel_fraction };
+                    v.map_or("FULL".into(), |v| format!("{:.0} %", v * 100.0))
+                }
+                _ => "-".into(),
+            },
             Field::Year => self.def.date.0.to_string(),
             Field::Month => format!("{:02}", self.def.date.1),
             Field::Day => format!("{:02}", self.def.date.2),
@@ -1459,6 +1497,38 @@ mod tests {
     }
 
     #[test]
+    fn ammo_and_fuel_rows_set_the_selected_vehicle() {
+        // TODO C7: 10 % steps, full is no override, 0 % the floor; nothing without a selection.
+        let ds = DataSet::load(&data_dir()).unwrap();
+        let def = DataSet::load_scenario(&data_dir(), "m1-move").unwrap();
+        let mut ed = ScenarioEditor::new(def, &ds);
+        ed.sel = None;
+        ed.act(EdAction::Step(Field::Ammo, -1), &ds);
+        assert_eq!(ed.status, "SELECT A VEHICLE");
+        assert_eq!(ed.field_value(Field::Ammo, &ds), "-");
+        ed.sel = Some(Sel::Unit(0, 0));
+        assert_eq!(ed.field_value(Field::Ammo, &ds), "FULL");
+        for _ in 0..4 {
+            ed.act(EdAction::Step(Field::Ammo, -1), &ds);
+        }
+        assert_eq!(ed.def.sides[0].units[0].ammo_fraction, Some(0.6));
+        assert_eq!(ed.field_value(Field::Ammo, &ds), "60 %");
+        for _ in 0..12 {
+            ed.act(EdAction::Step(Field::Fuel, -1), &ds);
+        }
+        assert_eq!(ed.def.sides[0].units[0].fuel_fraction, Some(0.0));
+        for _ in 0..12 {
+            ed.act(EdAction::Step(Field::Fuel, 1), &ds);
+        }
+        assert_eq!(ed.def.sides[0].units[0].fuel_fraction, None, "back to full: no override");
+        assert_eq!(step_fraction(Some(0.25), 1), Some(0.3));
+        assert_eq!(step_fraction(Some(0.25), -1), Some(0.2));
+        assert_eq!(step_fraction(Some(0.3), 1), Some(0.4));
+        assert!(ed.unsaved);
+        assert!(ed.problems(&ds).is_empty(), "{:?}", ed.problems(&ds));
+    }
+
+    #[test]
     fn squads_go_into_carriers_or_on_the_ground() {
         let ds = DataSet::load(&data_dir()).unwrap();
         let def = DataSet::load_scenario(&data_dir(), "m1-move").unwrap();
@@ -1539,6 +1609,9 @@ mod tests {
         ] {
             ed.act(EdAction::Step(f, d), &ds);
         }
+        ed.sel = Some(Sel::Unit(0, 0));
+        ed.act(EdAction::Step(Field::Ammo, -3), &ds);
+        ed.act(EdAction::Step(Field::Fuel, -1), &ds);
         ed.place_battery([3000.0, 2000.0], &ds);
         ed.act(EdAction::Step(Field::BatteryHe, -1), &ds);
         ed.act(EdAction::Step(Field::BatteryType, 1), &ds);

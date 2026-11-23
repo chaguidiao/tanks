@@ -456,7 +456,7 @@ The panel on the left has four pages (<kbd>1</kbd>–<kbd>4</kbd> or click the t
 
 | Page | Rows |
 |---|---|
-| **1 UNITS** | Side, doctrine pack, tech year (pretend the side lives in another year), vehicle type, platoon |
+| **1 UNITS** | Side, doctrine pack, tech year (pretend the side lives in another year), vehicle type, squad type, platoon; ammo and fuel of the selected vehicle at the start, in 10 % steps (`FULL` = a full load; for a unit that has already fought) |
 | **2 TIME / WX** | Year, month, day, start time (30 min steps), weather preset (clear, haze, overcast, rain, fog, dust), wind direction and speed (drifts smoke), latitude, moon. Below: visibility, sun elevation and light at the start |
 | **3 FIRES** | The side's batteries: <kbd>B</kbd> places one at the cursor, LMB selects and drags it, <kbd>Del</kbd> removes it; rows pick the battery, its type and its HE and smoke stock. The selected battery shows its minimum and maximum range |
 | **4 VICTORY** | On / off, time limit, the objective the attacker must seize (alone on it for 2 minutes), the attacking side, and the share of its vehicles at which a side loses |

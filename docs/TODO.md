@@ -128,7 +128,7 @@ Plan: `docs/plans/M8B-AT-TEAMS.md`. Agreed 2026-10-24, with all 12 recommendatio
 - [ ] C5 (2026-10-31, slice 6 follow-ups) Supply trucks: refill at a supply point (`Command::Refill`, plan M8C-TAILGATE-TRUCKS §8 #4, deferred); ~~hide fighting orders (BATTLE POS, ENGAGE, AMMO, WEAPONS) on a truck platoon's card~~ (done 2026-11-23, also for recovery vehicles; context menu entries disabled); cargo editing in the scenario editor (plain RON `cargo` on the unit for now); a truck's own fuel is not refilled
 - [x] C4 Scenario re-arm events — 2026-10-23: `ScenarioDef.logistics` (rearm / refuel fraction per platoon, battery rounds) applied at their time as generated `Command::Logpac`; tests `m8c.rs`. Editing events in the scenario editor is not done (plain RON for now)
 - Note: no hard dependency on infantry (trucks and recovery vehicles are vehicles); placed here by priority and could move earlier.
-- [ ] C7 (2026-11-04) Scenario editor: `ammo_fraction` / `fuel_fraction` per unit (plain RON for now). (The guide's Infantry figures from the slice 9 note: done 2026-11-04, figures from `i-dismount`)
+- [x] C7 (2026-11-04) Scenario editor: `ammo_fraction` / `fuel_fraction` per unit (plain RON for now). **Done 2026-11-23**: AMMO and FUEL rows on the UNITS page for the selected vehicle, 10 % steps, FULL = no override; guide table updated. (The guide's Infantry figures from the slice 9 note: done 2026-11-04, figures from `i-dismount`)
 - Exit: a long scenario where ammunition decides the outcome; stock accounting tests. (Met 2026-11-04: `m8c-long-defence`, DESIGN.md §13.1 slice 9; stock accounting tests in `m8c.rs`. C1 stays open for its client follow-ups.)
 
 ## PT — Newcomer playtest findings (2026-11-06, version 0.1.3)
