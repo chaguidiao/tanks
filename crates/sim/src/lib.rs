@@ -1857,6 +1857,7 @@ impl Sim {
                     point: pi,
                     approach,
                     members: vec![logistics::ServiceState::waiting(); p.members.len()],
+                    arrived: false,
                 };
                 p.plan = None;
                 p.held = None;

@@ -55,10 +55,17 @@ fn a_platoon_drives_to_the_point_is_served_two_at_a_time_and_reports() {
     let radius = 40.0;
     let (mut report, mut most_at_point) = (None, 0);
     let (mut most_served, mut saw_waiting, mut saw_point) = (0, false, false);
+    let mut arrived = Vec::new();
     for s in 0..1200 {
         for e in run(&mut sim, 1.0) {
-            if let Event::PlatoonReport { report: PlatoonReport::Resupplied { complete }, .. } = e {
-                report = Some((s, complete));
+            match e {
+                Event::PlatoonReport { report: PlatoonReport::Resupplied { complete }, .. } => {
+                    report = Some((s, complete));
+                }
+                Event::PlatoonReport { report: PlatoonReport::AtSupplyPoint { point }, .. } => {
+                    arrived.push((s, point));
+                }
+                _ => {}
             }
         }
         let w = sim.truth();
@@ -77,6 +84,10 @@ fn a_platoon_drives_to_the_point_is_served_two_at_a_time_and_reports() {
         }
     }
     let (s, complete) = report.expect("resupply finishes within 20 minutes");
+    assert!(
+        arrived.len() == 1 && arrived[0].1 == sp.id && arrived[0].0 <= s,
+        "one AT SUPPLY POINT report, before RESUPPLY COMPLETE: {arrived:?}"
+    );
     assert!(complete, "the point holds enough fuel for four tanks");
     assert!(most_at_point <= 2, "two stations: at most two vehicles served at once ({most_at_point})");
     assert!(most_served == 2 && saw_waiting && saw_point, "the picture shows the stages ({most_served} served)");

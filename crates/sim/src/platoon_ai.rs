@@ -936,7 +936,7 @@ fn resupply_step(p: &mut Platoon, ctx: &mut Ctx) {
     let avoid = avoids_built_up(p, ctx);
     use crate::logistics::{Tables, transfer};
     use ai::picture::ServiceStage;
-    let PlatoonOrder::Resupply { point, approach, mut members } = p.order.clone() else { return };
+    let PlatoonOrder::Resupply { point, approach, mut members, mut arrived } = p.order.clone() else { return };
     let Some(sp_pos) = ctx.supply.get(point).map(|s| s.pos) else {
         p.order = PlatoonOrder::None;
         return;
@@ -996,12 +996,18 @@ fn resupply_step(p: &mut Platoon, ctx: &mut Ctx) {
             st.goal = goal;
         }
     }
+    // The platoon reports in once the point starts serving it (FM 17-15 (1996) ch. 7: report
+    // arrival at the LRP / service point).
+    if !arrived && members.iter().any(|m| matches!(m.stage, ServiceStage::Served)) {
+        arrived = true;
+        ctx.report(p, PlatoonReport::AtSupplyPoint { point: point as u32 });
+    }
     if members.iter().all(|m| m.done) {
         let complete = !members.iter().any(|m| m.short);
         p.order = PlatoonOrder::None;
         ctx.report(p, PlatoonReport::Resupplied { complete });
     } else {
-        p.order = PlatoonOrder::Resupply { point, approach, members };
+        p.order = PlatoonOrder::Resupply { point, approach, members, arrived };
     }
 }
 

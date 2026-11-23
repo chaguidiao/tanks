@@ -2167,6 +2167,17 @@ mod tests {
     }
 
     #[test]
+    fn the_roster_warns_at_the_resupply_thresholds() {
+        // TODO C1: the doctrine's thresholds (western-combined: ammo 60 %, fuel 50 %).
+        let low = UnitDef { ammo_fraction: Some(0.3), fuel_fraction: Some(0.4), ..unit("2-1", 900.0, "2") };
+        let g = game_with(vec![unit("1-1", 700.0, "1"), low], |_| {});
+        let rows = g.roster();
+        let value = |cs: &str| rows.iter().find(|r| r.0.starts_with(&format!("{cs} PLT"))).unwrap().1.clone();
+        assert!(!value("1").contains("LOW"), "{}", value("1"));
+        assert!(value("2").starts_with("AMMO FUEL LOW · "), "{}", value("2"));
+    }
+
+    #[test]
     fn hiding_the_selection_panel_frees_the_map_under_it() {
         let mut g = game();
         let (a, _) = platoons(&g);

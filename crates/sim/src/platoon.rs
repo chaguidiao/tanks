@@ -39,6 +39,9 @@ pub enum PlatoonOrder {
         point: usize,
         approach: f64,
         members: Vec<crate::logistics::ServiceState>,
+        /// The first vehicle has been served: the AT SUPPLY POINT report is out (not hashed:
+        /// it only gates that report).
+        arrived: bool,
     },
     /// Tailgate resupply by the supply trucks of platoon `trucks`: the platoon holds in its
     /// positions. One `ServiceState` per member (stage for the picture; `done`, `short`).

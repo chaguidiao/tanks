@@ -514,6 +514,11 @@ pub enum PlatoonReport {
         to: u16,
     },
     PlanComplete,
+    /// Service-station resupply: the first vehicle is being served at supply point `point`
+    /// (index in the picture's `supply_points` ids).
+    AtSupplyPoint {
+        point: u32,
+    },
     /// Resupply finished: `complete` = every vehicle full, else the point or the trucks ran short.
     Resupplied {
         complete: bool,

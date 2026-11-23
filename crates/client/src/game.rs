@@ -2754,6 +2754,9 @@ impl Game {
             if self.has_draft(pv.id) {
                 task = format!("DRAFT · {task}");
             }
+            if let Some(w) = self.supply_warning(pv) {
+                task = format!("{w} · {task}");
+            }
             rows.push((
                 format!("{} PLT  {}/{}", pv.callsign, n, pv.members.len()),
                 task,
@@ -2770,6 +2773,30 @@ impl Game {
             ));
         }
         rows
+    }
+
+    /// Roster warning when a platoon is at the side's resupply thresholds (doctrine `logistics`,
+    /// as the commander AI uses them: the platoon's rounds against its full load, its emptiest
+    /// tank's fuel): "AMMO", "FUEL" or "AMMO FUEL", then "LOW".
+    fn supply_warning(&self, pv: &sim::view::PlatoonView) -> Option<String> {
+        let lg = self.sim.doctrine(self.side)?.logistics.as_ref()?;
+        let pic = self.picture();
+        let alive: Vec<&OwnUnit> = pv
+            .members
+            .iter()
+            .filter_map(|m| pic.unit(*m))
+            .filter(|u| u.condition != Condition::Destroyed && u.squad.is_none())
+            .collect();
+        let full: u32 = alive.iter().map(|u| u.full_load).sum();
+        let ammo =
+            full > 0 && (alive.iter().map(|u| u.ammo).sum::<u32>() as f64 / full as f64) < lg.ammo_threshold.get();
+        let fuel = alive.iter().any(|u| u.fuel_fraction < lg.fuel_threshold.get());
+        match (ammo, fuel) {
+            (false, false) => None,
+            (true, false) => Some("AMMO LOW".into()),
+            (false, true) => Some("FUEL LOW".into()),
+            (true, true) => Some("AMMO FUEL LOW".into()),
+        }
     }
 
     /// Command card cells (index, button), StarCraft-style: a fixed 5 × 3 grid, with a
@@ -4018,6 +4045,10 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
             match report {
                 PlatoonReport::SetAt { pos } => format!("{cs}: SET AT GRID {}.", format::grid(*pos)),
                 PlatoonReport::NoRoute => format!("{cs}: UNABLE. NO ROUTE."),
+                PlatoonReport::AtSupplyPoint { point } => {
+                    let sp = pic.supply_points.iter().find(|s| s.id == *point).map(|s| s.callsign.clone());
+                    format!("{cs}: AT {}, TAKING ON SUPPLIES.", sp.unwrap_or_else(|| "SUPPLY POINT".into()))
+                }
                 PlatoonReport::Resupplied { complete: true } => format!("{cs}: RESUPPLY COMPLETE."),
                 PlatoonReport::LogpacReceived { refuel: true } => format!("{cs}: LOGPAC RECEIVED. REFUELLED."),
                 PlatoonReport::LogpacReceived { refuel: false } => format!("{cs}: LOGPAC RECEIVED. REARMED."),
