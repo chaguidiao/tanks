@@ -1306,6 +1306,9 @@ impl Game {
             self.revert_armed = false;
         }
         let selected = self.addressee().is_some();
+        if matches!(c, Cmd::BattlePosition | Cmd::Engage | Cmd::Weapons | Cmd::Ammo) && self.unarmed_selected() {
+            return;
+        }
         if self.tool == Tool::Viewshed && !matches!(c, Cmd::Viewshed) {
             fx.clear_overlay = true;
             self.viewshed_at = None;
@@ -1802,6 +1805,14 @@ impl Game {
     pub(crate) fn is_truck_platoon(&self, p: PlatoonId) -> bool {
         let pic = self.picture();
         pic.platoon(p).is_some_and(|pv| pv.members.iter().filter_map(|m| pic.unit(*m)).any(|u| u.cargo.is_some()))
+    }
+
+    /// The selection is supply trucks or recovery vehicles only (M8c): no gun to fight with, so
+    /// the card leaves out BATTLE POS, ENGAGE, WEAPONS and AMMO (TODO C5).
+    pub(crate) fn unarmed_selected(&self) -> bool {
+        let Some(to) = self.addressee() else { return false };
+        let units: Vec<&OwnUnit> = self.members_of(to).iter().filter_map(|m| self.picture().unit(*m)).collect();
+        !units.is_empty() && units.iter().all(|u| u.cargo.is_some() || u.recovery_vehicle)
     }
 
     /// A vehicle type with tow gear (M8c recovery).
@@ -3070,8 +3081,10 @@ impl Game {
                     })
             }),
         ];
+        let unarmed = self.unarmed_selected();
         cells
             .into_iter()
+            .filter(|(i, _)| !(unarmed && matches!(i, 2 | 3 | 11 | 13)))
             .map(|(i, mut btn)| {
                 let group = match i / hud::CARD_COLS {
                     0 => &orders,

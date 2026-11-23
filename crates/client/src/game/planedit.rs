@@ -2145,6 +2145,28 @@ mod tests {
     }
 
     #[test]
+    fn a_truck_platoon_card_has_no_fighting_orders() {
+        // TODO C5: supply trucks carry no gun, so BATTLE POS, ENGAGE, WEAPONS and AMMO are left
+        // off their card, and the hotkeys do nothing.
+        let truck = UnitDef { vehicle: "carter_c".into(), ..unit("9-1", 900.0, "9") };
+        let mut g = game_with(vec![unit("1-1", 700.0, "1"), truck], |_| {});
+        let id = |g: &Game, cs: &str| g.picture().platoons.iter().find(|p| p.callsign == cs).unwrap().id;
+        let fighting = ["BATTLE POS", "ENGAGE", "WEAPONS", "AMMO"];
+        let labels = |g: &Game| g.card().into_iter().map(|(_, b)| b.label).collect::<Vec<_>>();
+        let tanks = id(&g, "1");
+        select(&mut g, Some(tanks));
+        assert!(fighting.iter().all(|f| labels(&g).iter().any(|l| l == f)));
+        let trucks = id(&g, "9");
+        select(&mut g, Some(trucks));
+        assert!(g.unarmed_selected());
+        let shown = labels(&g);
+        assert!(fighting.iter().all(|f| !shown.iter().any(|l| l == f)), "{shown:?}");
+        assert!(shown.iter().any(|l| l == "MOVE"));
+        g.press(Cmd::BattlePosition);
+        assert_eq!(g.tool, Tool::None, "B does nothing for trucks");
+    }
+
+    #[test]
     fn hiding_the_selection_panel_frees_the_map_under_it() {
         let mut g = game();
         let (a, _) = platoons(&g);

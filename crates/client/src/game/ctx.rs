@@ -222,7 +222,13 @@ impl Game {
                 let cp = MenuItem::new("ADD CP", MenuAct::AddCp).key("P");
                 v.push(if sel.is_some() { cp } else { cp.disabled(no_unit) });
                 let bp = MenuItem::new("BATTLE POSITION HERE", MenuAct::BattlePositionHere).key("B");
-                v.push(if self.sel_platoon.is_some() { bp } else { bp.disabled("NO PLATOON SELECTED") });
+                v.push(if self.unarmed_selected() {
+                    bp.disabled("NOT A FIGHTING PLATOON")
+                } else if self.sel_platoon.is_some() {
+                    bp
+                } else {
+                    bp.disabled("NO PLATOON SELECTED")
+                });
                 let sm = MenuItem::new("SMOKE ROUNDS HERE", MenuAct::SmokeRoundAt).key("N");
                 v.push(if self.smoke_rounds(sel) > 0 { sm } else { sm.disabled("NO SMOKE ROUNDS") });
                 v.push(self.fire_item("CALL FOR FIRE").key("Y"));
@@ -276,7 +282,13 @@ impl Game {
                 let eng = MenuItem::new("ENGAGE", MenuAct::Engage(id)).key("A");
                 let sm = MenuItem::new("SMOKE ROUNDS ON", MenuAct::SmokeRoundAt).key("N");
                 let v = vec![
-                    if self.sel_unit.is_some() { eng } else { eng.disabled("NO VEHICLE SELECTED") },
+                    if self.unarmed_selected() {
+                        eng.disabled("NOT A FIGHTING VEHICLE")
+                    } else if self.sel_unit.is_some() {
+                        eng
+                    } else {
+                        eng.disabled("NO VEHICLE SELECTED")
+                    },
                     self.fire_item("CALL FOR FIRE ON"),
                     if self.smoke_rounds(sel) > 0 { sm } else { sm.disabled("NO SMOKE ROUNDS") },
                     {
