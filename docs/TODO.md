@@ -8,6 +8,7 @@ Rules for every item (CLAUDE.md): data in `data/**/*.ron` with source and confid
 
 ## Waiting on the user (decisions; check here first)
 Added 2026-10-21. Remove a line when it is decided, and record the decision on the item it belongs to.
+- (2026-11-24) Hand-play M8d (DELIBERATE BREACH) so it can go into 0.1.4 under the release scope rule; else 0.1.4 ships without it (K5)
 
 ## Phase map (v1.x = M8, v1.5 = M9, then v2+)
 
@@ -267,7 +268,7 @@ Run alongside the capability phases: each phase ends with at least one scenario 
 - [ ] K2 Code signing and notarisation; installer; Intel macOS; Linux AppImage — §13.1 packaging
 - K4 Release checkpoints (agreed 2026-10-31): a patch release `0.1.x` at the end of each M8 sub-phase (never mid-phase), `0.2.0` when the M8 capability phases are done (through M8f2); each release runs the checklist in `docs/DEVELOPMENT.md` Releases (balance batch, screenshots, docs pass, version bump, tag on `main`). `0.1.2` (2026-10-31) is the catch-up release for M8b, M8f1, M8g1, M8h1b and M8c C3; `0.1.3` (2026-11-04) ends M8c; the next is at the end of M8d.
 
-- [ ] K5 (2026-11-24) Release 0.1.4 (end of M8d): the K4 checklist, plus the docs gaps M8d left: README status (still says no engineers or obstacles, and calls logistics half built), guide reference chapter (`40-reference.md`: ON OBSTACLE keys C then O, scenario editor page 5 and X, KIT row), glossary (obstacle kinds, lane, breach, MLC, demolition), retake the `o-breach` guide shot (the scripted pointer leaves a REPLACES PLAN hint over the lane), rebuild the guide. M8d is validated by tests and the AI-vs-AI batch only, not by hand play (as PT28)
+- [ ] K5 (2026-11-24) Release 0.1.4 (end of M8d): the K4 checklist, plus the docs gaps M8d left: README status (still says no engineers or obstacles, and calls logistics half built), guide reference chapter (`40-reference.md`: ON OBSTACLE keys C then O, scenario editor page 5 and X, KIT row), glossary (obstacle kinds, lane, breach, MLC, demolition), retake the `o-breach` guide shot (the scripted pointer leaves a REPLACES PLAN hint over the lane), rebuild the guide. M8d is validated by tests and the AI-vs-AI batch only, not by hand play: under the release scope rule (DEVELOPMENT.md Releases, agreed 2026-11-24) it is out of 0.1.4 until the user has played DELIBERATE BREACH (obstacles, ON OBSTACLE, breach, lanes, demolitions, editor page 5). Revisit at the start of the next session
 
 ## ENG — Engine, performance, fidelity (pick up when touched)
 - [x] N1 Thermal crossover — §13.1 M2. Already built in M7c (`weather::thermal_factor`, `detection.ron` `thermal_crossover`, test `thermal_contrast_dips_at_crossover`); ticked 2026-10-21
