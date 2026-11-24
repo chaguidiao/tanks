@@ -8,7 +8,6 @@ Rules for every item (CLAUDE.md): data in `data/**/*.ron` with source and confid
 
 ## Waiting on the user (decisions; check here first)
 Added 2026-10-21. Remove a line when it is decided, and record the decision on the item it belongs to.
-- (2026-11-23) M8d plan review: `docs/plans/M8D-ENGINEERS.md` §8, decisions #1–#9
 
 ## Phase map (v1.x = M8, v1.5 = M9, then v2+)
 
@@ -178,7 +177,7 @@ Evidence and context: `docs/PLAYTEST-2026-11-06.md`. Worked through 2026-11-06, 
 - [ ] PT28 Still untested by hand: RECOVER (`O`), tank smoke rounds, engine smoke, contingency firing, branches, night and fog in the client, MARKET TOWN and the delay scenarios, terrain editor save, GL 2.1 build, fullscreen, edge pan
 
 ## M8d — Engineers and obstacles
-Plan: `docs/plans/M8D-ENGINEERS.md` (**draft 2026-11-23, waiting on review**: nine decisions in §8 with recommendations).
+Plan: `docs/plans/M8D-ENGINEERS.md` (agreed 2026-11-24, DESIGN.md §14 #40). **In progress.**
 - [ ] D1 Obstacles (ditch, wire, traps, abatis) as map features with run-time passage cost — §11, TERRAIN.md §5.7
 - [ ] D2 Minefields, mine plough/roller, breaching drill — §13.2
 - [ ] D3 Explicit bridges with MLC, fords, demolition; AI treats as chokepoints — TERRAIN.md §5.2, decision #11

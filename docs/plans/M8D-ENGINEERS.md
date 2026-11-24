@@ -1,6 +1,6 @@
 # M8d engineers and obstacles: design plan
 
-Status: **2026-11-23, draft for review** (TODO.md M8d: D1–D4, D6; exit scenario feeds I2). Nothing is built until the decisions in §8 are agreed. Release `0.1.4` follows the end of M8d (TODO K4).
+Status: **2026-11-24, agreed**: all nine recommendations in §8 accepted (DESIGN.md §14 #40). TODO.md M8d: D1–D4, D6; the exit scenario feeds I2. Release `0.1.4` follows the end of M8d (TODO K4).
 
 Goal: ground can be closed by obstacles and mines, opened again by breaching, and crossed at bridges and fords that can be lost. Tanks react to an obstacle as doctrine says, and the cost of crossing (time, exposure, a lane that funnels the attacker) shows up in play. Exit: a deliberate-breach scenario with scenario tests (with breaching assets the attack gets through, without them it stalls or detours), balance batch, golden hash unchanged for every scenario without obstacles.
 
