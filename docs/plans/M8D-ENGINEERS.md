@@ -1,6 +1,6 @@
 # M8d engineers and obstacles: design plan
 
-Status: **2026-11-24, agreed**: all nine recommendations in §8 accepted (DESIGN.md §14 #40). TODO.md M8d: D1–D4, D6; the exit scenario feeds I2. Release `0.1.4` follows the end of M8d (TODO K4).
+Status: **2026-11-24, built except D4** (§8a); all nine recommendations in §8 accepted (DESIGN.md §14 #40). TODO.md M8d: D1–D4, D6; the exit scenario feeds I2. Release `0.1.4` follows the end of M8d (TODO K4).
 
 Goal: ground can be closed by obstacles and mines, opened again by breaching, and crossed at bridges and fords that can be lost. Tanks react to an obstacle as doctrine says, and the cost of crossing (time, exposure, a lane that funnels the attacker) shows up in play. Exit: a deliberate-breach scenario with scenario tests (with breaching assets the attack gets through, without them it stalls or detours), balance batch, golden hash unchanged for every scenario without obstacles.
 
@@ -89,6 +89,16 @@ HE and main-gun hits on a building add damage against a per-class threshold (`da
 | 7 | Mine effects: random or fixed? | **Random per metre in the field from one seeded stream** (FM 20-32 encounter model); effect shares per mine type from data (`estimate` where no public figure) |
 | 8 | Obstacles built during the battle | **Out of scope** for M8d (TODO entry): every obstacle is placed by the scenario |
 | 9 | Exit scenario | **A deliberate breach on `uplands`**: a Blue tank company with two plough tanks and an engineer squad attacks through a covered obstacle belt (wire, minefield, ditch) held by a Red platoon; plus Red bridge demolition on a second scenario if D3 lands. Tests: with breaching assets Blue opens a lane within a set time and seizes; without them it bypasses or stalls |
+
+## 8a. Results and deviations (2026-11-24)
+
+- Built as planned: data (§1 sources read; FM 20-32 calibrates the encounter model), obstacle layer and per-side rasters, sighting, the drill, minefields, plough / roller / engineer breaching, client, scenario editor page, bridges with classes and demolitions, exit scenario. Results: DESIGN.md §13.1 M8d.
+- The CP action BREACH became the leg setting ON OBSTACLE: BREACH (same effect at the next obstacle on that leg, and it also works for a platoon told now).
+- A platoon with a plough or roller, or of engineers, defaults to BREACH (the breach force); every other platoon to BYPASS.
+- Moves plan round known obstacles only while the detour is acceptable (2.5x; 1.2x to reach a known lane when set to BREACH), else straight at them for the drill, so a known belt with no way round is breached or reported, not "NO ROUTE".
+- Followers in a plough or roller lane meet a tenth of the mines the kit missed (`lane_follow_factor`, estimate); lane width is at least 3 m either side in planning and physics alike, so a vehicle routed through lane cells is in the lane.
+- Generated bridges all get class 80 (no balance change); classes by road, fords, a bridge tool and demolitions in the editor are TODO D7-D9. Engineers breach only as a dismount platoon (D8).
+- D4 (building damage, rubble, push-through) was not attempted: the LOS height overlay was not built or measured (TODO D4).
 
 ## 9. Order of work (each about one commit)
 
