@@ -7,7 +7,9 @@
 //! the rows and `-` / `=` step the focused one. The panel is built by [`ScenarioEditor::buttons`]
 //! (the same layout for hit-testing and drawing) and every hotkey issues the same [`EdAction`].
 
-use sim_data::{BatteryAssign, DataSet, ObjectiveDef, ScenarioDef, SideDef, SupplyPointDef, UnitDef, VictoryDef};
+use sim_data::{
+    BatteryAssign, DataSet, ObjectiveDef, ObstacleDef, ScenarioDef, SideDef, SupplyPointDef, UnitDef, VictoryDef,
+};
 
 use crate::format;
 use crate::hud::{Button, Look, Rect};
@@ -31,6 +33,8 @@ enum Sel {
     Battery(usize, usize),
     /// Supply point (side, index).
     Supply(usize, usize),
+    /// Obstacle (side, index) (M8d).
+    Obstacle(usize, usize),
 }
 
 #[derive(Debug, Default)]
@@ -50,17 +54,19 @@ pub enum Page {
     Weather,
     Fires,
     Victory,
+    Obstacles,
 }
 
 impl Page {
-    pub const ALL: [Page; 4] = [Page::Units, Page::Weather, Page::Fires, Page::Victory];
+    pub const ALL: [Page; 5] = [Page::Units, Page::Weather, Page::Fires, Page::Victory, Page::Obstacles];
 
     fn label(self) -> &'static str {
         match self {
             Page::Units => "UNITS",
-            Page::Weather => "TIME / WX",
+            Page::Weather => "TIME/WX",
             Page::Fires => "FIRES",
             Page::Victory => "VICTORY",
+            Page::Obstacles => "OBST",
         }
     }
 
@@ -70,6 +76,7 @@ impl Page {
             Page::Weather => "2",
             Page::Fires => "3",
             Page::Victory => "4",
+            Page::Obstacles => "5",
         }
     }
 
@@ -79,13 +86,17 @@ impl Page {
             Page::Weather => "DATE, START TIME, WEATHER PRESET, WIND, LATITUDE AND MOON",
             Page::Fires => "FIRE SUPPORT: BATTERIES PER SIDE (B PLACES ONE AT THE CURSOR)",
             Page::Victory => "VICTORY CONDITIONS: TIME LIMIT, OBJECTIVE, ATTACKER, LOSS LIMIT",
+            Page::Obstacles => "OBSTACLES PER SIDE: DITCH, WIRE, ABATIS, TEETH, MINEFIELD (X AT EACH END)",
         }
     }
 
     fn fields(self) -> &'static [Field] {
         use Field as F;
         match self {
-            Page::Units => &[F::Side, F::Doctrine, F::TechYear, F::Vehicle, F::Squad, F::Platoon, F::Ammo, F::Fuel],
+            Page::Units => {
+                &[F::Side, F::Doctrine, F::TechYear, F::Vehicle, F::Squad, F::Platoon, F::Ammo, F::Fuel, F::Kit]
+            }
+            Page::Obstacles => &[F::Side, F::ObKind, F::ObMine, F::ObDensity, F::ObWidth],
             Page::Fires => &[F::Side, F::Battery, F::BatteryType, F::BatteryHe, F::BatterySmoke],
             Page::Victory => &[F::VicOn, F::VicTime, F::VicObjective, F::VicAttacker, F::VicLoss],
             Page::Weather => {
@@ -108,6 +119,16 @@ pub enum Field {
     Ammo,
     /// The selected vehicle's starting fuel (`UnitDef::fuel_fraction`).
     Fuel,
+    /// The selected vehicle's mine plough or roller (`UnitDef::kit`).
+    Kit,
+    /// Obstacle kind placed by X (sets the selected obstacle too).
+    ObKind,
+    /// Mine type of a minefield.
+    ObMine,
+    /// Mines per metre of front.
+    ObDensity,
+    /// Band width (a minefield's depth).
+    ObWidth,
     Year,
     Month,
     Day,
@@ -206,6 +227,12 @@ pub struct ScenarioEditor {
     pub status: String,
     /// Serving radius of a supply point (`logistics.ron`), for drawing.
     point_radius_m: f64,
+    /// Obstacle placed by X: kind id, mine type, mines per metre (M8d).
+    ob_kind: String,
+    ob_mine: String,
+    ob_density: f64,
+    /// First end of an obstacle being placed (X pressed once).
+    ob_start: Option<[f64; 2]>,
 }
 
 impl ScenarioEditor {
@@ -257,6 +284,10 @@ impl ScenarioEditor {
             unsaved: false,
             status: String::new(),
             point_radius_m: ds.logistics.point_radius_m.get(),
+            ob_kind: ds.obstacles.kinds.first().map_or_else(String::new, |k| k.id.clone()),
+            ob_mine: ds.obstacles.mines.first().map_or_else(String::new, |m| m.id.clone()),
+            ob_density: 0.5,
+            ob_start: None,
         }
     }
 
@@ -291,6 +322,15 @@ impl ScenarioEditor {
                 let dist = d(sp.position).min(d([sp.position[0], sp.position[1] + 16.0 * cam.mpp]));
                 if dist < PICK_PX && best.is_none_or(|(b, _)| dist < b) {
                     best = Some((dist, Sel::Supply(si, k)));
+                }
+            }
+            for (k, o) in side.obstacles.iter().enumerate() {
+                let m = cam.to_world(s);
+                let dm =
+                    o.points.windows(2).map(|w| sim::obstacles::seg_dist(m, w[0], w[1])).fold(f64::INFINITY, f64::min);
+                let dist = (dm / cam.mpp) as f32;
+                if dist < PICK_PX && best.is_none_or(|(b, _)| dist < b) {
+                    best = Some((dist, Sel::Obstacle(si, k)));
                 }
             }
         }
@@ -548,6 +588,13 @@ impl ScenarioEditor {
                 Some(Sel::Objective(k)) => self.def.objectives[k].centre = m,
                 Some(Sel::Battery(s, k)) => self.def.sides[s].fire_support[k].position = m,
                 Some(Sel::Supply(s, k)) => self.def.sides[s].supply_points[k].position = m,
+                Some(Sel::Obstacle(s, k)) => {
+                    let d = [inp.mouse_delta[0] as f64 * cam.mpp, -(inp.mouse_delta[1] as f64) * cam.mpp];
+                    for p in &mut self.def.sides[s].obstacles[k].points {
+                        p[0] += d[0];
+                        p[1] += d[1];
+                    }
+                }
                 None => {}
             }
             self.unsaved = true;
@@ -565,6 +612,9 @@ impl ScenarioEditor {
         }
         if inp.hit(Key::Char('b')) && !over_ui {
             self.place_battery(m, ds);
+        }
+        if inp.hit(Key::Char('x')) && !over_ui {
+            self.place_obstacle_point(m);
         }
         if inp.hit(Key::Char('o')) && !over_ui {
             let taken = |n: &str| self.def.objectives.iter().any(|o| o.name == n);
@@ -656,6 +706,10 @@ impl ScenarioEditor {
                 let gone = self.def.sides[s].supply_points.remove(k);
                 self.status = format!("REMOVED {}", gone.callsign);
             }
+            Some(Sel::Obstacle(s, k)) => {
+                let gone = self.def.sides[s].obstacles.remove(k);
+                self.status = format!("REMOVED {}", gone.kind.to_uppercase());
+            }
             None => return,
         }
         self.unsaved = true;
@@ -667,6 +721,7 @@ impl ScenarioEditor {
             EdAction::Page(p) => {
                 self.page = p;
                 self.focus = 0;
+                self.ob_start = None;
             }
             EdAction::Focus(d) => {
                 let n = self.page.fields().len().max(1) as i64;
@@ -720,6 +775,32 @@ impl ScenarioEditor {
                     return;
                 }
                 unit.squad = Some(self.squad.clone());
+            }
+            Field::Kit => {
+                let Some(Sel::Unit(s, u)) = self.sel else {
+                    self.status = "SELECT A VEHICLE".into();
+                    return;
+                };
+                let year = self.year();
+                let unit = &mut self.def.sides[s].units[u];
+                let mut list: Vec<Option<String>> = vec![None];
+                list.extend(
+                    ds.obstacles
+                        .kits
+                        .iter()
+                        .filter(|k| k.fits.contains(&unit.vehicle) && k.in_service.contains(year))
+                        .map(|k| Some(k.id.clone())),
+                );
+                if list.len() == 1 {
+                    self.status = "NO KIT FITS THIS VEHICLE".into();
+                    return;
+                }
+                unit.kit = list[cycle(&list, &unit.kit, dir)].clone();
+            }
+            Field::ObKind | Field::ObMine | Field::ObDensity | Field::ObWidth => {
+                if !self.step_obstacles(f, dir, ds) {
+                    return;
+                }
             }
             Field::Ammo | Field::Fuel => {
                 let Some(Sel::Unit(s, u)) = self.sel else {
@@ -823,6 +904,11 @@ impl ScenarioEditor {
             Field::Platoon => "PLATOON",
             Field::Ammo => "AMMO",
             Field::Fuel => "FUEL",
+            Field::Kit => "KIT",
+            Field::ObKind => "KIND",
+            Field::ObMine => "MINES",
+            Field::ObDensity => "DENSITY",
+            Field::ObWidth => "WIDTH",
             Field::Year => "YEAR",
             Field::Month => "MONTH",
             Field::Day => "DAY",
@@ -856,6 +942,13 @@ impl ScenarioEditor {
             Field::Platoon => "START A NEW PLATOON FOR THE NEXT PLACED VEHICLE",
             Field::Ammo => "SELECTED VEHICLE'S AMMUNITION AT THE START, 10 % STEPS (A UNIT THAT HAS ALREADY FOUGHT)",
             Field::Fuel => "SELECTED VEHICLE'S FUEL AT THE START, 10 % STEPS",
+            Field::Kit => "SELECTED TANK'S MINE PLOUGH OR ROLLER (KITS THAT FIT IT, IN SERVICE AT THE SIDE'S YEAR)",
+            Field::ObKind => {
+                "OBSTACLE KIND X PLACES (AND THE SELECTED OBSTACLE'S): DITCH, WIRE, ABATIS, TEETH, MINEFIELD"
+            }
+            Field::ObMine => "MINE TYPE OF A MINEFIELD (DATA/COMBAT/OBSTACLES.RON)",
+            Field::ObDensity => "MINES PER METRE OF FRONT (FM 20-32: 0.5 DISRUPT, 1.0 TURN, 1.1+ BLOCK)",
+            Field::ObWidth => "WIDTH OF THE BAND (A MINEFIELD'S DEPTH); DEFAULT = THE KIND'S",
             Field::Year => "SCENARIO YEAR: DECIDES WHICH VEHICLES EXIST",
             Field::Month => "SCENARIO MONTH: SUN AND DAY LENGTH",
             Field::Day => "SCENARIO DAY OF THE MONTH",
@@ -891,6 +984,16 @@ impl ScenarioEditor {
             Field::Vehicle => ds.vehicle(&self.vehicle).map_or("-".to_owned(), |v| v.name.to_uppercase()),
             Field::Squad => ds.squad(&self.squad).map_or("-".to_owned(), |q| q.name.to_uppercase()),
             Field::Platoon => self.platoon[self.side].as_deref().unwrap_or("-").to_owned(),
+            Field::Kit => match self.sel {
+                Some(Sel::Unit(s, u)) if self.def.sides[s].units[u].squad.is_none() => {
+                    let unit = &self.def.sides[s].units[u];
+                    unit.kit
+                        .as_deref()
+                        .map_or("NONE".into(), |k| ds.obstacles.kit(k).map_or(k.to_uppercase(), |d| d.name.clone()))
+                }
+                _ => "-".into(),
+            },
+            Field::ObKind | Field::ObMine | Field::ObDensity | Field::ObWidth => self.obstacle_value(f, ds),
             Field::Ammo | Field::Fuel => match self.sel {
                 Some(Sel::Unit(s, u)) if self.def.sides[s].units[u].squad.is_none() => {
                     let unit = &self.def.sides[s].units[u];
@@ -977,6 +1080,7 @@ impl ScenarioEditor {
             Page::Weather => lines.extend(self.weather_lines(ds)),
             Page::Fires => lines.extend(self.fires_lines(ds)),
             Page::Victory => lines.extend(self.victory_lines()),
+            Page::Obstacles => lines.extend(self.obstacle_lines()),
         }
         lines.extend(self.supply_lines(ds));
         lines.push((if self.unsaved { "UNSAVED  CTRL+S".to_owned() } else { "SAVED".to_owned() }, style::TEXT_DIM));
@@ -1097,6 +1201,38 @@ impl ScenarioEditor {
                     },
                 }
             }
+            for u in s.units.iter().filter(|u| u.kit.is_some()) {
+                let k = u.kit.as_deref().unwrap_or_default();
+                match ds.obstacles.kit(k) {
+                    None => out.push(format!("{}: UNKNOWN KIT", u.callsign)),
+                    Some(d) if !d.fits.contains(&u.vehicle) => {
+                        out.push(format!("{}: {} DOES NOT FIT", u.callsign, d.name))
+                    }
+                    Some(d) if !d.in_service.contains(year) => {
+                        out.push(format!("{} {} NOT IN SERVICE {year}", u.callsign, d.name))
+                    }
+                    _ => {}
+                }
+            }
+            for (k, o) in s.obstacles.iter().enumerate() {
+                let n = k + 1;
+                match ds.obstacles.kind(&o.kind) {
+                    None => out.push(format!("{} OBSTACLE {n}: UNKNOWN KIND", s.name)),
+                    Some(d) if d.vehicle == sim_data::VehicleRule::Mined && o.mines.is_empty() => {
+                        out.push(format!("{} OBSTACLE {n}: NO MINES", s.name))
+                    }
+                    _ => {}
+                }
+                for (id, _) in &o.mines {
+                    match ds.obstacles.mine(id) {
+                        None => out.push(format!("{} OBSTACLE {n}: UNKNOWN MINE", s.name)),
+                        Some(m) if !m.in_service.contains(year) => {
+                            out.push(format!("{} OBSTACLE {n}: {} NOT IN SERVICE {year}", s.name, m.name))
+                        }
+                        _ => {}
+                    }
+                }
+            }
             for b in &s.fire_support {
                 match ds.fires.battery(&b.battery) {
                     Some(d) if !d.in_service.contains(year) => {
@@ -1134,6 +1270,7 @@ impl ScenarioEditor {
 
     pub fn draw_world(&self, f: &mut Frame, cam: &Camera, ds: &DataSet) {
         self.draw_batteries(f, cam, ds);
+        self.draw_obstacles(f, cam, ds);
         for (k, o) in self.def.objectives.iter().enumerate() {
             let c = if self.sel == Some(Sel::Objective(k)) { style::SELECT } else { style::AMBER };
             let p = cam.to_screen(o.centre);
@@ -1205,6 +1342,7 @@ impl ScenarioEditor {
             Page::Weather => "CLICK OR + NEXT VALUE  - PREVIOUS  PGUP/PGDN FOCUS, - / = STEP",
             Page::Fires => "B PLACE BATTERY AT CURSOR  LMB SELECT/DRAG  DEL REMOVE",
             Page::Victory => "O OBJECTIVE AT CURSOR ([ ] RADIUS)  CLICK OR + NEXT VALUE  - PREVIOUS",
+            Page::Obstacles => "X AT ONE END, X AT THE OTHER: OBSTACLE OF THE SIDE  LMB SELECT/DRAG  DEL REMOVE",
         };
         f.text(
             &format!("{help}   1-{} PAGES  CTRL+S SAVE  F9 PLAY TEST  ESC MENU", Page::ALL.len()),
@@ -1453,6 +1591,175 @@ impl ScenarioEditor {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Obstacles (M8d): `SideDef.obstacles`, placed by X at each end.
+// ---------------------------------------------------------------------------------------------
+
+/// Density step of the minefield row (mines per metre of front).
+const DENSITY_STEP: f64 = 0.1;
+/// Width step of the band row (m).
+const WIDTH_STEP: f64 = 10.0;
+
+impl ScenarioEditor {
+    /// The selected obstacle, if it belongs to the side being edited.
+    fn obstacle_sel(&self) -> Option<usize> {
+        match self.sel {
+            Some(Sel::Obstacle(s, k)) if s == self.side => Some(k),
+            _ => None,
+        }
+    }
+
+    /// X: the first press marks one end, the second places the obstacle to the other end.
+    fn place_obstacle_point(&mut self, at: [f64; 2]) {
+        let Some(a) = self.ob_start.take() else {
+            self.ob_start = Some(at);
+            self.status = format!("{}: X AT THE OTHER END", self.ob_kind.to_uppercase());
+            return;
+        };
+        if ((at[0] - a[0]).powi(2) + (at[1] - a[1]).powi(2)).sqrt() < 10.0 {
+            self.status = "OBSTACLE TOO SHORT".into();
+            return;
+        }
+        let mines = if self.ob_kind == "minefield" { vec![(self.ob_mine.clone(), self.ob_density)] } else { vec![] };
+        let side = self.side;
+        self.def.sides[side].obstacles.push(ObstacleDef {
+            kind: self.ob_kind.clone(),
+            points: vec![a, at],
+            width_m: None,
+            height_m: None,
+            mines,
+        });
+        self.sel = Some(Sel::Obstacle(side, self.def.sides[side].obstacles.len() - 1));
+        self.status = format!("{} PLACED", self.ob_kind.to_uppercase());
+        self.unsaved = true;
+    }
+
+    /// Step an obstacle row: the placing default, and the selected obstacle with it. False if
+    /// nothing changed.
+    fn step_obstacles(&mut self, f: Field, dir: i8, ds: &DataSet) -> bool {
+        let year = self.year();
+        let sel = self.obstacle_sel();
+        match f {
+            Field::ObKind => {
+                let list: Vec<&str> = ds.obstacles.kinds.iter().map(|k| k.id.as_str()).collect();
+                if list.is_empty() {
+                    return false;
+                }
+                self.ob_kind = list[cycle(&list, &self.ob_kind.as_str(), dir)].to_owned();
+                if let Some(k) = sel {
+                    let (kind, mine, density) = (self.ob_kind.clone(), self.ob_mine.clone(), self.ob_density);
+                    let o = &mut self.def.sides[self.side].obstacles[k];
+                    o.kind = kind;
+                    o.width_m = None;
+                    o.mines = if o.kind == "minefield" { vec![(mine, density)] } else { vec![] };
+                }
+            }
+            Field::ObMine => {
+                let list: Vec<&str> =
+                    ds.obstacles.mines.iter().filter(|m| m.in_service.contains(year)).map(|m| m.id.as_str()).collect();
+                if list.is_empty() {
+                    return false;
+                }
+                self.ob_mine = list[cycle(&list, &self.ob_mine.as_str(), dir)].to_owned();
+                if let Some(k) = sel {
+                    let mine = self.ob_mine.clone();
+                    for m in &mut self.def.sides[self.side].obstacles[k].mines {
+                        m.0 = mine.clone();
+                    }
+                }
+            }
+            Field::ObDensity => {
+                let cur = sel.and_then(|k| self.def.sides[self.side].obstacles[k].mines.first().map(|m| m.1));
+                let d = (cur.unwrap_or(self.ob_density) + DENSITY_STEP * f64::from(dir)).clamp(0.1, 3.0);
+                self.ob_density = (d * 10.0).round() / 10.0;
+                if let Some(k) = sel {
+                    let density = self.ob_density;
+                    for m in &mut self.def.sides[self.side].obstacles[k].mines {
+                        m.1 = density;
+                    }
+                }
+            }
+            Field::ObWidth => {
+                let Some(k) = sel else {
+                    self.status = "SELECT AN OBSTACLE".into();
+                    return false;
+                };
+                let o = &mut self.def.sides[self.side].obstacles[k];
+                let base = ds.obstacles.kind(&o.kind).map_or(10.0, |d| d.width_m.get());
+                let w = (o.width_m.unwrap_or(base) + WIDTH_STEP * f64::from(dir)).clamp(2.0, 500.0);
+                o.width_m = ((w - base).abs() > 1e-6).then_some(w);
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn obstacle_value(&self, f: Field, ds: &DataSet) -> String {
+        let sel = self.obstacle_sel().map(|k| &self.def.sides[self.side].obstacles[k]);
+        let kind = sel.map_or(self.ob_kind.as_str(), |o| o.kind.as_str());
+        let mined = kind == "minefield";
+        match f {
+            Field::ObKind => ds.obstacles.kind(kind).map_or(kind.to_uppercase(), |k| k.name.clone()),
+            Field::ObMine if !mined => "-".into(),
+            Field::ObMine => {
+                let id = sel.and_then(|o| o.mines.first().map(|m| m.0.as_str())).unwrap_or(self.ob_mine.as_str());
+                ds.obstacles.mine(id).map_or(id.to_uppercase(), |m| m.name.clone())
+            }
+            Field::ObDensity if !mined => "-".into(),
+            Field::ObDensity => {
+                let d = sel.and_then(|o| o.mines.first().map(|m| m.1)).unwrap_or(self.ob_density);
+                format!("{d:.1} / M")
+            }
+            Field::ObWidth => match sel {
+                Some(o) => {
+                    let base = ds.obstacles.kind(&o.kind).map_or(0.0, |d| d.width_m.get());
+                    format!("{:.0} M{}", o.width_m.unwrap_or(base), if o.width_m.is_none() { " (KIND)" } else { "" })
+                }
+                None => "-".into(),
+            },
+            _ => String::new(),
+        }
+    }
+
+    fn obstacle_lines(&self) -> Vec<(String, Rgba)> {
+        let n: Vec<String> = self.def.sides.iter().map(|s| format!("{} {}", s.name, s.obstacles.len())).collect();
+        let mut out = vec![(format!("OBSTACLES   {}", n.join("   ")), style::TEXT_DIM)];
+        if self.ob_start.is_some() {
+            out.push(("X AT THE OTHER END TO PLACE IT".into(), style::AMBER));
+        }
+        out
+    }
+
+    /// Obstacles of both sides, as the game draws them (side 1 friendly, side 2 hostile colour).
+    fn draw_obstacles(&self, f: &mut Frame, cam: &Camera, ds: &DataSet) {
+        for (si, side) in self.def.sides.iter().enumerate() {
+            let c = if si == 0 { style::FRIENDLY } else { style::HOSTILE };
+            for (k, o) in side.obstacles.iter().enumerate() {
+                let kd = ds.obstacles.kind(&o.kind);
+                let view = sim::view::ObstacleView {
+                    id: k as u32,
+                    kind: o.kind.clone(),
+                    name: kd.map_or(o.kind.to_uppercase(), |d| d.name.clone()),
+                    points: o.points.clone(),
+                    width_m: o.width_m.unwrap_or_else(|| kd.map_or(10.0, |d| d.width_m.get())),
+                    own: si == 0,
+                    lanes: Vec::new(),
+                };
+                let sel = self.sel == Some(Sel::Obstacle(si, k));
+                symbols::obstacle(f, cam, &view, if sel { style::SELECT } else { c });
+                if sel {
+                    for p in &o.points {
+                        f.circle_lines(cam.to_screen(*p), 5.0, style::SELECT);
+                    }
+                }
+            }
+        }
+        if let Some(a) = self.ob_start {
+            f.circle(cam.to_screen(a), 4.0, style::AMBER);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1530,6 +1837,46 @@ mod tests {
         assert_eq!(step_fraction(Some(0.3), 1), Some(0.4));
         assert!(ed.unsaved);
         assert!(ed.problems(&ds).is_empty(), "{:?}", ed.problems(&ds));
+    }
+
+    #[test]
+    fn obstacles_and_kits_are_placed_and_edited() {
+        // M8d: X at each end places an obstacle of the side; the rows edit the selected one.
+        let ds = DataSet::load(&data_dir()).unwrap();
+        let def = DataSet::load_scenario(&data_dir(), "m1-move").unwrap();
+        let mut ed = ScenarioEditor::new(def, &ds);
+        ed.act(EdAction::Page(Page::Obstacles), &ds);
+        while ed.ob_kind != "minefield" {
+            ed.act(EdAction::Step(Field::ObKind, 1), &ds);
+        }
+        ed.place_obstacle_point([1000.0, 2000.0]);
+        assert!(ed.def.sides[0].obstacles.is_empty(), "one end only");
+        ed.place_obstacle_point([1400.0, 2000.0]);
+        let o = &ed.def.sides[0].obstacles[0];
+        assert_eq!((o.kind.as_str(), o.points.len()), ("minefield", 2));
+        assert_eq!(o.mines.len(), 1);
+        ed.act(EdAction::Step(Field::ObDensity, 1), &ds);
+        assert!((ed.def.sides[0].obstacles[0].mines[0].1 - 0.6).abs() < 1e-9);
+        ed.act(EdAction::Step(Field::ObWidth, -1), &ds);
+        assert_eq!(ed.def.sides[0].obstacles[0].width_m, Some(90.0));
+        ed.act(EdAction::Step(Field::ObKind, 1), &ds);
+        assert!(ed.def.sides[0].obstacles[0].mines.is_empty(), "no longer a minefield");
+        // A plough on the first tank (bulwark_a1, 1990).
+        ed.sel = Some(Sel::Unit(0, 0));
+        ed.act(EdAction::Step(Field::Kit, 1), &ds);
+        assert!(ed.def.sides[0].units[0].kit.is_some());
+        assert!(ed.problems(&ds).is_empty(), "{:?}", ed.problems(&ds));
+        // Saved and loaded back as it was.
+        let tmp = std::env::temp_dir().join(format!("tanks-scenedit-ob-{}", std::process::id()));
+        std::fs::create_dir_all(tmp.join("scenarios")).unwrap();
+        ed.prepare_save();
+        DataSet::save_scenario(&tmp, &ed.def).unwrap();
+        let back = DataSet::load_scenario(&tmp, &ed.def.id).unwrap();
+        assert_eq!(dump(&back), dump(&ed.def));
+        // Deleted with DEL.
+        ed.sel = Some(Sel::Obstacle(0, 0));
+        ed.delete_selected();
+        assert!(ed.def.sides[0].obstacles.is_empty());
     }
 
     #[test]
