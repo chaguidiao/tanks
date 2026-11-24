@@ -77,6 +77,7 @@ shot h-dusk --scenario mod-dusk-attack
 shot i-dismount --scenario m8b-dismounts --select 1-D --press U --advance 45 --zoom 0.5 --center 4560,3620
 # ---- logistics (LONG DEFENCE)
 shot l-rear --scenario m8c-long-defence --advance 3 --zoom 1.0 --center 3900,3000
+shot o-breach --scenario m8d-deliberate-breach --plan 1:3300,1250,4000,1250 --advance 800 --zoom 2.0 --center 3550,1250
 shot l-sources --scenario m8c-long-defence --advance 3 --zoom 1.4 --center 4250,3800 --select 1 --press R
 true
 # ---- tour

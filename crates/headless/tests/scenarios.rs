@@ -5,7 +5,7 @@
 
 use std::process::Command;
 
-const SCENARIOS: [&str; 7] = [
+const SCENARIOS: [&str; 8] = [
     "cw-village-defence",
     "cw-night-delay",
     "cw-hasty-attack",
@@ -13,6 +13,7 @@ const SCENARIOS: [&str; 7] = [
     "mod-dusk-attack",
     "mod-delay-in-depth",
     "m8c-long-defence",
+    "m8d-deliberate-breach",
 ];
 
 fn run(id: &str) -> String {

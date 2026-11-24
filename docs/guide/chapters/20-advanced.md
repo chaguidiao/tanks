@@ -336,6 +336,31 @@ The recovery vehicle is armoured, but unarmed, and it does not count for victory
 
 A scenario can also bring a **LOGPAC** (logistics package) at a set time: `LOGPAC RECEIVED. REARMED.` or `REFUELLED.` The rounds and fuel arrive at once, wherever the platoon is. The scenario editor's supply points (<kbd>S</kbd>) and the RON file's `logistics` list set both up.
 
+# Obstacles and breaching
+
+Some scenarios put **obstacles** on the ground: anti-tank ditches, wire, abatis (felled trees), dragon's teeth and minefields, each a band along a line. Your own are on the map from the start in your colour; the enemy's appear in his colour once one of your units sees them (a ditch or wall from well over a kilometre, wire at a few hundred metres, buried mines only from about 50 m) or runs into them. Each carries its name (`AT DITCH`, `WIRE`, `MINES`), so colour is never the only cue.
+
+| Kind | Tanks | Men on foot |
+|---|---|---|
+| **AT DITCH** | Stopped, unless the ditch is narrower than the tank's trench crossing and shallower than its step (most are not) | Slowed |
+| **WIRE** | Drive through it, slowly | Stopped until a lane is cut |
+| **ABATIS**, **TEETH** | Stopped | Slowed |
+| **MINES** | Drive in at their peril: a strike usually immobilises a tank, sometimes destroys it | Not affected (only anti-tank mines are modelled) |
+
+Routes are planned round the obstacles you know of. A platoon that meets one on its route halts short of it and reports (`1: OBSTACLE, MINEFIELD, GRID 0358 0121. BREACHING.`); what it does next is its **ON OBSTACLE** setting (under ON CONTACT, <kbd>C</kbd> then <kbd>O</kbd>, for the platoon now or for one leg of a plan):
+
+- **BYPASS** (the default): it goes round if the way round is no more than about two and a half times the route it had left; otherwise `NO BYPASS. HOLDING SHORT OF OBSTACLE.`
+- **BREACH**: a tank with a **mine plough** or **mine roller** (shown on its status card as `KIT`) drives to a point 100 m short of the obstacle and cuts a 4.5 m **lane** across it to 100 m past it, at about 9 km/h; the rest of the platoon halts and watches. A roller is wrecked after two mines. Then the platoon goes through the lane in column (`LANE OPEN AT GRID ... MOVING THROUGH.`). Platoons with a plough or roller, and platoons of engineers, breach by default. Engineer squads cut a lane by hand: wire in a couple of minutes, abatis in a quarter of an hour, a minefield at about 4 m a minute, and not while they are pinned down.
+- **HALT**: it halts short and waits for orders.
+
+A platoon halted at an obstacle goes on by itself once a lane through it is open, whoever cut it. The plan branch condition **OBSTACLE** lets a plan switch to another route when the platoon meets one.
+
+Obstacles are meant to be **covered by fire**: the defender watches them, and a breach under fire is costly. Do it as the manuals say: suppress the defenders (overwatch, artillery), obscure the breach with smoke, then reduce the obstacle and push through.
+
+**Bridges** carry a load class (MLC, shown when zoomed in on a bridge that has its own). A tank heavier than the class does not plan over it. A defender may have a bridge prepared for demolition: it is blown at a set time, on a code word, or when the enemy comes close, and the drill then plans round to another crossing.
+
+::fig o-breach | crop=480,150,780,560 | w=70 | A plough tank's lane through a minefield (two lines), and the platoon going through it.
+
 # Terrain analysis
 
 ## Line of sight (L)

@@ -610,6 +610,18 @@ impl Sim {
         };
         let code_words: Vec<Vec<String>> = sides.iter().map(|s| s.doctrine.code_words.clone()).collect();
         let obstacle_field = obstacles::ObstacleField::new(scenario, &data.obstacles, &map, &kits, &code_words)?;
+        // A platoon given a plough or roller, or of engineers, is the breach force: its default
+        // reaction to an obstacle is to breach it (ATP 3-90.4 deliberate breach; every other
+        // platoon bypasses by default).
+        for p in platoons.iter_mut() {
+            let engineers = p
+                .members
+                .iter()
+                .any(|&k| world.squad[k].as_ref().is_some_and(|s| squads.get(s.def).is_some_and(|d| d.engineer)));
+            if engineers || p.members.iter().any(|k| obstacle_field.kits.contains_key(k)) {
+                p.obstacle_reaction = ai::picture::ObstacleReaction::Breach;
+            }
+        }
         let mut sim = Self {
             tick: 0,
             map,

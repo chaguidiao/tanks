@@ -177,13 +177,17 @@ Evidence and context: `docs/PLAYTEST-2026-11-06.md`. Worked through 2026-11-06, 
 - [ ] PT28 Still untested by hand: RECOVER (`O`), tank smoke rounds, engine smoke, contingency firing, branches, night and fog in the client, MARKET TOWN and the delay scenarios, terrain editor save, GL 2.1 build, fullscreen, edge pan
 
 ## M8d — Engineers and obstacles
-Plan: `docs/plans/M8D-ENGINEERS.md` (agreed 2026-11-24, DESIGN.md §14 #40). **In progress.**
-- [ ] D1 Obstacles (ditch, wire, traps, abatis) as map features with run-time passage cost — §11, TERRAIN.md §5.7
-- [ ] D2 Minefields, mine plough/roller, breaching drill — §13.2
-- [ ] D3 Explicit bridges with MLC, fords, demolition; AI treats as chokepoints — TERRAIN.md §5.2, decision #11
-- [ ] D4 Building damage → rubble; tanks pushing through light walls (uses H8; narrow streets moved to H10) — TERRAIN.md §5.4, §13.1 M6
-- [ ] D6 Editor placement of obstacles and mines
-- Exit: breach scenario; planner honours capability; mobility and mine-effect tests.
+Plan: `docs/plans/M8D-ENGINEERS.md` (agreed 2026-11-24, DESIGN.md §14 #40). **Done 2026-11-24 except D4** (DESIGN.md §13.1 M8d).
+- [x] D1 Obstacles (ditch, wire, traps, abatis) as map features with run-time passage cost — §11, TERRAIN.md §5.7. Done 2026-11-24: a scenario layer per side (decision #1), stops and slows in physics, per-side planning rasters, sighting, react-to-obstacle drill
+- [x] D2 Minefields, mine plough/roller, breaching drill — §13.2. Done 2026-11-24: FM 20-32 encounter model, plough and roller kits, engineer hand breach, lanes, ON OBSTACLE and OBSTACLE branch
+- [x] D3 Explicit bridges with MLC, fords, demolition; AI treats as chokepoints — TERRAIN.md §5.2, decision #11. Done 2026-11-24 (bridges with classes, authored classes, demolitions; the drill re-plans round a blown bridge). Fords and the rest: D7-D9
+- [ ] D4 Building damage → rubble; tanks pushing through light walls (uses H8; narrow streets moved to H10) — TERRAIN.md §5.4, §13.1 M6. **Not attempted in M8d** (decision #6 made it the last slice, conditional on the LOS height overlay costing under 10 % on the Z5 benchmark; the overlay was not built or measured). Next step: prototype the runtime height overlay on `Ground`, run `tanks-headless bench`, then decide
+- [x] D6 Editor placement of obstacles and mines. Done 2026-11-24: scenario editor page 5 OBST (X at each end; kind, mines, density, width), KIT row on UNITS
+- [ ] D7 (2026-11-24) Fords as labelled features (depth, bottom) on the map; today a shallow river is fordable but not marked
+- [ ] D8 (2026-11-24) Editors: a terrain editor bridge tool (authored class), demolitions in the scenario editor (plain RON `demolitions` for now), engineer squads breaching from inside a carrier platoon (today only a dismount platoon of engineers breaches)
+- [ ] D9 (2026-11-24) Generator: bridge classes by road class (changes v1 maps: re-run the balance batch); line charges (MICLIC class), AVLB and CEV; obstacles built during the battle (decision #8); scatterable mines
+- [ ] D10 (2026-11-24) AI: defending commanders site obstacles and cover them; attacking commanders plan the breach (SOSRA: support by fire, smoke, then reduce) instead of relying on the platoon drill; a blown bridge as a planned chokepoint
+- Exit (met 2026-11-24): `m8d-deliberate-breach`, with and without kits (`crates/headless/tests/m8d.rs`); planner honours known obstacles and bridge classes; mobility, mine and breach tests (`crates/sim/tests/m8d.rs`, `crates/terrain/tests/bridges.rs`).
 
 ## M8e — Recon, UAS, communications
 - [ ] E1 Cheap UAS reconnaissance feeding the picture (via `PerceivedWorld` only) — §13.2
