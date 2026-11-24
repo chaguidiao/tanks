@@ -1627,6 +1627,7 @@ mod tests {
             cargo: None,
             ammo_fraction: None,
             fuel_fraction: None,
+            kit: None,
         }
     }
 
@@ -1660,6 +1661,7 @@ mod tests {
             ai: None,
             fire_support: vec![],
             supply_points: vec![],
+            obstacles: vec![],
         };
         let sc = ScenarioDef {
             id: "t".into(),

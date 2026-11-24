@@ -77,6 +77,13 @@ A reading list grouped by subsystem. ★ = read first. Public sources only — n
 - Launcher and round data, `low`, from Wikipedia: [RPG-7](https://en.wikipedia.org/wiki/RPG-7) (rocket table; the 1976 US Army 5 x 2.5 m moving-panel hit table), [RPG-18](https://en.wikipedia.org/wiki/RPG-18), [RPG-26](https://en.wikipedia.org/wiki/RPG-26), [M72 LAW](https://en.wikipedia.org/wiki/M72_LAW) (FM 3-23.25 and FM 7-7 figures; effective range = hit chance one half), [M47 Dragon](https://en.wikipedia.org/wiki/M47_Dragon) (Dragon II 1988, 610 mm), [9K111 Fagot](https://en.wikipedia.org/wiki/9K111_Fagot), [9M133 Kornet](https://en.wikipedia.org/wiki/9M133_Kornet), [FGM-148 Javelin](https://en.wikipedia.org/wiki/FGM-148_Javelin). Fetched 2026-10-28.
 - ATGM performance: Sagger 1973 (Iyer 1995, via [Wikipedia, MCLOS](https://en.wikipedia.org/wiki/Manual_command_to_line_of_sight)); Javelin in Ukraine, 100 hits from 112 shots ([National Interest](https://nationalinterest.org/node/213728)); system data from [CSIS Missile Threat](https://missilethreat.csis.org/missile/fgm-148-javelin/) and the Wikipedia articles on the Dragon, Fagot, Kornet, Kontakt-5 and AT4, plus [GlobalSecurity AT-7](https://www.globalsecurity.org/military/world/russia/at-7.htm) (`low`).
 
+## Engineers, obstacles and mines (M8d; plan docs/plans/M8D-ENGINEERS.md)
+- ★ **FM 20-32, *Mine/Countermine Operations*** (1998, changes 1-3 to 2002) — linear and area density, standard row minefields (figs. 6-10 to 6-12), probability of encounter and kill by obstacle effect (ch. 2-3), mine plough and roller paths and speeds, lane width and marking, manual breaching (ch. 10). Read from the archive.org full text (November 2026); tables G-1/G-2 not yet read.
+- **FM 3-34.2, *Combined-Arms Breaching Operations*** (2000) — SOSRA, breach organisation; **ATP 3-90.4, *Combined Arms Mobility*** (2016) — breaching, bypass, gap crossing.
+- **FM 90-7, *Combined Arms Obstacle Integration*** (1994, C1 2003) and **ATP 3-90.8, *Combined Arms Countermobility Operations*** (2021) — obstacle effects (disrupt, fix, turn, block), obstacles covered by fire.
+- USMC The Basic School, *Engineering in the Offense and Defense* (B3L4038) — anti-tank ditch criteria (wider than 2.8 m, deeper than 1.5 m).
+- **Military load classification**: DTIC AD1151141 (*Military Load Classification*, 2021 briefing) and the Wikipedia article (read November 2026) — a tracked vehicle's class is close to its weight in short tons; STANAG 2021 corrects for width.
+
 ## Line of sight & terrain algorithms
 - **Franklin & Ray**, "Higher isn't necessarily better: visibility algorithms and experiments" (1994) — R2, XDraw.
 - **Van Kreveld**, "Variations on sweep algorithms: efficient computation of extended viewsheds and class intervals" (1996).

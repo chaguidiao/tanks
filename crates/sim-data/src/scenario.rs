@@ -214,6 +214,29 @@ pub struct SideDef {
     /// Supply points the side's platoons can be sent to (M8c, service-station resupply).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub supply_points: Vec<SupplyPointDef>,
+    /// Obstacles the side has built (M8d): known to it from the start, to the enemy once seen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub obstacles: Vec<ObstacleDef>,
+}
+
+/// An obstacle placed for a side (docs/plans/M8D-ENGINEERS.md §2): a band along a line, its kind
+/// from `data/combat/obstacles.ron`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ObstacleDef {
+    /// Obstacle kind id (`ditch`, `wire`, `abatis`, `teeth`, `minefield`).
+    pub kind: String,
+    /// The line of the obstacle (local map metres), at least two points; a minefield's line is
+    /// its front, the field lying across it.
+    pub points: Vec<[f64; 2]>,
+    /// Width of the band across the line (a minefield's depth), else the kind's default (m).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width_m: Option<f64>,
+    /// Depth of a ditch or height of a wall, else the kind's default (m).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height_m: Option<f64>,
+    /// Minefields: (mine type id, linear density in mines per metre of front; FM 20-32 ch. 2).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mines: Vec<(String, f64)>,
 }
 
 /// A supply point placed for a side: a scenario item with a stock, not an entity
@@ -283,6 +306,9 @@ pub struct UnitDef {
     /// Starts with this fraction of its fuel. None = full.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fuel_fraction: Option<f64>,
+    /// Mine plough or roller fitted (`data/combat/obstacles.ron` kits; M8d breaching).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kit: Option<String>,
 }
 
 /// Cargo listed for one supply truck in a scenario: replaces the default fill (rounds its side

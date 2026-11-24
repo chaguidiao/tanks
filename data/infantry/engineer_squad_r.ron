@@ -1,0 +1,78 @@
+// Red combat engineer squad (plan M8D-ENGINEERS §3): a sapper squad that opens lanes through
+// wire, abatis and minefields by hand (FM 100-2-1 (1984) engineer support; FM 20-32 (1998) ch. 10
+// for the work itself). Armed and sighted as the motorised rifle squad; the engineer work is the
+// `engineer` flag and the breach rates in data/combat/obstacles.ron.
+(
+    id: "engineer_squad_r",
+    name: "SAPPER SQUAD",
+    mirrors: "Soviet combat engineer (sapper) squad, BTR/BMP-mounted (FM 100-2-3, 1991)",
+    in_service: (from: 1966),
+    men: 7,
+    weapons: [
+        (name: "ASSAULT RIFLES", count: 4,
+            rounds_per_burst: (value: 3.0, source: "FM 100-2-3 (1991); estimate as for Blue rifles", confidence: low),
+            burst_interval_s: (value: 10.0, source: "estimate as for Blue rifles", confidence: estimate),
+            max_range_m: (value: 500.0, source: "FM 100-2-3 (1991): AK-74/AKM effective range about 500 m", confidence: low),
+            dispersion_mrad: (value: 6.0, source: "Hitchman, ORO-T-160 (1952) x Rowland (JORS 1987, 1991), as for Blue rifles", confidence: low, notes: "Same combat aiming error as Blue rifles."),
+            bursts: 70),
+        (name: "LIGHT MG (RPK)", count: 1,
+            rounds_per_burst: (value: 4.0, source: "estimate", confidence: estimate, notes: "Magazine-fed: short bursts."),
+            burst_interval_s: (value: 6.0, source: "estimate", confidence: estimate),
+            max_range_m: (value: 800.0, source: "FM 100-2-3 (1991): RPK about 800 m", confidence: low),
+            dispersion_mrad: (value: 5.0, source: "estimate", confidence: estimate),
+            bursts: 110),
+        (name: "7.62 MM MG (PK)", count: 1,
+            rounds_per_burst: (value: 8.0, source: "estimate as for the M60", confidence: estimate),
+            burst_interval_s: (value: 5.0, source: "estimate as for the M60", confidence: estimate),
+            max_range_m: (value: 1000.0, source: "FM 100-2-3 (1991): PK/PKM about 1000 m", confidence: low),
+            dispersion_mrad: (value: 5.0, source: "estimate", confidence: estimate),
+            bursts: 90),
+    ],
+    sensors: [
+        (name: "EYES", kind: optical, in_service: (from: 1900),
+            cycles_per_mrad: (value: 1.7, source: "estimate: visual acuity of about 1 arcminute per detail", confidence: estimate)),
+        (name: "BINOCULARS", kind: optical, in_service: (from: 1900),
+            field_of_view_deg: (value: 8.5, source: "open-source summaries (6x30 and 7x50 military binoculars, 2026): 7-8.5 deg", confidence: low),
+            cycles_per_mrad: (value: 4.0, source: "estimate", confidence: estimate, notes: "6x-8x glasses used by the squad leader part of the time.")),
+        (name: "NIGHT WEAPON SIGHT", kind: night_channel, in_service: (from: 1965, to: 1974),
+            field_of_view_deg: (value: 6.0, source: "estimate", confidence: estimate, notes: "Early Soviet weapon night sight (NSP-2 class), narrow field."),
+            cycles_per_mrad: (value: 0.5, source: "estimate", confidence: estimate),
+            max_range_m: (value: 300.0, source: "FM 100-2-3 (1991): NSP-3 / NSPU class weapon night sights", confidence: low)),
+        (name: "NIGHT WEAPON SIGHT (1PN58 CLASS)", kind: night_channel, in_service: (from: 1975),
+            field_of_view_deg: (value: 5.0, source: "estimate", confidence: estimate, notes: "Passive weapon sight (NSPU class), about 5 deg."),
+            cycles_per_mrad: (value: 0.7, source: "estimate (calibration notes §3)", confidence: low,
+                notes: "1PN58 (early 1970s): detection 970 m, recognition 400 m under starlight (target type not given). 1975 is an estimate for issue."),
+            max_range_m: (value: 400.0, source: "1PN58 recognition range under starlight (Wikipedia, 1PN58)", confidence: low)),
+    ],
+    signature: (
+        moving: (
+            width_m: (value: 1.5, source: "plan M8B-INFANTRY §3; estimate", confidence: estimate, notes: "A group of two or three men in view at once."),
+            height_m: (value: 1.8, source: "estimate", confidence: estimate),
+            man_area_m2: (value: 0.5, source: "estimate", confidence: estimate, notes: "Crouched rushes rather than a 0.75 m2 standing man."),
+            eye_height_m: (value: 1.6, source: "estimate", confidence: estimate)),
+        halted: (
+            width_m: (value: 1.0, source: "estimate", confidence: estimate, notes: "Kneeling and prone men among cover."),
+            height_m: (value: 0.6, source: "estimate", confidence: estimate),
+            man_area_m2: (value: 0.15, source: "estimate", confidence: estimate, notes: "Kneeling (0.45 m2) and prone (0.15 m2) men who show themselves only part of the time, to observe and fire."),
+            eye_height_m: (value: 0.7, source: "estimate", confidence: estimate)),
+        dug_in: (
+            width_m: (value: 0.8, source: "estimate", confidence: estimate),
+            height_m: (value: 0.3, source: "estimate", confidence: estimate, notes: "Head and shoulders above the parapet."),
+            man_area_m2: (value: 0.06, source: "estimate", confidence: estimate, notes: "Head and shoulders, exposed only to fire."),
+            eye_height_m: (value: 0.5, source: "estimate", confidence: estimate)),
+        in_building: (
+            width_m: (value: 0.6, source: "plan M8B-INFANTRY §3; estimate", confidence: estimate, notes: "A window."),
+            height_m: (value: 0.8, source: "estimate", confidence: estimate),
+            man_area_m2: (value: 0.1, source: "estimate", confidence: estimate, notes: "Head and shoulders in a window or firing port, part of the time."),
+            eye_height_m: (value: 1.5, source: "estimate", confidence: estimate, notes: "Above the floor; upper floors add a storey each.")),
+    ),
+    dig_in_s: (value: 1200.0, source: "estimate", confidence: estimate,
+        notes: "Hasty fighting positions and use of folds in the ground after about 20 minutes halted."),
+    body_armour: [
+        (name: "FRAGMENT VEST (6B2/6B3 CLASS), PART ISSUE", in_service: (from: 1985),
+            bullet_factor: (value: 1.0, source: "calibration notes §3", confidence: low, notes: "Fragment protection only."),
+            fragment_factor: (value: 0.95, source: "estimate (calibration notes §3)", confidence: estimate,
+                notes: "6B2/6B3 in Afghanistan, 6B5 from 1985, issued only in part and still partial in 2005: a third of the Blue effect.")),
+    ],
+    engineer: true,
+)

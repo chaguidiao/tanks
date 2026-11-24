@@ -33,6 +33,9 @@ pub struct SquadDef {
     /// Anti-armour weapons (rockets and missiles) by period (plan M8B-AT-TEAMS §2.1).
     #[serde(default)]
     pub anti_armour: Vec<AntiArmourDef>,
+    /// Combat engineers: open lanes through obstacles by hand (plan M8D-ENGINEERS §3).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub engineer: bool,
 }
 
 impl SquadDef {

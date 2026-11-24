@@ -439,10 +439,12 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                             cargo: None,
                             ammo_fraction: None,
                             fuel_fraction: None,
+                            kit: None,
                         }],
                         ai: None,
                         fire_support: vec![],
                         supply_points: vec![],
+                        obstacles: vec![],
                     },
                     SideDef {
                         name: "B".into(),
@@ -459,10 +461,12 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                             cargo: None,
                             ammo_fraction: None,
                             fuel_fraction: None,
+                            kit: None,
                         }],
                         ai: None,
                         fire_support: vec![],
                         supply_points: vec![],
+                        obstacles: vec![],
                     },
                 ],
                 objectives: vec![],
@@ -605,6 +609,7 @@ fn detect(ds: &DataSet, a: &Args) -> Result<(), String> {
         cargo: None,
         ammo_fraction: None,
         fuel_fraction: None,
+        kit: None,
     };
     let side = |name: &str, doctrine: &str, u: UnitDef| SideDef {
         name: name.into(),
@@ -614,6 +619,7 @@ fn detect(ds: &DataSet, a: &Args) -> Result<(), String> {
         ai: None,
         fire_support: vec![],
         supply_points: vec![],
+        obstacles: vec![],
     };
     // The observer is a vehicle, or a squad (its eyes, binoculars and night devices).
     let observer_squad = ds.squad(&observer).is_some();
@@ -785,6 +791,7 @@ fn firefight(ds: &DataSet, a: &Args) -> Result<(), String> {
         cargo: None,
         ammo_fraction: None,
         fuel_fraction: None,
+        kit: None,
     };
     let side = |name: &str, doctrine: &str, u: UnitDef| SideDef {
         name: name.into(),
@@ -794,6 +801,7 @@ fn firefight(ds: &DataSet, a: &Args) -> Result<(), String> {
         ai: None,
         fire_support: vec![],
         supply_points: vec![],
+        obstacles: vec![],
     };
     let mut csv = String::from(
         "posture,range_m,weapons,guns,trials,p_engaged,mean_first_volley_s,rounds,casualties,rounds_per_casualty,casualties_per_gun_min,shooter_casualties,exchange_ratio\n",

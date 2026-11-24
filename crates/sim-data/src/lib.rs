@@ -8,6 +8,7 @@ pub mod doctrine;
 pub mod fires;
 pub mod infantry;
 pub mod logistics;
+pub mod obstacles;
 pub mod scenario;
 pub mod smoke;
 pub mod stat;
@@ -21,6 +22,7 @@ pub use doctrine::*;
 pub use fires::*;
 pub use infantry::*;
 pub use logistics::*;
+pub use obstacles::*;
 pub use scenario::*;
 pub use smoke::*;
 pub use stat::*;
@@ -66,6 +68,7 @@ pub struct DataSet {
     pub weather: WeatherTable,
     pub fires: FireSupportModel,
     pub logistics: LogisticsModel,
+    pub obstacles: ObstacleModel,
     pub infantry: InfantryModel,
     pub terrain: TerrainData,
 }
@@ -127,9 +130,11 @@ impl DataSet {
             weather: load_ron(&root.join("combat/weather.ron"))?,
             fires: load_ron(&root.join("combat/fires.ron"))?,
             logistics: load_ron(&root.join("combat/logistics.ron"))?,
+            obstacles: load_ron(&root.join("combat/obstacles.ron"))?,
             infantry: load_ron(&root.join("combat/infantry.ron"))?,
             terrain,
         };
+        ds.obstacles.validate().map_err(|message| DataError { path: root.join("combat/obstacles.ron"), message })?;
         for a in &ds.ammo {
             let bad = |what: &str| DataError { path: root.join("ammo"), message: format!("{}: {what}", a.id) };
             match a.kind {

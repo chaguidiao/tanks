@@ -88,6 +88,7 @@ pub fn squad(cs: &str, squad: &str, pos: [f64; 2], platoon: Option<&str>, carrie
         cargo: None,
         ammo_fraction: None,
         fuel_fraction: None,
+        kit: None,
     }
 }
 
@@ -103,6 +104,7 @@ pub fn unit(cs: &str, vehicle: &str, pos: [f64; 2], heading_deg: f64, platoon: O
         cargo: None,
         ammo_fraction: None,
         fuel_fraction: None,
+        kit: None,
     }
 }
 
@@ -123,6 +125,7 @@ pub fn scenario(start_time_s: u32, blue: Vec<UnitDef>, red: Vec<UnitDef>) -> Sce
                 ai: None,
                 fire_support: vec![],
                 supply_points: vec![],
+                obstacles: vec![],
             },
             SideDef {
                 name: "RED".into(),
@@ -132,6 +135,7 @@ pub fn scenario(start_time_s: u32, blue: Vec<UnitDef>, red: Vec<UnitDef>) -> Sce
                 ai: None,
                 fire_support: vec![],
                 supply_points: vec![],
+                obstacles: vec![],
             },
         ],
         objectives: vec![],

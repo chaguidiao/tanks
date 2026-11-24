@@ -37,6 +37,7 @@ fn unit(cs: &str, vehicle: &str, at: [f64; 2], heading_deg: f64, platoon: &str) 
         cargo: None,
         ammo_fraction: None,
         fuel_fraction: None,
+        kit: None,
     }
 }
 
@@ -52,6 +53,7 @@ fn squad(cs: &str, at: [f64; 2], platoon: &str) -> UnitDef {
         cargo: None,
         ammo_fraction: None,
         fuel_fraction: None,
+        kit: None,
     }
 }
 
