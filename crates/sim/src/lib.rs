@@ -20,6 +20,7 @@ pub mod gunnery;
 pub mod infantry;
 pub mod logistics;
 pub mod mobility;
+pub mod obstacles;
 pub mod picture;
 pub mod plan;
 pub mod platoon;
@@ -72,13 +73,15 @@ pub struct Rngs {
     pub ai: ChaCha8Rng,
     pub comms: ChaCha8Rng,
     pub fires: ChaCha8Rng,
+    /// Mine strikes (M8d): its own stream, so scenarios without mines draw nothing from it.
+    pub mines: ChaCha8Rng,
 }
 
 impl Rngs {
     fn new(seed: u64) -> Self {
         let s =
             |k: u64| ChaCha8Rng::seed_from_u64(terrain::noise::hash_u64(seed ^ k.wrapping_mul(0x9e37_79b9_7f4a_7c15)));
-        Self { mobility: s(1), sensors: s(2), gunnery: s(3), ai: s(4), comms: s(5), fires: s(6) }
+        Self { mobility: s(1), sensors: s(2), gunnery: s(3), ai: s(4), comms: s(5), fires: s(6), mines: s(7) }
     }
 }
 
@@ -111,6 +114,10 @@ pub struct Sim {
     pathfinder: Pathfinder,
     /// Speed rasters for routes round built-up ground, per (side, vehicle id).
     avoid: builtup::AvoidLayers,
+    /// Obstacles, lanes and fitted kits (M8d).
+    obstacles: obstacles::ObstacleField,
+    /// Planning rasters with the obstacles each side knows (M8d).
+    layers: obstacles::Layers,
     rngs: Rngs,
     start_time_s: u32,
     los_cache: sensors::LosCache,
@@ -278,6 +285,7 @@ impl Sim {
         let mut sides = Vec::new();
         // Supply trucks and their scenario cargo, filled once every unit is placed.
         let mut trucks: Vec<(usize, Option<sim_data::CargoAssign>)> = Vec::new();
+        let mut kits: Vec<(usize, String)> = Vec::new();
         let g = Ground::new(&map, &data.terrain);
         for (si, side) in scenario.sides.iter().enumerate() {
             let year = side.tech_year.unwrap_or(scenario.date.0);
@@ -359,6 +367,17 @@ impl Sim {
                     trucks.push((k, u.cargo.clone()));
                 } else if u.cargo.is_some() {
                     return Err(format!("{}: only a supply truck carries cargo", u.callsign));
+                }
+                if let Some(kit) = &u.kit {
+                    let kd = data.obstacles.kit(kit).ok_or_else(|| format!("{}: unknown kit '{kit}'", u.callsign))?;
+                    let vid = world.vehicle[k].map(|vi| vehicles[vi].id.as_str()).unwrap_or("");
+                    if !kd.fits.iter().any(|f| f == vid) {
+                        return Err(format!("{}: {} does not fit {vid}", u.callsign, kd.name));
+                    }
+                    if !kd.in_service.contains(year) {
+                        return Err(format!("{}: {} is not in service in {year}", u.callsign, kd.name));
+                    }
+                    kits.push((k, kit.clone()));
                 }
                 // A mounted squad joins its carrier platoon's dismount platoon unless named.
                 let carrier_pc = world.squad[k]
@@ -585,6 +604,7 @@ impl Sim {
                 .collect();
             builtup::layers(&map, &data.terrain, &fielded)
         };
+        let obstacle_field = obstacles::ObstacleField::new(scenario, &data.obstacles, &map, &kits)?;
         let mut sim = Self {
             tick: 0,
             map,
@@ -603,6 +623,8 @@ impl Sim {
             platoons,
             pathfinder: Pathfinder::new(),
             avoid,
+            obstacles: obstacle_field,
+            layers: obstacles::Layers::default(),
             rngs: Rngs::new(scenario.seed),
             start_time_s: scenario.start_time_s,
             los_cache: sensors::LosCache::default(),
@@ -622,6 +644,7 @@ impl Sim {
             impacts: Vec::new(),
             years,
         };
+        sim.rebuild_layers();
         sim.update_pictures();
         Ok(sim)
     }
@@ -651,10 +674,29 @@ impl Sim {
     /// The speed raster a side's vehicle type plans routes on: its own, or with `avoid` the one
     /// round built-up ground (`builtup`), as the platoon AI does. None = no mobility layer.
     pub fn planning_speed(&self, side: SideId, vehicle_id: &str, avoid: bool) -> Option<&terrain::Grid<u8>> {
-        if avoid && let Some(g) = self.avoid.get(&(side.0, vehicle_id.to_string())) {
-            return Some(g);
+        self.layers.speed(&self.map, &self.avoid, side.0, vehicle_id, avoid)
+    }
+
+    /// Rebuild the planning rasters of every side whose obstacle knowledge or lanes changed.
+    fn rebuild_layers(&mut self) {
+        if !self.obstacles.dirty.iter().any(|d| *d) {
+            return;
         }
-        Some(&self.map.mobility(vehicle_id)?.speed)
+        let mut ids: Vec<String> = self.vehicles.iter().map(|v| v.id.clone()).collect();
+        ids.push(terrain::mobility::FOOT_CLASS.to_string());
+        for s in 0..self.obstacles.dirty.len() {
+            if std::mem::take(&mut self.obstacles.dirty[s]) {
+                self.layers.rebuild(
+                    &self.obstacles,
+                    &self.data.obstacles,
+                    &self.map,
+                    &self.avoid,
+                    &self.vehicles,
+                    SideId(s as u8),
+                    &ids,
+                );
+            }
+        }
     }
 
     /// The doctrine pack a side uses (its own data; the UI reads speed presets from it).
@@ -869,7 +911,10 @@ impl Sim {
             }
         }
 
-        // 2. Platoon AI.
+        // 2. Platoon AI, on planning rasters with what each side now knows of obstacles.
+        if tick.is_multiple_of(PLATOON_AI_EVERY) {
+            self.rebuild_layers();
+        }
         if tick.is_multiple_of(PLATOON_AI_EVERY) {
             let mut sim_cmds = Vec::new();
             let mut ctx = platoon_ai::Ctx {
@@ -890,6 +935,7 @@ impl Sim {
                 ammo: &self.ammo,
                 logistics: &self.data.logistics,
                 avoid: &self.avoid,
+                layers: &self.layers,
                 recalled: Vec::new(),
                 repairs: &mut self.repairs,
             };
@@ -937,6 +983,7 @@ impl Sim {
                 pathfinder: &mut self.pathfinder,
                 tick,
                 events: &mut events,
+                layers: &self.layers,
             };
             infantry::step(&mut ictx);
             if tick.is_multiple_of(PLATOON_AI_EVERY) {
@@ -1221,6 +1268,13 @@ impl Sim {
         self.smoke.step(DT);
 
         // 8. Mobility.
+        let mut strikes = Vec::new();
+        let obs = (!self.obstacles.list.is_empty()).then(|| mobility::ObstacleCtx {
+            field: &mut self.obstacles,
+            model: &self.data.obstacles,
+            rng: &mut self.rngs.mines,
+            strikes: &mut strikes,
+        });
         mobility::step(
             &mut self.world,
             &self.vehicles,
@@ -1228,9 +1282,12 @@ impl Sim {
             &self.data.terrain,
             self.weather.going(),
             &mut events,
+            obs,
         );
+        self.apply_strikes(strikes, &mut events);
 
-        infantry::move_squads(&mut self.world, &self.map, &self.data.terrain, &self.data.infantry, &mut events);
+        let obs = (!self.obstacles.list.is_empty()).then_some((&mut self.obstacles, &self.data.obstacles));
+        infantry::move_squads(&mut self.world, &self.map, &self.data.terrain, &self.data.infantry, &mut events, obs);
         infantry::follow_carriers(&mut self.world);
         if self.world.tow.iter().flatten().any(|t| t.towing.is_some()) {
             let g = Ground::new(&self.map, &self.data.terrain);
@@ -1250,6 +1307,34 @@ impl Sim {
         self.tick += 1;
         self.update_pictures();
         events
+    }
+
+    /// Mine strikes from the mobility step (M8d): the field becomes known to the vehicle's side,
+    /// the damage is done and reported; squads aboard share the carrier's fate.
+    fn apply_strikes(&mut self, strikes: Vec<(usize, usize, obstacles::Strike)>, events: &mut Vec<Event>) {
+        use obstacles::Strike;
+        for (k, ob, s) in strikes {
+            self.obstacles.learn(ob, self.world.side[k]);
+            let kill = match s {
+                Strike::Kit | Strike::NoEffect => None,
+                Strike::Destroyed => Some(KillKind::Catastrophic),
+                Strike::Immobilised => Some(KillKind::Mobility),
+            };
+            let kill = gunnery::apply_damage(&mut self.world, k, kill, false);
+            let thr = self.ineffective_fractions();
+            infantry::carrier_hit(
+                &mut self.world,
+                k,
+                kill.is_some(),
+                kill,
+                &self.data.infantry,
+                &thr,
+                None,
+                &mut self.rngs.mines,
+                events,
+            );
+            events.push(Event::MineStrike { unit: self.world.id[k], kit: s == Strike::Kit, kill });
+        }
     }
 
     /// Per side: the strength fraction below which its squads are combat-ineffective.
@@ -1459,7 +1544,15 @@ impl Sim {
                     if let Some(s) = self.world.squad[k].as_mut() {
                         s.boarding = None;
                     }
-                    match infantry::foot_route(&self.map, &mut self.pathfinder, pos, via, *destination) {
+                    match infantry::foot_route(
+                        &self.map,
+                        &self.layers,
+                        c.side,
+                        &mut self.pathfinder,
+                        pos,
+                        via,
+                        *destination,
+                    ) {
                         Some(route) => {
                             let length = route.windows(2).map(|w| dist(w[0], w[1])).sum::<f64>();
                             self.world.set_route(k, route, *speed_limit_mps, None, false, 2.0);
@@ -2016,7 +2109,9 @@ impl Sim {
                         continue;
                     }
                     let pos = self.world.transform[k].pos;
-                    if let Some(route) = infantry::foot_route(&self.map, &mut self.pathfinder, pos, &[], goal) {
+                    if let Some(route) =
+                        infantry::foot_route(&self.map, &self.layers, c.side, &mut self.pathfinder, pos, &[], goal)
+                    {
                         self.world.set_route(k, route, None, None, false, 2.0);
                         if let Some(s) = self.world.squad[k].as_mut() {
                             s.boarding = None;
@@ -2075,6 +2170,30 @@ impl Sim {
                 .enumerate()
                 .filter(|(_, b)| b.side == dst.side)
                 .map(|(i, b)| b.view(i as u32, &self.data.fires.batteries[b.def], self.tick))
+                .collect();
+            let si = dst.side.0 as usize;
+            dst.obstacles = self
+                .obstacles
+                .list
+                .iter()
+                .enumerate()
+                .filter(|(_, o)| o.known[si])
+                .map(|(i, o)| {
+                    let kd = &self.data.obstacles.kinds[o.kind];
+                    ai::picture::ObstacleView {
+                        id: i as u32,
+                        kind: kd.id.clone(),
+                        name: kd.name.clone(),
+                        points: o.points.clone(),
+                        width_m: o.half * 2.0,
+                        own: o.side == dst.side,
+                        lanes: o
+                            .lanes
+                            .iter()
+                            .map(|l| ai::picture::LaneView { a: l.a, b: l.b, width_m: l.half * 2.0, open: l.open })
+                            .collect(),
+                    }
+                })
                 .collect();
             dst.supply_points = self
                 .supply
@@ -2210,6 +2329,10 @@ impl Sim {
         }
         for b in &self.batteries {
             b.hash_into(&mut h);
+        }
+        // Obstacles, lanes, kits (nothing when a scenario has none: old hashes hold).
+        if !self.obstacles.is_empty() {
+            self.obstacles.hash_into(&mut h);
         }
         // Supply points and resupply progress (nothing when a scenario has none: old hashes hold).
         for sp in &self.supply {

@@ -326,6 +326,23 @@ pub enum Event {
     OutOfFuel {
         unit: EntityId,
     },
+    /// A vehicle or squad ran into an obstacle it cannot cross (M8d): obstacle id = index in the
+    /// pictures' `obstacles` ids.
+    ObstacleMet {
+        unit: EntityId,
+        obstacle: u32,
+    },
+    /// A side learned of an enemy obstacle by seeing it.
+    ObstacleSeen {
+        side: SideId,
+        obstacle: u32,
+    },
+    /// A vehicle set off a mine: `kit` = the plough or roller took it; else the damage done.
+    MineStrike {
+        unit: EntityId,
+        kit: bool,
+        kill: Option<KillKind>,
+    },
     /// A spot report reached the side's picture.
     SpotReport {
         side: SideId,

@@ -66,6 +66,8 @@ pub struct Ctx<'a> {
     pub logistics: &'a sim_data::LogisticsModel,
     /// Speed rasters round built-up ground (crate::builtup).
     pub avoid: &'a crate::builtup::AvoidLayers,
+    /// Planning rasters with the obstacles each side knows (M8d).
+    pub layers: &'a crate::obstacles::Layers,
     /// Carrier platoons whose plans called their squads back aboard this tick: the orders and
     /// plans of their dismount platoons end.
     pub recalled: Vec<PlatoonId>,
@@ -81,12 +83,9 @@ impl<'a> Ctx<'a> {
     /// The speed raster member `k`'s routes are planned on: its own, or the one round built-up
     /// ground (`avoid`).
     fn speed(&self, k: usize, avoid: bool) -> Option<&'a terrain::Grid<u8>> {
-        let (map, layers): (&'a BakedMap, &'a crate::builtup::AvoidLayers) = (self.map, self.avoid);
+        let (map, avoid_layers, layers) = (self.map, self.avoid, self.layers);
         let id = &self.vehicles[self.world.vehicle[k]?].id;
-        if avoid && let Some(g) = layers.get(&(self.world.side[k].0, id.clone())) {
-            return Some(g);
-        }
-        Some(&map.mobility(id)?.speed)
+        layers.speed(map, avoid_layers, self.world.side[k].0, id, avoid)
     }
 
     fn route(&mut self, k: usize, to: Vec2, avoid: bool) -> Option<Vec<Vec2>> {

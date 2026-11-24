@@ -135,22 +135,27 @@ pub struct Ctx<'a> {
     pub pathfinder: &'a mut terrain::path::Pathfinder,
     pub tick: u64,
     pub events: &'a mut Vec<Event>,
+    /// Planning rasters with the obstacles each side knows (M8d).
+    pub layers: &'a crate::obstacles::Layers,
 }
 
 fn foot_layer(map: &terrain::BakedMap) -> Option<&terrain::bake::MobilityLayer> {
     map.mobility(terrain::mobility::FOOT_CLASS)
 }
 
-/// Foot route on the foot raster (buildings entered only through entrances, TODO H9).
+/// Foot route on the foot raster (buildings entered only through entrances, TODO H9), with the
+/// obstacles `side` knows (M8d).
 pub fn foot_route(
     map: &terrain::BakedMap,
+    layers: &crate::obstacles::Layers,
+    side: crate::SideId,
     pf: &mut terrain::path::Pathfinder,
     from: crate::Vec2,
     via: &[crate::Vec2],
     to: crate::Vec2,
 ) -> Option<Vec<crate::Vec2>> {
-    let layer = foot_layer(map)?;
-    pf.find_via(&layer.speed, map.manifest.cell_size_m, from, via, to).map(|r| r.0)
+    let speed = layers.foot(map, side.0)?;
+    pf.find_via(speed, map.manifest.cell_size_m, from, via, to).map(|r| r.0)
 }
 
 fn ramp_of(world: &World, c: usize) -> crate::Vec2 {
@@ -166,7 +171,9 @@ pub fn move_squads(
     td: &sim_data::TerrainData,
     model: &InfantryModel,
     events: &mut Vec<Event>,
+    mut obs: Option<(&mut crate::obstacles::ObstacleField, &sim_data::ObstacleModel)>,
 ) {
+    use crate::obstacles::Passage;
     let Some(layer) = foot_layer(map) else { return };
     let cell = map.manifest.cell_size_m;
     let pinned = model.pinned_above.get();
@@ -193,6 +200,36 @@ pub fn move_squads(
         }
         if suppressed {
             v = 0.0;
+        }
+        // Obstacles (M8d): wire stops men until a lane is cut; ditches and abatis slow them.
+        if let Some((field, om)) = obs.as_mut()
+            && v > 0.0
+            && let Some(next) = route.get(*segment + 1)
+        {
+            let here = field.at(t.pos);
+            if let Some(o) = here
+                && let Passage::Slow(f) = field.foot_passage(om, o, t.pos)
+            {
+                v *= f;
+            }
+            let d = crate::dist(t.pos, *next).max(1e-6);
+            let reach = v * crate::DT + 1.0;
+            let probe = [t.pos[0] + (next[0] - t.pos[0]) / d * reach, t.pos[1] + (next[1] - t.pos[1]) / d * reach];
+            let blocked =
+                field.at(probe).filter(|&o| here != Some(o) && field.foot_passage(om, o, probe) == Passage::Blocked);
+            match blocked {
+                Some(o) => {
+                    v = 0.0;
+                    if field.met.get(&k) != Some(&o) {
+                        field.met.insert(k, o);
+                        field.learn(o, world.side[k]);
+                        events.push(Event::ObstacleMet { unit: world.id[k], obstacle: o as u32 });
+                    }
+                }
+                None => {
+                    field.met.remove(&k);
+                }
+            }
         }
         let mut left = v * crate::DT;
         let tol = arrive.max(FOOT_ARRIVE_M);
@@ -359,7 +396,9 @@ fn displace(ctx: &mut Ctx, k: usize) {
         .find(|b| crate::dist([b.centroid[0] as f64, b.centroid[1] as f64], threat) >= to_threat - 10.0)
         .map(|b| b.id);
     let Some(goal) = next.and_then(|id| ctx.map.building_goal(id)) else { return };
-    let Some(route) = foot_route(ctx.map, ctx.pathfinder, pos, &[], goal) else { return };
+    let Some(route) = foot_route(ctx.map, ctx.layers, ctx.world.side[k], ctx.pathfinder, pos, &[], goal) else {
+        return;
+    };
     ctx.world.set_route(k, route, None, None, true, FOOT_ARRIVE_M);
     if let Some(s) = ctx.world.squad[k].as_mut() {
         s.in_building = None;
@@ -418,8 +457,8 @@ fn react_to_contact(ctx: &mut Ctx, k: usize) {
     if moving && sup >= REACT_SUPPRESSION && !held {
         let pos = ctx.world.transform[k].pos;
         let reach = ctx.doctrines[ctx.world.side[k].0 as usize].infantry.cover_search_m.get();
-        let cover =
-            cover_near(ctx.map, ctx.td, pos, reach).and_then(|c| foot_route(ctx.map, ctx.pathfinder, pos, &[], c));
+        let cover = cover_near(ctx.map, ctx.td, pos, reach)
+            .and_then(|c| foot_route(ctx.map, ctx.layers, ctx.world.side[k], ctx.pathfinder, pos, &[], c));
         let ai = ctx.world.ai[k].as_mut().expect("checked");
         ai.held = Some(std::mem::replace(&mut ai.order, crate::world::Order::Idle));
         if let Some(route) = cover {
@@ -516,7 +555,7 @@ fn carriers(ctx: &mut Ctx, dt: f64) {
             let a = heading + std::f64::consts::PI + if n > 1.0 { (i as f64 / (n - 1.0) - 0.5) * 1.57 } else { 0.0 };
             let at = [centre[0] + libm::sin(a) * radius, centre[1] + libm::cos(a) * radius];
             let from = ctx.world.transform[k].pos;
-            if let Some(route) = foot_route(ctx.map, ctx.pathfinder, from, &[], at) {
+            if let Some(route) = foot_route(ctx.map, ctx.layers, ctx.world.side[k], ctx.pathfinder, from, &[], at) {
                 ctx.world.set_route(k, route, None, Some(a), true, FOOT_ARRIVE_M);
             }
         }
@@ -567,7 +606,7 @@ fn boarding(ctx: &mut Ctx, k: usize, dt: f64) {
         };
         if (idle || far)
             && ctx.tick.is_multiple_of(crate::PLATOON_AI_EVERY)
-            && let Some(route) = foot_route(ctx.map, ctx.pathfinder, pos, &[], ramp)
+            && let Some(route) = foot_route(ctx.map, ctx.layers, ctx.world.side[k], ctx.pathfinder, pos, &[], ramp)
         {
             ctx.world.set_route(k, route, None, None, true, FOOT_ARRIVE_M);
         }
@@ -721,7 +760,7 @@ pub fn platoon_step(platoons: &mut [crate::platoon::Platoon], ctx: &mut Ctx) {
             // New order: plan every squad's route.
             for (i, &k) in movers.iter().enumerate() {
                 let pos = ctx.world.transform[k].pos;
-                match foot_route(ctx.map, ctx.pathfinder, pos, via, slot(i)) {
+                match foot_route(ctx.map, ctx.layers, ctx.world.side[k], ctx.pathfinder, pos, via, slot(i)) {
                     Some(r) => ctx.world.set_route(k, r, p.speed_limit, Some(b), true, FOOT_ARRIVE_M),
                     None => ctx.events.push(Event::NoRoute { unit: ctx.world.id[k] }),
                 }

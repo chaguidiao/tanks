@@ -14,8 +14,18 @@ use sim_data::{TerrainData, VehicleDef};
 use terrain::BakedMap;
 use terrain::mobility::{MobilityClass, terrain_cap};
 
+use crate::obstacles::{ObstacleField, Passage, Strike, mine_rates, roll_strike};
 use crate::world::World;
-use crate::{DT, Event};
+use crate::{DT, Event, dist};
+
+/// Obstacles in the physics step (M8d): stops and slows vehicles, rolls mine strikes.
+pub(crate) struct ObstacleCtx<'a> {
+    pub field: &'a mut ObstacleField,
+    pub model: &'a sim_data::ObstacleModel,
+    pub rng: &'a mut rand_chacha::ChaCha8Rng,
+    /// (entity, obstacle, outcome) of this tick's mine strikes, for the sim to apply.
+    pub strikes: &'a mut Vec<(usize, usize, Strike)>,
+}
 
 pub const G: f64 = 9.80665;
 /// Below this speed, power-limited force is evaluated at this speed (torque/converter limit).
@@ -40,6 +50,7 @@ pub(crate) fn step(
     td: &TerrainData,
     going: (f64, f64),
     events: &mut Vec<Event>,
+    mut obs: Option<ObstacleCtx>,
 ) {
     let hf = &map.elevation;
     for k in 0..world.len() {
@@ -55,7 +66,7 @@ pub(crate) fn step(
         let t = &mut world.transform[k];
 
         let (i, j) = hf.cell_of(t.pos[0], t.pos[1]);
-        let cap = terrain_cap(&class, td, map.landcover.get(i, j), map.water_depth.get(i, j));
+        let mut cap = terrain_cap(&class, td, map.landcover.get(i, j), map.water_depth.get(i, j));
         let soil = td.soil(map.soil.get(i, j));
         // Weather changes the going: wet soil grips less and resists more (Wong ch. 2).
         let (f_r, mu) = (soil.rolling_resistance.get() * going.1, soil.traction_coefficient.get() * going.0);
@@ -65,6 +76,39 @@ pub(crate) fn step(
             m.reversing = m.cmd_reverse;
         }
         let dir = if m.reversing { -1.0 } else { 1.0 };
+
+        // Obstacles: slowed in a wire belt; stopped short of one it cannot cross (FM 90-7: an
+        // obstacle the vehicle cannot cross halts it at the near edge). The probe looks a hull
+        // half-length plus this tick's travel ahead in the direction of travel.
+        let start = t.pos;
+        let mut blocked = None;
+        if let Some(o) = obs.as_mut() {
+            let here = o.field.at(t.pos);
+            if let Some(ob) = here
+                && let Passage::Slow(f) = o.field.vehicle_passage(o.model, ob, def, t.pos)
+            {
+                cap *= f;
+            }
+            let ahead = def.dimensions.hull_length_m.get() / 2.0 + m.speed * DT + 0.5;
+            let probe = [t.pos[0] + dir * libm::sin(t.heading) * ahead, t.pos[1] + dir * libm::cos(t.heading) * ahead];
+            if let Some(ob) = o.field.at(probe)
+                && here != Some(ob)
+                && o.field.vehicle_passage(o.model, ob, def, probe) == Passage::Blocked
+            {
+                blocked = Some(ob);
+            }
+            match blocked {
+                Some(ob) if o.field.met.get(&k) != Some(&ob) => {
+                    o.field.met.insert(k, ob);
+                    o.field.learn(ob, world.side[k]);
+                    events.push(Event::ObstacleMet { unit: world.id[k], obstacle: ob as u32 });
+                }
+                Some(_) => {}
+                None => {
+                    o.field.met.remove(&k);
+                }
+            }
+        }
 
         // Steering.
         let w_max = d.max_yaw_rate_rad_s.get().min(d.max_lateral_accel_mps2.get() / m.speed.abs().max(0.1));
@@ -88,7 +132,7 @@ pub(crate) fn step(
         if side.abs() > d.max_side_slope.get() {
             target = target.min(SIDE_SLOPE_CRAWL);
         }
-        if m.fuel_l <= 0.0 {
+        if m.fuel_l <= 0.0 || blocked.is_some() {
             target = 0.0;
         }
 
@@ -108,6 +152,9 @@ pub(crate) fn step(
         m.speed = (m.speed + a * DT).max(0.0);
         if a_des < 0.0 && m.speed < target {
             m.speed = target.min(v_old); // braking does not undershoot the target
+        }
+        if blocked.is_some() {
+            m.speed = 0.0;
         }
 
         // Progress / stuck detection.
@@ -129,6 +176,19 @@ pub(crate) fn step(
         t.z = hf.height(t.pos[0], t.pos[1]);
         t.pitch = th_hull;
         t.roll = libm::atan(side);
+
+        // Mines: strikes along the distance driven inside a minefield (FM 20-32 ch. 2-3).
+        if let Some(o) = obs.as_mut()
+            && let Some(ob) = o.field.at(t.pos)
+            && !o.field.list[ob].mines.is_empty()
+        {
+            let ds = dist(start, t.pos);
+            let residual = o.field.list[ob].lane_at(t.pos).map_or(1.0, |l| l.residual);
+            let rates = mine_rates(o.model, &o.field.list[ob], o.field.kits.get(&k), residual);
+            if let Some(s) = roll_strike(o.model, &rates, o.field.kits.get_mut(&k), ds, o.rng) {
+                o.strikes.push((k, ob, s));
+            }
+        }
 
         // Fuel: idle plus delivered power.
         let p_wheel = ((mass * a + resist) * m.speed).max(0.0);

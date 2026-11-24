@@ -604,6 +604,31 @@ pub struct BatteryView {
     pub resupplies_left: u32,
 }
 
+/// An obstacle the side knows of (M8d): its own from the start, the enemy's once seen or met.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObstacleView {
+    pub id: u32,
+    /// Kind id (`data/combat/obstacles.ron`): ditch, wire, abatis, teeth, minefield.
+    pub kind: String,
+    pub name: String,
+    pub points: Vec<Vec2>,
+    /// Width of the band (a minefield's depth) (m).
+    pub width_m: f64,
+    /// Built by this side.
+    pub own: bool,
+    pub lanes: Vec<LaneView>,
+}
+
+/// A lane through an obstacle.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LaneView {
+    pub a: Vec2,
+    pub b: Vec2,
+    pub width_m: f64,
+    /// Still being cut.
+    pub open: bool,
+}
+
 /// A supply point of the side (M8c): where platoons are sent to resupply, with what is left.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SupplyPointView {
@@ -655,6 +680,7 @@ pub struct PerceivedWorld {
     pub weather: WeatherView,
     pub fire_support: Vec<BatteryView>,
     pub supply_points: Vec<SupplyPointView>,
+    pub obstacles: Vec<ObstacleView>,
     pub impacts: Vec<ImpactView>,
     pub code_words: Vec<CodeWordView>,
 }
@@ -675,6 +701,7 @@ impl PerceivedWorld {
             weather: WeatherView::default(),
             fire_support: Vec::new(),
             supply_points: Vec::new(),
+            obstacles: Vec::new(),
             impacts: Vec::new(),
             code_words: Vec::new(),
         }
