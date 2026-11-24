@@ -1695,6 +1695,7 @@ mod tests {
             fire_support: vec![],
             supply_points: vec![],
             obstacles: vec![],
+            demolitions: vec![],
         };
         let sc = ScenarioDef {
             id: "t".into(),

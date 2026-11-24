@@ -21,7 +21,7 @@ use crate::raster;
 use crate::{AuthoringPackage, Features, Grid, Heightfield, MapManifest, Result, TerrainError, Vec2};
 
 /// Bump when baker output changes for the same input.
-pub const BAKER_VERSION: u32 = 4;
+pub const BAKER_VERSION: u32 = 5;
 
 /// Elevation quantisation step (m) in the baked package.
 pub const ELEVATION_STEP: f64 = 0.02;
@@ -55,6 +55,22 @@ pub struct BakedBuilding {
     pub entrances: Vec<[f32; 2]>,
 }
 
+/// A bridge (M8d, TERRAIN.md §5.2): the cells where a road crosses water on a deck, with its
+/// military load class (authored, else the default).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BakedBridge {
+    /// 1-based, in raster order of the first cell.
+    pub id: u32,
+    /// Cell indices (row-major) of the deck over water.
+    pub cells: Vec<u32>,
+    pub centre: [f32; 2],
+    /// The two cells furthest apart along the deck (its ends).
+    pub ends: [[f32; 2]; 2],
+    pub mlc: f32,
+    /// The class was authored (features/bridges.geojson), not the default.
+    pub authored: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BakedMap {
     pub manifest: MapManifest,
@@ -69,6 +85,8 @@ pub struct BakedMap {
     /// Building owning each cell (`BakedBuilding::id`); 0 = none.
     pub building_id: Grid<u32>,
     pub buildings: Vec<BakedBuilding>,
+    /// Bridges, in raster order (M8d).
+    pub bridges: Vec<BakedBridge>,
     pub mobility: Vec<MobilityLayer>,
     pub contours: Vec<ContourLine>,
     pub features: Features,
@@ -144,6 +162,14 @@ impl BakedMap {
         }
         for &v in &self.building_id.data {
             h.u32(v);
+        }
+        for b in &self.bridges {
+            h.u32(b.id);
+            h.f32(b.mlc);
+            h.u32(b.cells.len() as u32);
+            for &k in &b.cells {
+                h.u32(k);
+            }
         }
         for b in &self.buildings {
             h.u32(b.id);
@@ -337,6 +363,7 @@ pub fn bake(pkg: &AuthoringPackage, td: &TerrainData, classes: &[MobilityClass])
     }
 
     // Roads: flatten the corridor to a smoothed longitudinal profile (cut and fill).
+    let water_before = water.clone();
     for r in &pkg.features.roads {
         if r.points.len() < 2 {
             continue;
@@ -404,10 +431,18 @@ pub fn bake(pkg: &AuthoringPackage, td: &TerrainData, classes: &[MobilityClass])
     let (building_list, foot_open) = identify_buildings(pkg, &building_id, &water, td.foot.fording_depth_m.get());
     let interior = mobility::quantise(td.foot.building_interior_speed_mps.get());
 
+    let bridges = find_bridges(&water_before, &water, &pkg.features.bridges, cell, td.bridges.default_mlc.get());
+    let per_kg = td.bridges.mlc_per_kg.get();
     let mobility = classes
         .iter()
         .map(|c| {
             let mut speed = mobility::speed_raster(c, td, &hf, &landcover, &water);
+            // A bridge below the vehicle's class is closed to it (TERRAIN.md §5.2).
+            for b in bridges.iter().filter(|b| (b.mlc as f64) < c.mass_kg * per_kg) {
+                for &k in &b.cells {
+                    speed.data[k as usize] = 0;
+                }
+            }
             for (k, v) in speed.data.iter_mut().enumerate() {
                 if building_id.data[k] != 0 {
                     // Vehicles: no-go (TERRAIN.md §5.4). Foot: walls are no-go, so a squad gets
@@ -430,10 +465,88 @@ pub fn bake(pkg: &AuthoringPackage, td: &TerrainData, classes: &[MobilityClass])
         building_height: buildings,
         building_id,
         buildings: building_list,
+        bridges,
         mobility,
         contours,
         features: pkg.features.clone(),
     }
+}
+
+/// Bridges: cells that held water before the roads were cut and are dry decks after, grouped
+/// into 4-connected pieces. An authored bridge line within 1.5 cells of a piece sets its class.
+fn find_bridges(
+    before: &Grid<f32>,
+    after: &Grid<f32>,
+    authored: &[crate::features::Bridge],
+    cell: f64,
+    default_mlc: f64,
+) -> Vec<BakedBridge> {
+    let (w, h) = (before.w, before.h);
+    let deck: Vec<bool> = before.data.iter().zip(&after.data).map(|(&b, &a)| b > 0.0 && a <= 0.0).collect();
+    let mut seen = vec![false; w * h];
+    let mut out = Vec::new();
+    for start in 0..w * h {
+        if !deck[start] || seen[start] {
+            continue;
+        }
+        let mut cells = Vec::new();
+        let mut stack = vec![start];
+        seen[start] = true;
+        while let Some(k) = stack.pop() {
+            cells.push(k as u32);
+            let (i, j) = (k % w, k / w);
+            let mut push = |n: usize| {
+                if deck[n] && !seen[n] {
+                    seen[n] = true;
+                    stack.push(n);
+                }
+            };
+            if i > 0 {
+                push(k - 1);
+            }
+            if i + 1 < w {
+                push(k + 1);
+            }
+            if j > 0 {
+                push(k - w);
+            }
+            if j + 1 < h {
+                push(k + w);
+            }
+        }
+        cells.sort_unstable();
+        let at = |k: u32| [((k as usize % w) as f64 + 0.5) * cell, ((k as usize / w) as f64 + 0.5) * cell];
+        let n = cells.len() as f64;
+        let centre = cells.iter().map(|&k| at(k)).fold([0.0, 0.0], |s, p| [s[0] + p[0] / n, s[1] + p[1] / n]);
+        let far = |from: [f64; 2]| {
+            cells
+                .iter()
+                .map(|&k| at(k))
+                .max_by(|a, b| {
+                    let d = |p: &[f64; 2]| (p[0] - from[0]).powi(2) + (p[1] - from[1]).powi(2);
+                    d(a).total_cmp(&d(b))
+                })
+                .expect("one cell")
+        };
+        let e0 = far(centre);
+        let e1 = far(e0);
+        let near = |b: &crate::features::Bridge| {
+            cells.iter().any(|&k| {
+                let p = at(k);
+                b.points.windows(2).any(|s| raster::seg_dist(p, s[0], s[1]) <= cell * 1.5)
+            })
+        };
+        let own = authored.iter().find(|b| near(b));
+        out.push(BakedBridge {
+            id: out.len() as u32 + 1,
+            cells,
+            centre: [centre[0] as f32, centre[1] as f32],
+            ends: [[e0[0] as f32, e0[1] as f32], [e1[0] as f32, e1[1] as f32]],
+            mlc: own.map_or(default_mlc as f32, |b| b.props.mlc),
+            authored: own.is_some(),
+        });
+    }
+    out
 }
 
 /// Building list with entrances, and the building cells open to foot movement: interior cells
@@ -558,6 +671,8 @@ pub struct BakedClass {
     pub fording_depth: f64,
     #[serde(default)]
     pub foot: bool,
+    #[serde(default)]
+    pub mass_kg: f64,
 }
 
 const MAGIC: &[u8; 4] = b"TKL1";
@@ -636,6 +751,9 @@ impl BakedMap {
             .map_err(|e| TerrainError::io(dir, e))?;
         let lp = dir.join("buildings.ron");
         std::fs::write(&lp, list).map_err(|e| TerrainError::io(&lp, e))?;
+        let bl = ron::to_string(&self.bridges).map_err(|e| TerrainError::io(dir, e))?;
+        let bp = dir.join("bridges.ron");
+        std::fs::write(&bp, bl).map_err(|e| TerrainError::io(&bp, e))?;
         for m in &self.mobility {
             write_layer(&md.join(format!("{}.bin", m.class.id)), w, h, &m.speed.data)?;
         }
@@ -657,6 +775,7 @@ impl BakedMap {
                     max_slope: m.class.max_slope,
                     fording_depth: m.class.fording_depth,
                     foot: m.class.foot,
+                    mass_kg: m.class.mass_kg,
                 })
                 .collect(),
         };
@@ -684,6 +803,9 @@ impl BakedMap {
         let lp = dir.join("buildings.ron");
         let list = std::fs::read_to_string(&lp).map_err(|e| TerrainError::io(&lp, e))?;
         let buildings: Vec<BakedBuilding> = ron::from_str(&list).map_err(|e| TerrainError::io(&lp, e))?;
+        let bp = dir.join("bridges.ron");
+        let bl = std::fs::read_to_string(&bp).map_err(|e| TerrainError::io(&bp, e))?;
+        let bridges: Vec<BakedBridge> = ron::from_str(&bl).map_err(|e| TerrainError::io(&bp, e))?;
         let mut mobility = Vec::new();
         for c in &man.mobility_classes {
             mobility.push(MobilityLayer {
@@ -694,6 +816,7 @@ impl BakedMap {
                     max_slope: c.max_slope,
                     fording_depth: c.fording_depth,
                     foot: c.foot,
+                    mass_kg: c.mass_kg,
                 },
                 speed: u8_grid(&dir.join("mobility").join(format!("{}.bin", c.id)))?,
             });
@@ -706,6 +829,7 @@ impl BakedMap {
             building_height: bh,
             building_id: u32_grid(&dir.join("building_id.bin"))?,
             buildings,
+            bridges,
             mobility,
             contours: read_contours(&dir.join("contours.bin"))?,
             features: Features::load(&dir.join("features"))?,

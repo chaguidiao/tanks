@@ -52,6 +52,7 @@ fn map(td: &TerrainData) -> BakedMap {
         max_slope: 0.5,
         fording_depth: 1.2,
         foot: false,
+        mass_kg: 50_000.0,
     };
     bake(&p, td, &[vehicle, MobilityClass::foot(&td.foot)])
 }

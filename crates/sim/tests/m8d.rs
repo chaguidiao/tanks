@@ -301,3 +301,92 @@ fn a_platoon_halted_at_a_minefield_breaches_when_told_to() {
     assert!(r.iter().any(|r| matches!(r, sim::PlatoonReport::LaneOpen { .. })), "{r:?}");
     assert!(ys(&sim, 4).iter().filter(|y| **y > 900.0).count() >= 3, "{:?}", ys(&sim, 4));
 }
+
+/// 1.6 × 2.4 km: a river west to east at y 1200, roads north to south at x 500 and x 1300 (two
+/// bridges). Blue's platoon at the south end of the west road.
+fn river_setup(edit: impl FnOnce(&mut ScenarioDef)) -> Sim {
+    use terrain::features::{River, RiverProps, Road, RoadClass, RoadProps};
+    let ds = data();
+    let m = map_with(&ds, 400, 600, "grassland", |p| {
+        p.features.rivers.push(River {
+            id: 1,
+            points: vec![[0.0, 1200.0], [1600.0, 1200.0]],
+            props: RiverProps { width_m: vec![30.0, 30.0], depth_m: vec![3.0, 3.0] },
+        });
+        for (id, x) in [(2, 500.0), (3, 1300.0)] {
+            p.features.roads.push(Road {
+                id,
+                points: vec![[x, 0.0], [x, 2400.0]],
+                props: RoadProps { class: RoadClass::Secondary, width_m: 6.0 },
+            });
+        }
+    });
+    assert_eq!(m.bridges.len(), 2);
+    let blue: Vec<_> = (0..4)
+        .map(|i| unit(&format!("1-{}", i + 1), "bulwark_a1", [480.0 + i as f64 * 15.0, 300.0], 0.0, Some("1")))
+        .collect();
+    let red = vec![unit("211", "kurgan_b", [1500.0, 2300.0], 180.0, Some("21"))];
+    let mut sc = scenario(10 * 3600, blue, red);
+    edit(&mut sc);
+    let mut sim = Sim::new(&sc, ds, m).unwrap();
+    sim.set_ai_enabled(BLUE, false);
+    sim.set_ai_enabled(RED, false);
+    sim
+}
+
+#[test]
+fn a_blown_bridge_closes_the_crossing_and_the_platoon_takes_the_other() {
+    // Red blows the west bridge at once (FM 90-7 reserved demolition); Blue sees the dropped span
+    // and goes round by the east bridge.
+    let mut sim = river_setup(|sc| {
+        sc.sides[1].demolitions.push(sim_data::DemolitionDef {
+            at: [500.0, 1200.0],
+            at_s: Some(1.0),
+            code_word: None,
+            enemy_within_m: None,
+        });
+    });
+    sim.submit(BLUE, pmove([500.0, 2000.0]));
+    let mut crossed_x = None;
+    let mut ev = Vec::new();
+    for _ in 0..900 {
+        let before = sim.truth().transform[0].pos;
+        ev.extend(run(&mut sim, 1.0));
+        let after = sim.truth().transform[0].pos;
+        if before[1] < 1200.0 && after[1] >= 1200.0 {
+            crossed_x = Some(after[0]);
+        }
+    }
+    assert!(ev.iter().any(|e| matches!(e, Event::BridgeBlown { side: RED, .. })));
+    assert!(ev.iter().any(|e| matches!(e, Event::ObstacleSeen { side: BLUE, .. })), "the span is seen");
+    let x = crossed_x.expect("the leader crossed the river");
+    assert!((x - 1300.0).abs() < 40.0, "by the east bridge: {x:.0}");
+}
+
+#[test]
+fn an_enemy_close_to_a_prepared_bridge_sets_it_off() {
+    // Blown when Red sees an enemy within 400 m of the bridge (its observer looks down the road).
+    let mut sim = river_setup(|sc| {
+        sc.sides[1].demolitions.push(sim_data::DemolitionDef {
+            at: [500.0, 1200.0],
+            at_s: None,
+            code_word: None,
+            enemy_within_m: Some(400.0),
+        });
+        sc.sides[1].units.push(unit("231", "kurgan_b", [560.0, 1700.0], 180.0, Some("23")));
+    });
+    sim.submit_immediate(
+        BLUE,
+        Command::SetContactReaction { platoon: P1, reaction: ai::picture::ContactReaction::Continue },
+    );
+    // Blue holds its fire, so Red's observer lives to report it.
+    sim.submit_immediate(
+        BLUE,
+        Command::WeaponsControl { to: sim::Addressee::Platoon(P1), status: ai::picture::WeaponsStatus::Hold },
+    );
+    run(&mut sim, 1.0);
+    sim.submit(BLUE, pmove([500.0, 2000.0]));
+    let ev = run(&mut sim, 600.0);
+    assert!(ev.iter().any(|e| matches!(e, Event::BridgeBlown { side: RED, .. })), "blown");
+    assert_eq!(sim.perceived(RED).obstacles.iter().filter(|o| o.kind == "blown_bridge").count(), 1);
+}

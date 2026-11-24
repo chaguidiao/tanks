@@ -81,6 +81,19 @@ impl Obstacle {
     }
 }
 
+/// A bridge prepared for demolition (plan M8D-ENGINEERS §4).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Demolition {
+    pub side: SideId,
+    /// Index into the map's bridges.
+    pub bridge: usize,
+    pub at_s: Option<f64>,
+    /// Index of the code word in the side's doctrine pack.
+    pub code: Option<u8>,
+    pub enemy_within_m: Option<f64>,
+    pub blown: bool,
+}
+
 /// A breaching kit fitted to a vehicle.
 #[derive(Debug, Clone, PartialEq)]
 pub struct KitState {
@@ -112,7 +125,12 @@ pub struct ObstacleField {
     pub dirty: Vec<bool>,
     /// Entity → the obstacle it is stopped at (one `ObstacleMet` per stop; not hashed).
     pub met: BTreeMap<usize, usize>,
+    /// Bridges prepared for demolition.
+    pub demolitions: Vec<Demolition>,
 }
+
+/// A demolition's point names the bridge within this distance of it (m).
+pub const DEMOLITION_PICK_M: f64 = 150.0;
 
 /// Distance from `p` to segment a–b.
 pub fn seg_dist(p: Vec2, a: Vec2, b: Vec2) -> f64 {
@@ -155,11 +173,13 @@ fn band_cells(points: &[Vec2], half: f64, cell: f64, w: usize, h: usize) -> Vec<
 
 impl ObstacleField {
     /// The scenario's obstacles on `map`; `kits` = (entity, kit id) for fitted units.
+    /// `code_words`: each side's doctrine code words (demolitions fired by one).
     pub fn new(
         scenario: &ScenarioDef,
         model: &ObstacleModel,
         map: &BakedMap,
         kits: &[(usize, String)],
+        code_words: &[Vec<String>],
     ) -> Result<Self, String> {
         let n_sides = scenario.sides.len();
         let (w, h) = (map.landcover.w, map.landcover.h);
@@ -222,12 +242,79 @@ impl ObstacleField {
             let kit = model.kit_index(id).ok_or_else(|| format!("unknown kit '{id}'"))?;
             fitted.insert(*k, KitState { kit, strikes: 0, wrecked: false });
         }
+        let mut demolitions = Vec::new();
+        for (si, s) in scenario.sides.iter().enumerate() {
+            for (n, d) in s.demolitions.iter().enumerate() {
+                let err = |m: String| format!("side {} demolition {}: {m}", s.name, n + 1);
+                let dist = |b: &terrain::bake::BakedBridge| {
+                    ((b.centre[0] as f64 - d.at[0]).powi(2) + (b.centre[1] as f64 - d.at[1]).powi(2)).sqrt()
+                };
+                let bridge = (0..map.bridges.len())
+                    .filter(|&k| dist(&map.bridges[k]) <= DEMOLITION_PICK_M)
+                    .min_by(|&a, &b| dist(&map.bridges[a]).total_cmp(&dist(&map.bridges[b])))
+                    .ok_or_else(|| err(format!("no bridge within {DEMOLITION_PICK_M} m")))?;
+                let code = match &d.code_word {
+                    None => None,
+                    Some(w) => Some(
+                        code_words
+                            .get(si)
+                            .and_then(|l| l.iter().position(|x| x.eq_ignore_ascii_case(w)))
+                            .ok_or_else(|| err(format!("unknown code word '{w}'")))? as u8,
+                    ),
+                };
+                demolitions.push(Demolition {
+                    side: SideId(si as u8),
+                    bridge,
+                    at_s: d.at_s,
+                    code,
+                    enemy_within_m: d.enemy_within_m,
+                    blown: false,
+                });
+            }
+        }
         let dirty = (0..n_sides).map(|s| list.iter().any(|o| o.known[s])).collect();
-        Ok(Self { list, raster, cell_m: cell, kits: fitted, dirty, met: BTreeMap::new() })
+        Ok(Self { list, raster, cell_m: cell, kits: fitted, dirty, met: BTreeMap::new(), demolitions })
     }
 
     pub fn is_empty(&self) -> bool {
-        self.list.is_empty() && self.kits.is_empty()
+        self.list.is_empty() && self.kits.is_empty() && self.demolitions.is_empty()
+    }
+
+    /// Blow demolition `d`: the deck becomes a blown-bridge obstacle of its side (known to it at
+    /// once, to the enemy when seen). Returns the deck cells (what is on them is lost).
+    pub fn blow(&mut self, model: &ObstacleModel, map: &BakedMap, d: usize) -> Vec<(u32, u32)> {
+        let dm = &mut self.demolitions[d];
+        if dm.blown {
+            return Vec::new();
+        }
+        dm.blown = true;
+        let side = dm.side;
+        let b = &map.bridges[dm.bridge];
+        let w = map.landcover.w;
+        let deck: Vec<(u32, u32)> =
+            b.cells.iter().map(|&k| ((k as usize % w) as u32, (k as usize / w) as u32)).collect();
+        let Some(kind) = model.kind_index("blown_bridge") else { return deck };
+        let n_sides = self.dirty.len();
+        let mut known = vec![false; n_sides];
+        known[side.0 as usize] = true;
+        let e = |p: [f32; 2]| [p[0] as f64, p[1] as f64];
+        let id = self.list.len();
+        self.list.push(Obstacle {
+            side,
+            kind,
+            points: vec![e(b.ends[0]), e(b.ends[1])],
+            half: model.kinds[kind].width_m.get() / 2.0,
+            height: 0.0,
+            mines: Vec::new(),
+            known,
+            lanes: Vec::new(),
+            cells: deck.clone(),
+        });
+        for &(i, j) in &deck {
+            self.raster.set(i as usize, j as usize, id as u16 + 1);
+        }
+        self.dirty[side.0 as usize] = true;
+        deck
     }
 
     /// The obstacle whose band covers `p`.
@@ -332,6 +419,9 @@ impl ObstacleField {
             h.u64(*k as u64);
             h.u32(s.strikes);
             h.u8(s.wrecked as u8);
+        }
+        for d in &self.demolitions {
+            h.u8(d.blown as u8);
         }
     }
 }

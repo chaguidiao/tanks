@@ -608,7 +608,8 @@ impl Sim {
                 .collect();
             builtup::layers(&map, &data.terrain, &fielded)
         };
-        let obstacle_field = obstacles::ObstacleField::new(scenario, &data.obstacles, &map, &kits)?;
+        let code_words: Vec<Vec<String>> = sides.iter().map(|s| s.doctrine.code_words.clone()).collect();
+        let obstacle_field = obstacles::ObstacleField::new(scenario, &data.obstacles, &map, &kits, &code_words)?;
         let mut sim = Self {
             tick: 0,
             map,
@@ -917,6 +918,7 @@ impl Sim {
 
         // 2. Platoon AI, on planning rasters with what each side now knows of obstacles.
         if tick.is_multiple_of(PLATOON_AI_EVERY) {
+            self.demolition_step(&mut events);
             self.observe_obstacles(&mut events);
             self.rebuild_layers();
         }
@@ -1316,6 +1318,48 @@ impl Sim {
         self.tick += 1;
         self.update_pictures();
         events
+    }
+
+    /// Reserved demolitions (M8d, 1 Hz; FM 90-7 (1994) reserved targets): a prepared bridge is
+    /// blown at its time, on its code word, or when an enemy the side has seen comes within its
+    /// distance. Whatever is on the deck is lost.
+    fn demolition_step(&mut self, events: &mut Vec<Event>) {
+        let now = self.time_s();
+        for d in 0..self.obstacles.demolitions.len() {
+            let dm = self.obstacles.demolitions[d].clone();
+            if dm.blown {
+                continue;
+            }
+            let b = &self.map.bridges[dm.bridge];
+            let centre = [b.centre[0] as f64, b.centre[1] as f64];
+            let pic = &self.pictures[dm.side.0 as usize];
+            let timed = dm.at_s.is_some_and(|t| now >= t);
+            let word = dm.code.is_some_and(|w| pic.code_words.iter().any(|c| c.word == w));
+            let close = dm.enemy_within_m.is_some_and(|r| {
+                pic.live_contacts().any(|c| pic.time_s - c.last_report_s < 30.0 && dist(c.pos, centre) <= r)
+            });
+            if !(timed || word || close) {
+                continue;
+            }
+            let deck = self.obstacles.blow(&self.data.obstacles, &self.map, d);
+            let cell = self.map.manifest.cell_size_m;
+            for k in 0..self.world.len() {
+                let p = self.world.transform[k].pos;
+                let (i, j) = ((p[0] / cell).floor() as u32, (p[1] / cell).floor() as u32);
+                if self.world.alive(k)
+                    && !self.world.mounted(k)
+                    && deck.contains(&(i, j))
+                    && gunnery::apply_damage(&mut self.world, k, Some(KillKind::Catastrophic), false).is_some()
+                {
+                    events.push(Event::Hit {
+                        unit: self.world.id[k],
+                        penetrated: true,
+                        kill: Some(KillKind::Catastrophic),
+                    });
+                }
+            }
+            events.push(Event::BridgeBlown { side: dm.side, at: centre });
+        }
     }
 
     /// Enemy obstacles seen (M8d, 1 Hz): a unit with a line of sight to a point of the obstacle

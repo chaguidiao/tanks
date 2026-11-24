@@ -217,6 +217,26 @@ pub struct SideDef {
     /// Obstacles the side has built (M8d): known to it from the start, to the enemy once seen.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub obstacles: Vec<ObstacleDef>,
+    /// Bridges the side has prepared for demolition (M8d; TERRAIN.md §5.2).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub demolitions: Vec<DemolitionDef>,
+}
+
+/// A bridge prepared for demolition (plan M8D-ENGINEERS §4; FM 90-7 (1994) reserved demolition
+/// targets): the bridge nearest `at` is blown at the first trigger met; none listed = never.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DemolitionDef {
+    /// A point on or by the bridge (local map metres).
+    pub at: [f64; 2],
+    /// Blown at this time (s after the start).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at_s: Option<f64>,
+    /// Blown when the side sends this code word (its doctrine pack's list).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_word: Option<String>,
+    /// Blown when an enemy the side has seen comes within this distance of the bridge (m).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enemy_within_m: Option<f64>,
 }
 
 /// An obstacle placed for a side (docs/plans/M8D-ENGINEERS.md §2): a band along a line, its kind

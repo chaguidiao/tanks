@@ -19,6 +19,8 @@ pub struct MobilityClass {
     /// Foot movement: land cover uses `foot_speed_factor`, and buildings can be entered through
     /// their entrances (baker) instead of being no-go.
     pub foot: bool,
+    /// Combat mass (kg) for bridge classes (M8d); 0 for foot.
+    pub mass_kg: f64,
 }
 
 /// Id of the foot class's speed raster in the baked map.
@@ -33,6 +35,7 @@ impl MobilityClass {
             max_slope: f.max_slope.get(),
             fording_depth: f.fording_depth_m.get(),
             foot: true,
+            mass_kg: 0.0,
         }
     }
 }
@@ -52,6 +55,7 @@ impl From<&VehicleDef> for MobilityClass {
             max_slope: m.max_slope.get(),
             fording_depth: m.fording_depth_m.get(),
             foot: false,
+            mass_kg: m.combat_mass_kg.get(),
         }
     }
 }

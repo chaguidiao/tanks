@@ -116,6 +116,7 @@ impl DataSet {
             soils: load_ron(&root.join("terrain/soils.ron"))?,
             buildings: load_ron(&root.join("terrain/buildings.ron"))?,
             foot: load_ron(&root.join("terrain/foot.ron"))?,
+            bridges: load_ron(&root.join("terrain/bridges.ron"))?,
         };
         terrain.validate().map_err(|message| DataError { path: root.join("terrain"), message })?;
         let ds = Self {

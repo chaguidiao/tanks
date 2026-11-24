@@ -445,6 +445,7 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                         fire_support: vec![],
                         supply_points: vec![],
                         obstacles: vec![],
+                        demolitions: vec![],
                     },
                     SideDef {
                         name: "B".into(),
@@ -467,6 +468,7 @@ fn duel(ds: &DataSet, a: &Args) -> Result<(), String> {
                         fire_support: vec![],
                         supply_points: vec![],
                         obstacles: vec![],
+                        demolitions: vec![],
                     },
                 ],
                 objectives: vec![],
@@ -620,6 +622,7 @@ fn detect(ds: &DataSet, a: &Args) -> Result<(), String> {
         fire_support: vec![],
         supply_points: vec![],
         obstacles: vec![],
+        demolitions: vec![],
     };
     // The observer is a vehicle, or a squad (its eyes, binoculars and night devices).
     let observer_squad = ds.squad(&observer).is_some();
@@ -802,6 +805,7 @@ fn firefight(ds: &DataSet, a: &Args) -> Result<(), String> {
         fire_support: vec![],
         supply_points: vec![],
         obstacles: vec![],
+        demolitions: vec![],
     };
     let mut csv = String::from(
         "posture,range_m,weapons,guns,trials,p_engaged,mean_first_volley_s,rounds,casualties,rounds_per_casualty,casualties_per_gun_min,shooter_casualties,exchange_ratio\n",

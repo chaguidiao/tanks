@@ -13,6 +13,22 @@ pub struct Features {
     pub roads: Vec<Road>,
     pub forests: Vec<Forest>,
     pub buildings: Vec<Building>,
+    /// Authored bridges (M8d): a line along a road crossing water and its load class; the
+    /// baker gives the crossing under it that class. Optional file.
+    pub bridges: Vec<Bridge>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BridgeProps {
+    /// Military load class (TERRAIN.md §5.2).
+    pub mlc: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Bridge {
+    pub id: u32,
+    pub points: Vec<Vec2>,
+    pub props: BridgeProps,
 }
 
 pub use sim_data::BuildingClass;
@@ -187,7 +203,17 @@ impl Features {
                     (f.id, Geometry::Polygon { coordinates: vec![ring] }, f.props.clone())
                 })
                 .collect(),
-        )
+        )?;
+        if !self.bridges.is_empty() {
+            write_collection(
+                &dir.join("bridges.geojson"),
+                self.bridges
+                    .iter()
+                    .map(|b| (b.id, Geometry::LineString { coordinates: b.points.clone() }, b.props.clone()))
+                    .collect(),
+            )?;
+        }
+        Ok(())
     }
 
     pub fn load(dir: &Path) -> Result<Self> {
@@ -229,7 +255,16 @@ impl Features {
                 _ => Err(TerrainError::io(&p, "expected Polygon")),
             })
             .collect::<Result<_>>()?;
-        Ok(Self { rivers, roads, forests, buildings })
+        let p = dir.join("bridges.geojson");
+        let bridges = if p.exists() {
+            read_collection::<BridgeProps>(&p)?
+                .into_iter()
+                .map(|(id, g, props)| Ok(Bridge { id, points: line(&p, g)?, props }))
+                .collect::<Result<_>>()?
+        } else {
+            Vec::new()
+        };
+        Ok(Self { rivers, roads, forests, buildings, bridges })
     }
 
     /// Next free feature id (ids are unique across all feature kinds).
@@ -238,6 +273,7 @@ impl Features {
         let d = self.roads.iter().map(|f| f.id);
         let f = self.forests.iter().map(|f| f.id);
         let b = self.buildings.iter().map(|b| b.id);
-        r.chain(d).chain(f).chain(b).max().map_or(1, |m| m + 1)
+        let g = self.bridges.iter().map(|b| b.id);
+        r.chain(d).chain(f).chain(b).chain(g).max().map_or(1, |m| m + 1)
     }
 }

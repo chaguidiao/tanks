@@ -1,0 +1,10 @@
+// Bridges (M8d; TERRAIN.md §5.2; plan M8D-ENGINEERS §4). A vehicle crosses a bridge whose
+// military load class (MLC) is at least its own. Sources: DTIC AD1151141 (Military Load
+// Classification, 2021 briefing) and the Wikipedia article "Military Load Classification" (read
+// November 2026): a tracked vehicle's class was set equal to its weight in short tons; STANAG
+// 2021 corrects it for width, which is not modelled here.
+(
+    default_mlc: (value: 80.0, source: "estimate", confidence: estimate,
+        notes: "Generated road bridges carry no class of their own. A modern European road bridge on a main or secondary road takes the heaviest tanks of the period; 80 keeps every vehicle in the data able to cross, so generated maps play as before. Authored bridges (features/bridges.geojson) set their own class."),
+    mlc_per_kg: (value: 0.0011023, source: "1 short ton = 907.18 kg; DTIC AD1151141: tracked MLC = weight in short tons", confidence: medium),
+)

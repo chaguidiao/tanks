@@ -2310,6 +2310,13 @@ impl Game {
                 f.text("SMOKE", p[0] - 16.0, p[1] - 5.0, style::FONT, Rgba(205, 205, 205, 190));
             }
         }
+        // Bridges with an authored load class, when zoomed in (TERRAIN.md §5.2).
+        if cam.mpp < 3.0 {
+            for b in self.sim.map().bridges.iter().filter(|b| b.authored) {
+                let p = cam.to_screen([b.centre[0] as f64, b.centre[1] as f64]);
+                f.text(&format!("MLC {:.0}", b.mlc), p[0] + 8.0, p[1] + 6.0, style::FONT_S, style::TEXT);
+            }
+        }
         // Obstacles the side knows (M8d): its own in the friendly colour, the enemy's hostile.
         for o in &pic.obstacles {
             symbols::obstacle(f, cam, o, if o.own { style::FRIENDLY } else { style::HOSTILE });
@@ -3997,6 +4004,7 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                 (false, None) => format!("{}: MINE STRIKE. NO DAMAGE.", u.callsign),
             }
         }
+        Event::BridgeBlown { side, at } if *side == pic.side => format!("BRIDGE AT GRID {} BLOWN.", format::grid(*at)),
         Event::ObstacleSeen { side, obstacle } if *side == pic.side => {
             let o = pic.obstacles.iter().find(|o| o.id == *obstacle)?;
             let mid = o.points[o.points.len() / 2];

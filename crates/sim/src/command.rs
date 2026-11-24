@@ -337,6 +337,11 @@ pub enum Event {
         unit: EntityId,
         obstacle: u32,
     },
+    /// A side blew a bridge it had prepared for demolition (M8d).
+    BridgeBlown {
+        side: SideId,
+        at: Vec2,
+    },
     /// A side learned of an enemy obstacle by seeing it.
     ObstacleSeen {
         side: SideId,

@@ -249,6 +249,7 @@ impl ScenarioEditor {
                 fire_support: vec![],
                 supply_points: vec![],
                 obstacles: vec![],
+                demolitions: vec![],
             });
         }
         let vehicle =

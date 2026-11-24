@@ -101,12 +101,22 @@ pub struct FootMobilityDef {
     pub building_interior_speed_mps: Stat<f64>,
 }
 
+/// Bridges (M8d, TERRAIN.md §5.2; `data/terrain/bridges.ron`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BridgeData {
+    /// Military load class of a road bridge with no authored class (generated maps).
+    pub default_mlc: Stat<f64>,
+    /// Short tons per kilogram: a tracked vehicle's class is about its weight in short tons.
+    pub mlc_per_kg: Stat<f64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TerrainData {
     pub landcover: Vec<LandCoverDef>,
     pub soils: Vec<SoilDef>,
     pub buildings: Vec<BuildingTypeDef>,
     pub foot: FootMobilityDef,
+    pub bridges: BridgeData,
 }
 
 impl TerrainData {

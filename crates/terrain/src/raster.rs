@@ -82,6 +82,14 @@ pub fn polyline_length(pts: &[Vec2]) -> f64 {
     pts.windows(2).map(|w| libm::sqrt((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2))).sum()
 }
 
+/// Distance from `p` to segment a–b.
+pub fn seg_dist(p: Vec2, a: Vec2, b: Vec2) -> f64 {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let l2 = dx * dx + dy * dy;
+    let t = if l2 > 0.0 { (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+    libm::hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
