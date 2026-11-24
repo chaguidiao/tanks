@@ -175,6 +175,11 @@ pub enum Command {
         reaction: ai::picture::ContactReaction,
     },
     /// Set what the platoon does when ambushed at close range (plan M8F1-INFANTRY-AI §2).
+    /// ON OBSTACLE (M8d): what the platoon does at an obstacle on its route.
+    SetObstacleReaction {
+        platoon: PlatoonId,
+        reaction: ai::picture::ObstacleReaction,
+    },
     SetAmbushReaction {
         platoon: PlatoonId,
         reaction: ai::picture::AmbushReaction,
@@ -507,6 +512,27 @@ pub enum PlatoonReport {
         from: Vec2,
         reaction: ai::picture::AmbushReaction,
     },
+    /// React to obstacle (M8d): an obstacle of kind `kind` (its name) at `at` on the route;
+    /// `reaction` is what the platoon does about it.
+    Obstacle {
+        kind: String,
+        at: Vec2,
+        reaction: ai::picture::ObstacleReaction,
+    },
+    /// No acceptable bypass: halted short of the obstacle, waiting for orders or a lane.
+    NoBypass,
+    /// Ordered to breach without a plough, roller or engineers able to: halted.
+    NoBreachAsset,
+    /// Breach started at `at` (the point of breach).
+    Breaching {
+        at: Vec2,
+    },
+    /// A lane is open through the obstacle at `at`.
+    LaneOpen {
+        at: Vec2,
+    },
+    /// The breach stopped short (breacher lost or the kit wrecked): halted.
+    BreachFailed,
     /// Break-contact drill: screening and withdrawing away from `threat`.
     /// `threat`: the nearest contact in the picture; None when falling back with none seen.
     BreakingContact {

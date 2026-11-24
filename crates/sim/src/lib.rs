@@ -12,6 +12,7 @@
 //! reports → gunnery → impacts → mobility → pictures.
 
 pub mod antiarmour;
+pub mod breach;
 pub mod builtup;
 pub mod command;
 pub mod control;
@@ -417,6 +418,9 @@ impl Sim {
                                 finished: Vec::new(),
                                 contact_reaction: Default::default(),
                                 ambush_reaction: Default::default(),
+                                obstacle_reaction: Default::default(),
+                                obstacle_tick: None,
+                                wait_lane: None,
                                 built_up: Default::default(),
                                 shift_fire: Default::default(),
                                 ambush: None,
@@ -913,6 +917,7 @@ impl Sim {
 
         // 2. Platoon AI, on planning rasters with what each side now knows of obstacles.
         if tick.is_multiple_of(PLATOON_AI_EVERY) {
+            self.observe_obstacles(&mut events);
             self.rebuild_layers();
         }
         if tick.is_multiple_of(PLATOON_AI_EVERY) {
@@ -936,6 +941,9 @@ impl Sim {
                 logistics: &self.data.logistics,
                 avoid: &self.avoid,
                 layers: &self.layers,
+                obstacles: &mut self.obstacles,
+                obstacle_model: &self.data.obstacles,
+                squads: &self.squads,
                 recalled: Vec::new(),
                 repairs: &mut self.repairs,
             };
@@ -984,6 +992,7 @@ impl Sim {
                 tick,
                 events: &mut events,
                 layers: &self.layers,
+                obstacle_model: &self.data.obstacles,
             };
             infantry::step(&mut ictx);
             if tick.is_multiple_of(PLATOON_AI_EVERY) {
@@ -1307,6 +1316,52 @@ impl Sim {
         self.tick += 1;
         self.update_pictures();
         events
+    }
+
+    /// Enemy obstacles seen (M8d, 1 Hz): a unit with a line of sight to a point of the obstacle
+    /// within its kind's detection range, cut to the visibility and in poor light (estimate: wire
+    /// and ditches are hard to see at night even with night sights).
+    fn observe_obstacles(&mut self, events: &mut Vec<Event>) {
+        if self.obstacles.list.iter().all(|o| o.known.iter().all(|k| *k)) {
+            return;
+        }
+        let atm = self.weather.at(self.clock_s(), &self.data.detection);
+        let vis = 3.912 / atm.beta_visible.max(1e-9);
+        let light = atm.light.clamp(0.3, 1.0);
+        let g = Ground::new(&self.map, &self.data.terrain);
+        for o in 0..self.obstacles.list.len() {
+            let ob = &self.obstacles.list[o];
+            let range = self.data.obstacles.kinds[ob.kind].detect_range_m.get().min(vis) * light;
+            let mut seen = Vec::new();
+            for (s, known) in ob.known.iter().enumerate() {
+                if *known {
+                    continue;
+                }
+                let spotted = (0..self.world.len()).any(|k| {
+                    if self.world.side[k].0 as usize != s || !self.world.alive(k) || self.world.mounted(k) {
+                        return false;
+                    }
+                    let pos = self.world.transform[k].pos;
+                    if ob.distance(pos) > range {
+                        return false;
+                    }
+                    let eye = match self.world.vehicle[k] {
+                        Some(vi) => self.vehicles[vi].dimensions.sight_height_m.get(),
+                        None => 1.5,
+                    };
+                    let sight = terrain::los::sight(&g, pos, eye, ob.nearest(pos), &[0.5]);
+                    sight.any() && sight.transmittance > 0.3
+                });
+                if spotted {
+                    seen.push(s);
+                }
+            }
+            for s in seen {
+                if self.obstacles.learn(o, SideId(s as u8)) {
+                    events.push(Event::ObstacleSeen { side: SideId(s as u8), obstacle: o as u32 });
+                }
+            }
+        }
     }
 
     /// Mine strikes from the mobility step (M8d): the field becomes known to the vehicle's side,
@@ -1814,6 +1869,14 @@ impl Sim {
                     p.contact_reaction = *reaction;
                     let r = *reaction;
                     p.rewrite_leg(|l| l.on_contact = Some(r));
+                    events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
+                }
+            }
+            Command::SetObstacleReaction { platoon, reaction } => {
+                if let Some(p) = self.platoon_mut(c.side, *platoon) {
+                    p.obstacle_reaction = *reaction;
+                    let r = *reaction;
+                    p.rewrite_leg(|l| l.on_obstacle = Some(r));
                     events.push(Event::OrderReceived { side: c.side, to: Addressee::Platoon(*platoon) });
                 }
             }
@@ -2325,6 +2388,20 @@ impl Sim {
             if p.shift_fire != Default::default() {
                 h.u32(p.id.0);
                 h.u8(p.shift_fire as u8);
+            }
+            // Obstacle drill state (M8d; default and empty in scenarios without obstacles).
+            if p.obstacle_reaction != Default::default() || p.obstacle_tick.is_some() || p.wait_lane.is_some() {
+                h.u32(p.id.0);
+                h.u8(p.obstacle_reaction as u8);
+                h.u64(p.obstacle_tick.unwrap_or(u64::MAX));
+                h.u64(p.wait_lane.map_or(u64::MAX, |o| o as u64));
+            }
+            if let platoon::PlatoonOrder::Breach { obstacle, breacher, engineers, lane, .. } = &p.order {
+                h.u32(p.id.0);
+                h.u64(*obstacle as u64);
+                h.u64(breacher.map_or(u64::MAX, |k| k as u64));
+                h.u32(engineers.len() as u32);
+                h.u64(lane.map_or(u64::MAX, |l| l as u64));
             }
         }
         for b in &self.batteries {

@@ -1,6 +1,8 @@
 //! Platoons: membership, order state and the platoon view. Behaviour is in `platoon_ai.rs`.
 
-use ai::picture::{AmbushReaction, BuiltUp, ContactReaction, PlatoonId, PlatoonView, ShiftFire, SideId};
+use ai::picture::{
+    AmbushReaction, BuiltUp, ContactReaction, ObstacleReaction, PlatoonId, PlatoonView, ShiftFire, SideId,
+};
 use ai::position::Candidate;
 use sim_data::{Formation, Technique};
 
@@ -61,6 +63,20 @@ pub enum PlatoonOrder {
         home: Vec<Vec2>,
         phase: DeliverPhase,
         jobs: Vec<TruckJob>,
+    },
+    /// Breaching obstacle `obstacle` (M8d; FM 3-34.2 (2000) SOSRA, FM 20-32 (1998) ch. 10): a
+    /// lane from `entry` to `exit` across it, cut by `breacher` (a vehicle with a plough or
+    /// roller) or by the platoon's engineer squads; then the move to `resume` (destination,
+    /// checkpoints ahead) goes on through the lane.
+    Breach {
+        obstacle: usize,
+        entry: Vec2,
+        exit: Vec2,
+        breacher: Option<usize>,
+        engineers: Vec<usize>,
+        /// Index of the lane in the obstacle's lanes, once cutting has begun.
+        lane: Option<usize>,
+        resume: (Vec2, Vec<Vec2>),
     },
     /// Recovery vehicles recovering the immobilised vehicles of platoon `from` (plan
     /// M8C-RECOVERY §3). `targets` = its members' world indices in platoon order; `home` = the
@@ -138,6 +154,12 @@ pub struct Platoon {
     pub finished: Vec<u16>,
     pub contact_reaction: ContactReaction,
     pub ambush_reaction: AmbushReaction,
+    pub obstacle_reaction: ObstacleReaction,
+    /// Tick the platoon last met an obstacle on its route (OBSTACLE branch condition).
+    pub obstacle_tick: Option<u64>,
+    /// Halted at obstacle `n` (index in the sim's obstacles): the held move goes on by itself
+    /// once a lane through it is open.
+    pub wait_lane: Option<usize>,
     pub built_up: BuiltUp,
     pub shift_fire: ShiftFire,
     /// Rockets or missiles last fired at a member from inside the doctrine's close-ambush range:
@@ -245,6 +267,7 @@ impl Platoon {
                 format!("WAITING AT CP {}", self.plan.as_ref().map_or(0, |st| st.cursor + 1))
             }
             PlatoonOrder::None => match &self.held {
+                Some(PlatoonOrder::Move { .. }) if self.wait_lane.is_some() => "HALTED AT OBSTACLE".to_owned(),
                 Some(PlatoonOrder::Move { .. }) => "HALTED, ROUTE HELD".to_owned(),
                 Some(_) => "HALTED, BP ORDER HELD".to_owned(),
                 None => "HALTED".to_owned(),
@@ -256,6 +279,8 @@ impl Platoon {
             PlatoonOrder::Occupy { reported: true, .. } => "SET IN BATTLE POSITION".to_owned(),
             PlatoonOrder::Occupy { .. } => "OCCUPYING BATTLE POSITION".to_owned(),
             PlatoonOrder::Contact => "IN CONTACT".to_owned(),
+            PlatoonOrder::Breach { lane: None, .. } => "MOVING TO BREACH".to_owned(),
+            PlatoonOrder::Breach { .. } => "BREACHING".to_owned(),
             PlatoonOrder::Resupply { members, .. } | PlatoonOrder::Tailgate { members, .. } => {
                 format!("RESUPPLY {}/{}", members.iter().filter(|m| m.done).count(), members.len())
             }
@@ -300,6 +325,8 @@ impl Platoon {
             plan: self.plan.as_ref().map(|s| s.view()),
             contact_reaction: self.contact_reaction,
             ambush_reaction: self.ambush_reaction,
+            obstacle_reaction: self.obstacle_reaction,
+            obstacle_tick: self.obstacle_tick,
             built_up: self.built_up,
             unsupported: crate::platoon_ai::unsupported(self, w, support_radius_m),
             shift_fire: self.shift_fire,

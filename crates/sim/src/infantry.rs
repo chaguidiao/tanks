@@ -137,6 +137,7 @@ pub struct Ctx<'a> {
     pub events: &'a mut Vec<Event>,
     /// Planning rasters with the obstacles each side knows (M8d).
     pub layers: &'a crate::obstacles::Layers,
+    pub obstacle_model: &'a sim_data::ObstacleModel,
 }
 
 fn foot_layer(map: &terrain::BakedMap) -> Option<&terrain::bake::MobilityLayer> {
@@ -758,9 +759,23 @@ pub fn platoon_step(platoons: &mut [crate::platoon::Platoon], ctx: &mut Ctx) {
             movers.iter().all(|&k| ctx.world.ai[k].as_ref().is_none_or(|a| a.order == crate::world::Order::Idle));
         if route.is_empty() {
             // New order: plan every squad's route.
+            // Round known obstacles where that works; else, or when the platoon is to breach,
+            // straight at them for the obstacle drill (M8d, `crate::breach`).
+            let base = crate::obstacles::Layers::default();
+            let breach = p.obstacle_reaction == ai::picture::ObstacleReaction::Breach;
             for (i, &k) in movers.iter().enumerate() {
                 let pos = ctx.world.transform[k].pos;
-                match foot_route(ctx.map, ctx.layers, ctx.world.side[k], ctx.pathfinder, pos, via, slot(i)) {
+                let side = ctx.world.side[k];
+                let planned = foot_route(ctx.map, ctx.layers, side, ctx.pathfinder, pos, via, slot(i));
+                let direct = foot_route(ctx.map, &base, side, ctx.pathfinder, pos, via, slot(i));
+                let len = |r: &Vec<crate::Vec2>| ai::formation::length(r);
+                let m = ctx.obstacle_model;
+                let factor = if breach { m.breach_detour_factor.get() } else { m.bypass_detour_factor.get() };
+                let chosen = match (planned, direct) {
+                    (Some(a), Some(b)) => Some(if len(&a) > factor * len(&b).max(1.0) { b } else { a }),
+                    (a, b) => a.or(b),
+                };
+                match chosen {
                     Some(r) => ctx.world.set_route(k, r, p.speed_limit, Some(b), true, FOOT_ARRIVE_M),
                     None => ctx.events.push(Event::NoRoute { unit: ctx.world.id[k] }),
                 }

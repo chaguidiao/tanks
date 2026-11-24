@@ -130,6 +130,10 @@ pub fn condition_met(pic: &PerceivedWorld, c: &TriggerCondition, sign: f64) -> b
             .platoon(*platoon)
             .and_then(|v| v.ambushed_tick)
             .is_some_and(|t| pic.time_s - t as f64 * crate::DT <= AMBUSHED_RECENT_S),
+        TriggerCondition::ObstacleMet { platoon } => pic
+            .platoon(*platoon)
+            .and_then(|v| v.obstacle_tick)
+            .is_some_and(|t| pic.time_s - t as f64 * crate::DT <= AMBUSHED_RECENT_S),
         TriggerCondition::EnemyCrosses { line } => {
             let Some(l) = line_points(&pic.graphics, *line) else { return false };
             pic.live_contacts().filter(|c| pic.time_s - c.last_report_s < 30.0).any(|c| {

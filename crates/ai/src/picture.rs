@@ -269,6 +269,10 @@ pub struct PlatoonView {
     pub shift_fire: ShiftFire,
     /// Tick of the last close ambush the platoon reacted to.
     pub ambushed_tick: Option<u64>,
+    /// What it does at an obstacle on its route (M8d).
+    pub obstacle_reaction: ObstacleReaction,
+    /// Tick it last met an obstacle on its route.
+    pub obstacle_tick: Option<u64>,
     /// Orders waiting in the queue.
     pub queued: u8,
     /// Supply point (id in `supply_points`) of a service-station resupply in progress.
@@ -320,6 +324,9 @@ pub enum TriggerCondition {
     /// Rockets or missiles were fired at the platoon from close range (plans: since the step
     /// began; elsewhere: in the last 30 s).
     Ambushed { platoon: PlatoonId },
+    /// The platoon met an obstacle on its route (plans: since the step began; elsewhere: in the
+    /// last 30 s) (M8d).
+    ObstacleMet { platoon: PlatoonId },
     /// Plan only: platoon `platoon` has reached (is at or has passed) its plan step `step`.
     PlatoonAt { platoon: PlatoonId, step: u16 },
 }
@@ -426,6 +433,21 @@ pub struct LegSettings {
     pub built_up: Option<BuiltUp>,
     #[serde(default)]
     pub shift_fire: Option<ShiftFire>,
+    #[serde(default)]
+    pub on_obstacle: Option<ObstacleReaction>,
+}
+
+/// What a platoon does at an obstacle on its route (plan M8D-ENGINEERS §2; ATP 3-20.15 battle
+/// drill react to obstacle; ATP 3-90.4 bypass or breach).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ObstacleReaction {
+    /// Re-plan round it if the detour is acceptable, else halt and report.
+    #[default]
+    Bypass,
+    /// Open a lane with the platoon's plough, roller or engineers, then go through it.
+    Breach,
+    /// Halt short of it and wait for orders (or for a lane).
+    Halt,
 }
 
 /// What a platoon does when rockets or missiles are fired at it from close range (plan

@@ -68,6 +68,11 @@ pub struct Ctx<'a> {
     pub avoid: &'a crate::builtup::AvoidLayers,
     /// Planning rasters with the obstacles each side knows (M8d).
     pub layers: &'a crate::obstacles::Layers,
+    /// Obstacles, lanes and kits (M8d), and their data.
+    pub obstacles: &'a mut crate::obstacles::ObstacleField,
+    pub obstacle_model: &'a sim_data::ObstacleModel,
+    /// Squad types in use (`SquadState::def`).
+    pub squads: &'a [sim_data::SquadDef],
     /// Carrier platoons whose plans called their squads back aboard this tick: the orders and
     /// plans of their dismount platoons end.
     pub recalled: Vec<PlatoonId>,
@@ -88,14 +93,55 @@ impl<'a> Ctx<'a> {
         layers.speed(map, avoid_layers, self.world.side[k].0, id, avoid)
     }
 
+    /// A route for vehicle `k` to `to` on its side's plain raster (no built-up avoidance).
+    pub(crate) fn route_for(&mut self, k: usize, to: Vec2) -> Option<Vec<Vec2>> {
+        self.route(k, to, false)
+    }
+
     fn route(&mut self, k: usize, to: Vec2, avoid: bool) -> Option<Vec<Vec2>> {
         let (cell, from) = (self.map.manifest.cell_size_m, self.world.transform[k].pos);
         let speed = self.speed(k, avoid)?;
         self.pathfinder.find(speed, cell, from, to)
     }
 
+    /// Route through checkpoints for a platoon move (M8d): round the obstacles the side knows if
+    /// that works and the detour is acceptable, else (or when the platoon is to breach) the direct
+    /// route, which the obstacle drill then deals with at the obstacle (`crate::breach`).
+    fn route_move(
+        &mut self,
+        k: usize,
+        via: &[Vec2],
+        to: Vec2,
+        avoid: bool,
+        breach: bool,
+    ) -> Option<(Vec<Vec2>, Vec<f64>)> {
+        let id = &self.vehicles[self.world.vehicle[k]?].id;
+        let side = self.world.side[k].0;
+        if !self.layers.knows(side) {
+            return self.route_via(k, via, to, avoid);
+        }
+        let (cell, from) = (self.map.manifest.cell_size_m, self.world.transform[k].pos);
+        let base = crate::obstacles::Layers::default();
+        let direct = base.speed(self.map, self.avoid, side, id, avoid)?;
+        let r0 = self.pathfinder.find_via(direct, cell, from, via, to);
+        let r1 = self.route_via(k, via, to, avoid);
+        let m = self.obstacle_model;
+        let factor = if breach { m.breach_detour_factor.get() } else { m.bypass_detour_factor.get() };
+        match (r0, r1) {
+            (Some(r0), Some(r1)) => {
+                if ai::formation::length(&r1.0) > factor * ai::formation::length(&r0.0).max(1.0) {
+                    Some(r0)
+                } else {
+                    Some(r1)
+                }
+            }
+            (r0, None) => r0,
+            (None, r1) => r1,
+        }
+    }
+
     /// Route through checkpoints; also returns the arc length of each checkpoint.
-    fn route_via(&mut self, k: usize, via: &[Vec2], to: Vec2, avoid: bool) -> Option<(Vec<Vec2>, Vec<f64>)> {
+    pub(crate) fn route_via(&mut self, k: usize, via: &[Vec2], to: Vec2, avoid: bool) -> Option<(Vec<Vec2>, Vec<f64>)> {
         let (cell, from) = (self.map.manifest.cell_size_m, self.world.transform[k].pos);
         let speed = self.speed(k, avoid)?;
         self.pathfinder.find_via(speed, cell, from, via, to)
@@ -104,7 +150,7 @@ impl<'a> Ctx<'a> {
 
 /// Does the platoon route round built-up ground (plan M8F1-INFANTRY-AI §3; FM 3-06.11)? Tanks
 /// without dismounted support do, unless the leg says BUILT-UP ENTER.
-fn avoids_built_up(p: &Platoon, ctx: &Ctx) -> bool {
+pub(crate) fn avoids_built_up(p: &Platoon, ctx: &Ctx) -> bool {
     use ai::picture::BuiltUp;
     let r = ctx.doctrines[p.side.0 as usize].infantry.built_up.support_radius_m.get();
     p.built_up != BuiltUp::Enter && unsupported(p, ctx.world, r)
@@ -145,6 +191,7 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
         if p.dismount {
             // Orders of dismount platoons: crate::infantry; plans run here like any platoon's.
             crate::plan::step(p, ctx);
+            crate::breach::step(p, ctx);
             continue;
         }
         // Supply trucks and recovery vehicles fight nothing: no plans, no fire distribution, no
@@ -176,12 +223,14 @@ pub fn step(platoons: &mut [Platoon], ctx: &mut Ctx) {
         indirect_fire_drill(p, &alive, ctx);
         ambush_drill(p, ctx, &doctrine);
         contact_drill(p, ctx, &doctrine);
+        crate::breach::step(p, ctx);
         match p.order.clone() {
             PlatoonOrder::Move { .. } => move_step(p, ctx, &doctrine),
             PlatoonOrder::Occupy { .. } => occupy_step(p, ctx, &doctrine),
             PlatoonOrder::Contact => contact_step(p, ctx),
             PlatoonOrder::Resupply { .. } => resupply_step(p, ctx),
             PlatoonOrder::Tailgate { .. }
+            | PlatoonOrder::Breach { .. }
             | PlatoonOrder::Deliver { .. }
             | PlatoonOrder::Recover { .. }
             | PlatoonOrder::None => {}
@@ -455,7 +504,8 @@ fn move_step(p: &mut Platoon, ctx: &mut Ctx, d: &DoctrinePack) {
     }
     if route.is_empty() {
         let leader = movers[0];
-        match ctx.route_via(leader, &via, destination, avoid) {
+        let breach = p.obstacle_reaction == ai::picture::ObstacleReaction::Breach;
+        match ctx.route_move(leader, &via, destination, avoid, breach) {
             Some((r, marks)) => {
                 route = r;
                 checkpoints = marks;

@@ -17,10 +17,16 @@ pub struct ObstacleModel {
     /// A breach starts this far short of the obstacle's near edge and ends this far past its far
     /// edge (m).
     pub lane_overrun_m: Stat<f64>,
+    /// Share of the mines a plough or roller left in its path that vehicles following in its
+    /// cleared track paths still meet.
+    pub lane_follow_factor: Stat<f64>,
     /// Engineers opening a vehicle lane by hand through a minefield (m of lane per minute).
     pub hand_breach_mine_m_per_min: Stat<f64>,
     /// A bypass is taken only if the new route is at most this many times the old one.
     pub bypass_detour_factor: Stat<f64>,
+    /// A platoon set to breach still takes a known lane or gap if the route through it is at
+    /// most this many times the direct one.
+    pub breach_detour_factor: Stat<f64>,
     /// A breaching vehicle or squad stops work while suppressed above this level (0–1).
     pub breach_suppression_stop: Stat<f64>,
 }

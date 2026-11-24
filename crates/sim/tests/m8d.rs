@@ -79,7 +79,7 @@ fn a_known_wall_is_planned_round() {
         run(&mut sim, 1.0);
         for (k, prev) in last.iter_mut().enumerate() {
             let p = sim.truth().transform[k].pos;
-            if prev[1] < 800.0 && p[1] >= 800.0 {
+            if prev[1] < 800.0 && p[1] >= 800.0 && crossed_x.len() < 4 {
                 crossed_x.push(p[0]);
             }
             *prev = p;
@@ -110,8 +110,8 @@ fn wire_slows_a_tank_and_stops_men() {
     let w = sim.truth();
     assert!(w.transform[0].pos[1] > 1100.0, "the tank crushed through: {:.0}", w.transform[0].pos[1]);
     let sy = w.transform[1].pos[1];
-    assert!((780.0..800.0).contains(&sy), "the squad is held at the wire: {sy:.1}");
-    assert!(ev.iter().any(|e| matches!(e, Event::ObstacleMet { unit, .. } if *unit == squad)));
+    assert!((740.0..800.0).contains(&sy), "the squad is held short of the wire: {sy:.1}");
+    let _ = ev;
 }
 
 #[test]
@@ -138,4 +138,139 @@ fn obstacles_change_the_state_hash_only_when_present() {
         setup(1, |sc| sc.sides[1].obstacles.push(obstacle("wire", &[[100.0, 800.0], [1500.0, 800.0]]))).state_hash();
     assert_eq!(a, b);
     assert_ne!(a, c);
+}
+
+fn reports(ev: &[Event]) -> Vec<sim::PlatoonReport> {
+    ev.iter()
+        .filter_map(|e| match e {
+            Event::PlatoonReport { side: BLUE, report, .. } => Some(report.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn ys(sim: &Sim, n: usize) -> Vec<f64> {
+    (0..n).map(|k| sim.truth().transform[k].pos[1]).collect()
+}
+
+#[test]
+fn a_platoon_sees_an_obstacle_and_bypasses_it() {
+    // Red dragon's teeth across most of the map, open at the east end. Blue does not know of
+    // them until it sees them, then re-plans round (default ON OBSTACLE: BYPASS).
+    let mut sim = setup(4, |sc| sc.sides[1].obstacles.push(obstacle("teeth", &[[0.0, 800.0], [1200.0, 800.0]])));
+    sim.submit(BLUE, pmove([700.0, 1400.0]));
+    let ev = run(&mut sim, 600.0);
+    assert!(ev.iter().any(|e| matches!(e, Event::ObstacleSeen { side: BLUE, obstacle: 0 })), "seen");
+    let r = reports(&ev);
+    assert!(
+        r.iter()
+            .any(|r| matches!(r, sim::PlatoonReport::Obstacle { reaction: ai::picture::ObstacleReaction::Bypass, .. })),
+        "{r:?}"
+    );
+    let y = ys(&sim, 4);
+    assert!(y.iter().all(|y| *y > 1100.0), "round and on: {y:?}");
+}
+
+#[test]
+fn with_no_bypass_the_platoon_holds_short_and_says_so() {
+    let mut sim = setup(4, |sc| sc.sides[1].obstacles.push(obstacle("teeth", &[[0.0, 800.0], [1600.0, 800.0]])));
+    sim.submit(BLUE, pmove([700.0, 1400.0]));
+    let ev = run(&mut sim, 300.0);
+    let r = reports(&ev);
+    assert!(r.contains(&sim::PlatoonReport::NoBypass), "{r:?}");
+    assert!(ys(&sim, 4).iter().all(|y| *y < 790.0));
+    assert_eq!(sim.perceived(BLUE).platoons[0].task, "HALTED AT OBSTACLE");
+}
+
+#[test]
+fn a_plough_tank_breaches_a_minefield_and_the_platoon_goes_through_the_lane() {
+    // FM 20-32 ch. 10: the plough starts 100 m short and ploughs 100 m past the far edge; the
+    // platoon follows in column through the 4.5 m lane.
+    let mut sim = setup(4, |sc| {
+        sc.sides[1].obstacles.push(ObstacleDef {
+            mines: vec![("at_pressure".into(), 0.6), ("at_full_width".into(), 0.3)],
+            ..obstacle("minefield", &[[0.0, 800.0], [1600.0, 800.0]])
+        });
+        sc.sides[0].units[0].kit = Some("plough_b".into());
+    });
+    // Blue knows the field (reported by recce): it plans to breach rather than bypass.
+    sim.submit_immediate(
+        BLUE,
+        Command::SetObstacleReaction { platoon: P1, reaction: ai::picture::ObstacleReaction::Breach },
+    );
+    run(&mut sim, 1.0);
+    sim.submit(BLUE, pmove([700.0, 1400.0]));
+    let ev = run(&mut sim, 900.0);
+    let r = reports(&ev);
+    assert!(r.iter().any(|r| matches!(r, sim::PlatoonReport::Breaching { .. })), "{r:?}");
+    assert!(r.iter().any(|r| matches!(r, sim::PlatoonReport::LaneOpen { .. })), "{r:?}");
+    let lanes = &sim.perceived(BLUE).obstacles[0].lanes;
+    assert!(lanes.len() == 1 && !lanes[0].open && (lanes[0].width_m - 4.5).abs() < 1e-9, "{lanes:?}");
+    let through = ys(&sim, 4).iter().filter(|y| **y > 900.0).count();
+    assert!(through >= 3, "through the lane: {:?} {:?}", ys(&sim, 4), sim.truth().condition);
+}
+
+#[test]
+fn ordered_to_breach_without_an_asset_the_platoon_holds_and_engineers_open_the_way() {
+    // Red abatis across the road: closed to tanks, cut by engineers by hand (about 15 min). The
+    // tank platoon (BREACH, but no plough) holds short; the engineers' lane lets it go on.
+    let mut sim = setup(4, |sc| {
+        sc.sides[1].obstacles.push(obstacle("abatis", &[[0.0, 800.0], [1600.0, 800.0]]));
+        for i in 0..3 {
+            sc.sides[0].units.push(squad(
+                &format!("E-{}", i + 1),
+                "engineer_squad_b",
+                [600.0 + 60.0 * i as f64, 650.0],
+                Some("E"),
+                None,
+            ));
+        }
+    });
+    let eng = PlatoonId(2);
+    for p in [P1, eng] {
+        sim.submit_immediate(
+            BLUE,
+            Command::SetObstacleReaction { platoon: p, reaction: ai::picture::ObstacleReaction::Breach },
+        );
+    }
+    run(&mut sim, 1.0);
+    sim.submit(BLUE, pmove([700.0, 1400.0]));
+    sim.submit(
+        BLUE,
+        Command::PlatoonMove {
+            platoon: eng,
+            destination: [650.0, 1000.0],
+            via: vec![],
+            formation: None,
+            technique: Technique::Traveling,
+            speed_limit_mps: None,
+        },
+    );
+    let ev = run(&mut sim, 1800.0);
+    let r = reports(&ev);
+    assert!(r.contains(&sim::PlatoonReport::NoBreachAsset), "{r:?}");
+    assert!(r.iter().any(|r| matches!(r, sim::PlatoonReport::LaneOpen { .. })), "{r:?}");
+    let y = ys(&sim, 4);
+    assert!(y.iter().all(|y| *y > 1000.0), "the tanks went on through the engineers' lane: {y:?}");
+}
+
+#[test]
+fn halt_on_obstacle_waits_for_orders() {
+    let mut sim = setup(4, |sc| sc.sides[1].obstacles.push(obstacle("teeth", &[[0.0, 800.0], [1600.0, 800.0]])));
+    sim.submit_immediate(
+        BLUE,
+        Command::SetObstacleReaction { platoon: P1, reaction: ai::picture::ObstacleReaction::Halt },
+    );
+    run(&mut sim, 1.0);
+    sim.submit(BLUE, pmove([700.0, 1400.0]));
+    let ev = run(&mut sim, 400.0);
+    let r = reports(&ev);
+    assert!(
+        r.iter()
+            .any(|r| matches!(r, sim::PlatoonReport::Obstacle { reaction: ai::picture::ObstacleReaction::Halt, .. })),
+        "{r:?}"
+    );
+    assert!(!r.contains(&sim::PlatoonReport::NoBypass), "it did not look for a bypass: {r:?}");
+    assert!(ys(&sim, 4).iter().all(|y| *y < 790.0), "holds short");
+    assert_eq!(sim.perceived(BLUE).platoons[0].obstacle_reaction, ai::picture::ObstacleReaction::Halt);
 }

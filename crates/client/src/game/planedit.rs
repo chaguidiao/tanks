@@ -1166,6 +1166,7 @@ impl Game {
             TriggerCondition::StrengthAtMost { remaining, .. } => format!("STRENGTH <= {remaining}"),
             TriggerCondition::UnderFire { .. } => "UNDER FIRE".into(),
             TriggerCondition::Ambushed { .. } => "AMBUSHED".into(),
+            TriggerCondition::ObstacleMet { .. } => "OBSTACLE".into(),
             TriggerCondition::PlatoonAt { platoon, step } => {
                 let v = pic.platoon(*platoon);
                 let n = v

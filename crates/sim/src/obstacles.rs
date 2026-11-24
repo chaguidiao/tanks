@@ -517,6 +517,11 @@ impl Layers {
         Some(&map.mobility(id)?.speed)
     }
 
+    /// Does `side` know any obstacle (has rasters of its own)?
+    pub fn knows(&self, side: u8) -> bool {
+        self.plain.keys().any(|k| k.0 == side)
+    }
+
     /// The foot raster `side` plans squad routes on.
     pub fn foot<'a>(&'a self, map: &'a BakedMap, side: u8) -> Option<&'a Grid<u8>> {
         let id = terrain::mobility::FOOT_CLASS;

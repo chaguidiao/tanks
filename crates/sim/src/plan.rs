@@ -150,6 +150,9 @@ impl PlanState {
             h.u8(l.technique.map_or(255, |t| t as u8));
             h.u8(l.weapons.map_or(255, |w| w as u8));
             h.u8(l.on_contact.map_or(255, |r| r as u8));
+            if let Some(r) = l.on_obstacle {
+                h.u8(r as u8);
+            }
             if l.on_ambush.is_some() || l.built_up.is_some() {
                 h.u8(l.on_ambush.map_or(255, |r| r as u8));
                 h.u8(l.built_up.map_or(255, |b| b as u8));
@@ -204,8 +207,9 @@ fn run(st: &mut PlanState, p: &mut Platoon, ctx: &mut Ctx) -> bool {
                     return true;
                 }
             }
+            Phase::Leg { .. } if p.wait_lane.is_some() => return true, // halted at an obstacle
             Phase::Leg { stop } => match &p.order {
-                PlatoonOrder::Move { .. } | PlatoonOrder::Contact => {
+                PlatoonOrder::Move { .. } | PlatoonOrder::Contact | PlatoonOrder::Breach { .. } => {
                     track_progress(st, p, ctx, stop);
                     return true;
                 }
@@ -321,6 +325,9 @@ fn apply_leg(st: &PlanState, p: &mut Platoon, ctx: &mut Ctx, idx: usize) {
     }
     if let Some(r) = leg.on_contact {
         p.contact_reaction = r;
+    }
+    if let Some(r) = leg.on_obstacle {
+        p.obstacle_reaction = r;
     }
     if let Some(r) = leg.on_ambush {
         p.ambush_reaction = r;
@@ -568,6 +575,9 @@ pub fn set_met(pic: &ai::picture::PerceivedWorld, set: &ConditionSet, signs: &[f
         TriggerCondition::Ambushed { platoon } => {
             let since_s = since as f64 * DT;
             pic.platoon(*platoon).and_then(|v| v.ambushed_tick).is_some_and(|t| t as f64 * DT >= since_s)
+        }
+        TriggerCondition::ObstacleMet { platoon } => {
+            pic.platoon(*platoon).and_then(|v| v.obstacle_tick).is_some_and(|t| t >= since)
         }
         TriggerCondition::PlatoonAt { platoon, step } => {
             pic.platoon(*platoon).and_then(|v| v.plan.as_ref()).map_or_else(

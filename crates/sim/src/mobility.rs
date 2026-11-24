@@ -158,7 +158,7 @@ pub(crate) fn step(
         }
 
         // Progress / stuck detection.
-        if m.cmd_speed > 0.5 && m.speed < 0.2 {
+        if m.cmd_speed > 0.5 && m.speed < 0.2 && blocked.is_none() {
             let before = m.stalled_s;
             m.stalled_s += DT;
             if before < STUCK_AFTER_S && m.stalled_s >= STUCK_AFTER_S {

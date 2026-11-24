@@ -3977,6 +3977,22 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
             let u = unit(*u)?;
             format!("{}: IMMOBILE AT GRID {}.", u.callsign, format::grid(u.pos))
         }
+        Event::MineStrike { unit: u, kit, kill } => {
+            let u = unit(*u)?;
+            match (kit, kill) {
+                (true, _) => format!("{}: MINE DETONATED ON THE KIT.", u.callsign),
+                (false, Some(sim::KillKind::Catastrophic)) => format!("{}: MINE STRIKE. DESTROYED.", u.callsign),
+                (false, Some(_)) => {
+                    format!("{}: MINE STRIKE. IMMOBILISED AT GRID {}.", u.callsign, format::grid(u.pos))
+                }
+                (false, None) => format!("{}: MINE STRIKE. NO DAMAGE.", u.callsign),
+            }
+        }
+        Event::ObstacleSeen { side, obstacle } if *side == pic.side => {
+            let o = pic.obstacles.iter().find(|o| o.id == *obstacle)?;
+            let mid = o.points[o.points.len() / 2];
+            format!("OBSTACLE SPOTTED: {}, GRID {}.", o.name, format::grid(mid))
+        }
         Event::OutOfFuel { unit: u } => {
             let u = unit(*u)?;
             format!("{}: BLACK ON FUEL AT GRID {}.", u.callsign, format::grid(u.pos))
@@ -4087,6 +4103,22 @@ pub fn radio_text(e: &Event, pic: &PerceivedWorld, game: &Game) -> Option<String
                         ai::picture::AmbushReaction::Halt => " ENGAGING.",
                     }
                 ),
+                PlatoonReport::Obstacle { kind, at, reaction } => format!(
+                    "{cs}: OBSTACLE, {kind}, GRID {}. {}",
+                    format::grid(*at),
+                    match reaction {
+                        ai::picture::ObstacleReaction::Bypass => "BYPASSING.",
+                        ai::picture::ObstacleReaction::Breach => "BREACHING.",
+                        ai::picture::ObstacleReaction::Halt => "HOLDING SHORT.",
+                    }
+                ),
+                PlatoonReport::NoBypass => format!("{cs}: NO BYPASS. HOLDING SHORT OF OBSTACLE."),
+                PlatoonReport::NoBreachAsset => format!("{cs}: NO BREACHING ASSET. HOLDING SHORT OF OBSTACLE."),
+                PlatoonReport::Breaching { at } => format!("{cs}: BREACHING AT GRID {}.", format::grid(*at)),
+                PlatoonReport::LaneOpen { at } => {
+                    format!("{cs}: LANE OPEN AT GRID {}. MOVING THROUGH.", format::grid(*at))
+                }
+                PlatoonReport::BreachFailed => format!("{cs}: BREACH FAILED. HOLDING."),
                 PlatoonReport::BreakingContact { threat: Some(threat) } => {
                     format!("{cs}: BREAKING CONTACT, THREAT GRID {}. SMOKE, WITHDRAWING.", format::grid(*threat))
                 }
