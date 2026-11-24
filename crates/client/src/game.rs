@@ -2310,6 +2310,10 @@ impl Game {
                 f.text("SMOKE", p[0] - 16.0, p[1] - 5.0, style::FONT, Rgba(205, 205, 205, 190));
             }
         }
+        // Obstacles the side knows (M8d): its own in the friendly colour, the enemy's hostile.
+        for o in &pic.obstacles {
+            symbols::obstacle(f, cam, o, if o.own { style::FRIENDLY } else { style::HOSTILE });
+        }
         // Supply points (M8c).
         let sp_radius = self.sim.data().logistics.point_radius_m.get();
         for sp in &pic.supply_points {
@@ -3454,6 +3458,11 @@ impl Game {
             def.map_or(String::new(), |d| format!("   {:.0} L", u.fuel_fraction * d.mobility.fuel_capacity_l.get()));
         let fuel_c = if u.fuel_fraction < 0.25 { style::AMBER } else { style::TEXT };
         out.push((row("FUEL", format!("{:.0} %{litres}", u.fuel_fraction * 100.0)), fuel_c));
+        if let Some((name, wrecked)) = &u.kit {
+            let (text, c) =
+                if *wrecked { (format!("{name} (WRECKED)"), style::AMBER) } else { (name.clone(), style::TEXT) };
+            out.push((row("KIT", text), c));
+        }
         let load = u.full_load;
         let gun = match (u.condition, u.gun) {
             (Condition::FirepowerKill | Condition::Destroyed, _) => "OUT OF ACTION",

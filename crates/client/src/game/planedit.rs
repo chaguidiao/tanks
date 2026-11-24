@@ -8,8 +8,8 @@
 use std::collections::BTreeMap;
 
 use sim::view::{
-    AmbushReaction, Branch, BuiltUp, ConditionSet, ContactReaction, LegSettings, Plan, PlanStep, ShiftFire,
-    SpeedSetting, StepAction,
+    AmbushReaction, Branch, BuiltUp, ConditionSet, ContactReaction, LegSettings, ObstacleReaction, Plan, PlanStep,
+    ShiftFire, SpeedSetting, StepAction,
 };
 use terrain::path::{Pathfinder, segment_time};
 
@@ -183,6 +183,7 @@ pub enum PlanEdit {
     OnAmbush(u16, Option<AmbushReaction>),
     BuiltUp(u16, Option<BuiltUp>),
     ShiftFire(u16, Option<ShiftFire>),
+    OnObstacle(u16, Option<ObstacleReaction>),
     /// Add an action at the checkpoint (`true` = on release).
     Act(u16, bool, ActKind),
     ClearActs(u16, bool),
@@ -265,6 +266,20 @@ pub(super) fn built_up_name(b: BuiltUp) -> &'static str {
     match b {
         BuiltUp::Avoid => "AVOID",
         BuiltUp::Enter => "ENTER",
+    }
+}
+
+/// ON OBSTACLE values (plan M8D-ENGINEERS §2).
+pub(super) const OBSTACLE_REACTIONS: [ObstacleReaction; 3] =
+    [ObstacleReaction::Bypass, ObstacleReaction::Breach, ObstacleReaction::Halt];
+
+pub(super) const ON_OBSTACLE_TIP: &str = "AN OBSTACLE ON THE ROUTE: BYPASS IF THERE IS A WAY ROUND (DEFAULT), BREACH WITH A PLOUGH, ROLLER OR ENGINEERS, OR HALT SHORT AND WAIT";
+
+pub(super) fn obstacle_name(r: ObstacleReaction) -> &'static str {
+    match r {
+        ObstacleReaction::Bypass => "BYPASS",
+        ObstacleReaction::Breach => "BREACH",
+        ObstacleReaction::Halt => "HALT",
     }
 }
 
@@ -795,6 +810,13 @@ impl Game {
                     .checked(leg.shift_fire == Some(f)),
             );
         }
+        let mut obstacle = vec![keep(leg.on_obstacle.is_some(), PlanEdit::OnObstacle(id, None))];
+        for r in OBSTACLE_REACTIONS {
+            obstacle.push(
+                MenuItem::new(obstacle_name(r), Self::pa(PlanEdit::OnObstacle(id, Some(r))))
+                    .checked(leg.on_obstacle == Some(r)),
+            );
+        }
         let or_keep = |s: Option<String>| s.unwrap_or_else(|| "KEEP".into());
         vec![
             MenuItem::submenu("SPEED", speed).key("S").value(or_keep(leg.speed.map(speed_text))),
@@ -818,6 +840,10 @@ impl Game {
                 .key("N")
                 .value(or_keep(leg.shift_fire.map(|f| shift_fire_name(f).into())))
                 .tip(NO_EFFECT_TIP),
+            MenuItem::submenu("ON OBSTACLE", obstacle)
+                .key("O")
+                .value(or_keep(leg.on_obstacle.map(|r| obstacle_name(r).into())))
+                .tip(ON_OBSTACLE_TIP),
         ]
     }
 
@@ -960,6 +986,7 @@ impl Game {
             ("CONTACT < 3 KM", TriggerCondition::ContactWithin { platoon: p, range_m: 3000.0 }),
             ("UNDER FIRE", TriggerCondition::UnderFire { platoon: p }),
             ("AMBUSHED", TriggerCondition::Ambushed { platoon: p }),
+            ("OBSTACLE", TriggerCondition::ObstacleMet { platoon: p }),
             ("STRENGTH <= 3", TriggerCondition::StrengthAtMost { platoon: p, remaining: 3 }),
             ("STRENGTH <= 2", TriggerCondition::StrengthAtMost { platoon: p, remaining: 2 }),
         ];
@@ -1097,6 +1124,7 @@ impl Game {
                     | PlanEdit::OnAmbush(id, _)
                     | PlanEdit::BuiltUp(id, _)
                     | PlanEdit::ShiftFire(id, _)
+                    | PlanEdit::OnObstacle(id, _)
                     | PlanEdit::Act(id, ..)
                     | PlanEdit::ClearActs(id, _)
                     | PlanEdit::Wait(id, _)
@@ -1116,6 +1144,7 @@ impl Game {
                     PlanEdit::OnAmbush(_, v) => s.leg.on_ambush = v,
                     PlanEdit::BuiltUp(_, v) => s.leg.built_up = v,
                     PlanEdit::ShiftFire(_, v) => s.leg.shift_fire = v,
+                    PlanEdit::OnObstacle(_, v) => s.leg.on_obstacle = v,
                     PlanEdit::Act(_, release, k) => {
                         let a = match k {
                             ActKind::SmokeScreen => StepAction::SmokeScreen,
@@ -1576,6 +1605,9 @@ fn leg_text(l: &sim::view::LegSettings) -> String {
     }
     if let Some(f) = l.shift_fire {
         v.push(format!("NO EFFECT {}", shift_fire_name(f)));
+    }
+    if let Some(r) = l.on_obstacle {
+        v.push(format!("OBSTACLE {}", obstacle_name(r)));
     }
     if v.is_empty() { "KEEP".into() } else { v.join(" · ") }
 }

@@ -34,7 +34,10 @@ pub fn step(p: &mut Platoon, ctx: &mut Ctx) {
     if let Some(o) = p.wait_lane {
         match &p.held {
             Some(PlatoonOrder::Move { .. }) if p.order == PlatoonOrder::None => {
-                if ctx.obstacles.list[o].lanes.iter().any(|l| !l.open) {
+                // A lane is open, or the platoon has since been told to breach and can: go on
+                // (the drill then breaches at the obstacle).
+                let lane = ctx.obstacles.list[o].lanes.iter().any(|l| !l.open);
+                if lane || (p.obstacle_reaction == ObstacleReaction::Breach && can_breach(p, ctx, o)) {
                     let held = p.held.take().expect("matched");
                     if let Some((dest, ahead)) = held.move_ahead() {
                         p.order = PlatoonOrder::new_move(dest, ahead);
@@ -217,17 +220,9 @@ fn bypass(p: &mut Platoon, ctx: &mut Ctx) -> bool {
 fn start_breach(p: &mut Platoon, ctx: &mut Ctx, o: usize, at: Vec2) -> bool {
     let Some((dest, ahead)) = p.order.move_ahead() else { return false };
     let model = ctx.obstacle_model;
-    let ob = &ctx.obstacles.list[o];
-    let kind = &model.kinds[ob.kind];
     let movers = movers(p, ctx);
-    let breacher = (!p.dismount && kind.kit_breach)
-        .then(|| movers.iter().copied().find(|k| ctx.obstacles.kits.get(k).is_some_and(|s| !s.wrecked)))
-        .flatten();
-    let engineers = if p.dismount && (kind.hand_breach_s.is_some() || kind.vehicle == VehicleRule::Mined) {
-        engineers_of(p, ctx)
-    } else {
-        Vec::new()
-    };
+    let (breacher, engineers) = assets(p, ctx, o);
+    let ob = &ctx.obstacles.list[o];
     if breacher.is_none() && engineers.is_empty() {
         return false;
     }
@@ -268,6 +263,25 @@ fn start_breach(p: &mut Platoon, ctx: &mut Ctx, o: usize, at: Vec2) -> bool {
 
 /// Route `k` to `to`; from inside an obstacle band (where it was halted) there may be no planned
 /// route out, so then straight back the way it came.
+/// The plough or roller tank and the engineer squads able to breach obstacle `o`.
+fn assets(p: &Platoon, ctx: &Ctx, o: usize) -> (Option<usize>, Vec<usize>) {
+    let kind = &ctx.obstacle_model.kinds[ctx.obstacles.list[o].kind];
+    let breacher = (!p.dismount && kind.kit_breach)
+        .then(|| movers(p, ctx).into_iter().find(|k| ctx.obstacles.kits.get(k).is_some_and(|s| !s.wrecked)))
+        .flatten();
+    let engineers = if p.dismount && (kind.hand_breach_s.is_some() || kind.vehicle == VehicleRule::Mined) {
+        engineers_of(p, ctx)
+    } else {
+        Vec::new()
+    };
+    (breacher, engineers)
+}
+
+fn can_breach(p: &Platoon, ctx: &Ctx, o: usize) -> bool {
+    let (b, e) = assets(p, ctx, o);
+    b.is_some() || !e.is_empty()
+}
+
 fn route_to(ctx: &mut Ctx, k: usize, to: Vec2, side: crate::SideId) {
     let from = ctx.world.transform[k].pos;
     if ctx.world.squad[k].is_some() {

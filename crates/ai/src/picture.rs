@@ -75,6 +75,8 @@ pub struct OwnUnit {
     pub recovery: Option<RecoveryStage>,
     /// A recovery vehicle (tow gear).
     pub recovery_vehicle: bool,
+    /// Mine plough or roller fitted (M8d): its name, and whether it is wrecked.
+    pub kit: Option<(String, bool)>,
     /// Rounds left per type: (type label, count), in loadout order.
     pub rounds: Vec<(String, u32)>,
     /// Round type the commander ordered; None = crew's choice.

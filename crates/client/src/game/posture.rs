@@ -5,12 +5,12 @@
 
 use super::ctx::{MenuAct, reaction_name};
 use super::planedit::{
-    AMBUSH_REACTIONS, NO_EFFECT_TIP, PlanEdit, ambush_name, ambush_short, built_up_name, reaction_short,
-    shift_fire_name,
+    AMBUSH_REACTIONS, NO_EFFECT_TIP, OBSTACLE_REACTIONS, ON_OBSTACLE_TIP, PlanEdit, ambush_name, ambush_short,
+    built_up_name, obstacle_name, reaction_short, shift_fire_name,
 };
 use super::*;
 use crate::hud::{MenuItem, PopupMenu};
-use ai::picture::{AmbushReaction, BuiltUp, ContactReaction, ShiftFire, SpeedSetting};
+use ai::picture::{AmbushReaction, BuiltUp, ContactReaction, ObstacleReaction, ShiftFire, SpeedSetting};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Posture {
@@ -25,6 +25,8 @@ pub enum Posture {
     BuiltUp,
     /// Sub-list of ON CONTACT.
     ShiftFire,
+    /// Sub-list of ON CONTACT (plan M8D-ENGINEERS §2).
+    OnObstacle,
     Ammo,
 }
 
@@ -38,6 +40,7 @@ pub enum PostureVal {
     OnAmbush(AmbushReaction),
     BuiltUp(BuiltUp),
     ShiftFire(ShiftFire),
+    OnObstacle(ObstacleReaction),
     Ammo(Option<AmmoKind>),
     /// Leg scope: the leg does not set this; the platoon keeps what it has.
     Keep(Posture),
@@ -63,6 +66,7 @@ impl Posture {
             Posture::OnAmbush => "ON AMBUSH",
             Posture::BuiltUp => "BUILT-UP",
             Posture::ShiftFire => "NO EFFECT",
+            Posture::OnObstacle => "ON OBSTACLE",
             Posture::Ammo => "AMMUNITION",
         }
     }
@@ -74,7 +78,7 @@ impl Posture {
             Posture::Technique => 9,
             Posture::Speed => 10,
             Posture::Weapons => 11,
-            Posture::OnContact | Posture::OnAmbush | Posture::BuiltUp | Posture::ShiftFire => 12,
+            Posture::OnContact | Posture::OnAmbush | Posture::BuiltUp | Posture::ShiftFire | Posture::OnObstacle => 12,
             Posture::Ammo => 13,
         }
     }
@@ -88,6 +92,7 @@ impl Posture {
                 | Posture::OnAmbush
                 | Posture::BuiltUp
                 | Posture::ShiftFire
+                | Posture::OnObstacle
         )
     }
 }
@@ -172,6 +177,10 @@ impl Game {
                     let Addressee::Platoon(p) = to else { return None };
                     self.picture().platoon(p).map(|v| PostureVal::ShiftFire(v.shift_fire))
                 }
+                Posture::OnObstacle => {
+                    let Addressee::Platoon(p) = to else { return None };
+                    self.picture().platoon(p).map(|v| PostureVal::OnObstacle(v.obstacle_reaction))
+                }
                 Posture::Ammo => self.ammo_choice(to).map(|(c, _)| PostureVal::Ammo(c)),
             },
             Scope::Leg(p, id) => {
@@ -190,6 +199,7 @@ impl Game {
                     Posture::OnAmbush => leg.on_ambush.map(PostureVal::OnAmbush),
                     Posture::BuiltUp => leg.built_up.map(PostureVal::BuiltUp),
                     Posture::ShiftFire => leg.shift_fire.map(PostureVal::ShiftFire),
+                    Posture::OnObstacle => leg.on_obstacle.map(PostureVal::OnObstacle),
                     Posture::Ammo => None,
                 }
             }
@@ -206,6 +216,7 @@ impl Game {
             PostureVal::OnAmbush(r) => ambush_name(r).into(),
             PostureVal::BuiltUp(b) => built_up_name(b).into(),
             PostureVal::ShiftFire(f) => shift_fire_name(f).into(),
+            PostureVal::OnObstacle(r) => obstacle_name(r).into(),
             PostureVal::Ammo(k) => k.map_or("AUTO", |k| k.label()).into(),
             PostureVal::Keep(_) => "KEEP".into(),
         }
@@ -250,6 +261,7 @@ impl Game {
             Posture::OnAmbush => AMBUSH_REACTIONS.into_iter().map(PostureVal::OnAmbush).collect(),
             Posture::BuiltUp => [BuiltUp::Avoid, BuiltUp::Enter].into_iter().map(PostureVal::BuiltUp).collect(),
             Posture::ShiftFire => [ShiftFire::Shift, ShiftFire::Stay].into_iter().map(PostureVal::ShiftFire).collect(),
+            Posture::OnObstacle => OBSTACLE_REACTIONS.into_iter().map(PostureVal::OnObstacle).collect(),
             Posture::Ammo => {
                 let kinds = match scope {
                     Scope::Now(to) => self.ammo_choice(to).map(|(_, k)| k).unwrap_or_default(),
@@ -307,6 +319,12 @@ impl Game {
                     .key("N")
                     .value(value(Posture::ShiftFire))
                     .tip(NO_EFFECT_TIP),
+            );
+            items.push(
+                MenuItem::submenu("ON OBSTACLE", self.posture_items(Posture::OnObstacle, scope))
+                    .key("O")
+                    .value(value(Posture::OnObstacle))
+                    .tip(ON_OBSTACLE_TIP),
             );
         }
         items
@@ -402,6 +420,7 @@ impl Game {
                     PostureVal::OnAmbush(r) => PlanEdit::OnAmbush(id, Some(r)),
                     PostureVal::BuiltUp(b) => PlanEdit::BuiltUp(id, Some(b)),
                     PostureVal::ShiftFire(f) => PlanEdit::ShiftFire(id, Some(f)),
+                    PostureVal::OnObstacle(r) => PlanEdit::OnObstacle(id, Some(r)),
                     PostureVal::Keep(Posture::Formation) => PlanEdit::Formation(id, None),
                     PostureVal::Keep(Posture::Technique) => PlanEdit::Technique(id, None),
                     PostureVal::Keep(Posture::Speed) => PlanEdit::Speed(id, None),
@@ -410,6 +429,7 @@ impl Game {
                     PostureVal::Keep(Posture::OnAmbush) => PlanEdit::OnAmbush(id, None),
                     PostureVal::Keep(Posture::BuiltUp) => PlanEdit::BuiltUp(id, None),
                     PostureVal::Keep(Posture::ShiftFire) => PlanEdit::ShiftFire(id, None),
+                    PostureVal::Keep(Posture::OnObstacle) => PlanEdit::OnObstacle(id, None),
                     PostureVal::Ammo(_) | PostureVal::Keep(Posture::Ammo) => return,
                 };
                 self.run_plan_edit(e, [0.0, 0.0]);
@@ -471,6 +491,10 @@ impl Game {
             (PostureVal::ShiftFire(shift_fire), Addressee::Platoon(platoon)) => {
                 self.order(Command::SetShiftFire { platoon, shift_fire });
                 self.radio(format!("TO {cs}: ON NO EFFECT, {}.", shift_fire_name(shift_fire)));
+            }
+            (PostureVal::OnObstacle(reaction), Addressee::Platoon(platoon)) => {
+                self.order(Command::SetObstacleReaction { platoon, reaction });
+                self.radio(format!("TO {cs}: ON OBSTACLE, {}.", obstacle_name(reaction)));
             }
             (PostureVal::Ammo(kind), _) => {
                 self.order(Command::SelectAmmo { to, kind });

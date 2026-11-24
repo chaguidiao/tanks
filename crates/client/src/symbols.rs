@@ -313,3 +313,103 @@ pub fn graphic(f: &mut Frame, cam: &Camera, g: &sim::view::Graphic, highlight: b
         }
     }
 }
+
+/// An obstacle (M8d; APP-6D obstacle graphics, simplified): the line with marks by kind (ditch:
+/// teeth on the enemy side; wire: crosses; abatis: Vs; dragon's teeth: triangles), a minefield as
+/// its band with mine circles, lanes as two edges, and the kind written beside it (colour is
+/// never the only cue).
+pub fn obstacle(f: &mut Frame, cam: &Camera, o: &sim::view::ObstacleView, c: Rgba) {
+    let pts: Vec<P2> = o.points.iter().map(|p| cam.to_screen(*p)).collect();
+    let thin = Rgba(c.0, c.1, c.2, 200);
+    let half = o.width_m / 2.0;
+    // Mark spacing along the line, in metres, so marks are about 14 px apart.
+    let every = (14.0 * cam.mpp).max(2.0);
+    let mut marks: Vec<([f64; 2], [f64; 2])> = Vec::new(); // (point, unit normal)
+    for w in o.points.windows(2) {
+        let (dx, dy) = (w[1][0] - w[0][0], w[1][1] - w[0][1]);
+        let l = (dx * dx + dy * dy).sqrt();
+        if l < 1e-6 {
+            continue;
+        }
+        let (tx, ty) = (dx / l, dy / l);
+        let n = [-ty, tx];
+        let k = (l / every).floor() as usize;
+        for i in 0..k {
+            let s = (i as f64 + 0.5) * every;
+            marks.push(([w[0][0] + tx * s, w[0][1] + ty * s], n));
+        }
+        if o.kind == "minefield" {
+            let edge = |sgn: f64| {
+                [
+                    cam.to_screen([w[0][0] + n[0] * half * sgn, w[0][1] + n[1] * half * sgn]),
+                    cam.to_screen([w[1][0] + n[0] * half * sgn, w[1][1] + n[1] * half * sgn]),
+                ]
+            };
+            for e in [edge(1.0), edge(-1.0)] {
+                dashed(f, e[0], e[1], thin);
+            }
+            for p in [w[0], w[1]] {
+                let a = cam.to_screen([p[0] + n[0] * half, p[1] + n[1] * half]);
+                let b = cam.to_screen([p[0] - n[0] * half, p[1] - n[1] * half]);
+                dashed(f, a, b, thin);
+            }
+        }
+    }
+    if o.kind != "minefield" {
+        for w in pts.windows(2) {
+            f.line(w[0], w[1], 1.5, c);
+        }
+    }
+    let m = 4.0 * cam.mpp; // a 4 px mark, in metres
+    for (p, n) in &marks {
+        let t = [n[1], -n[0]];
+        let at = |a: f64, b: f64| cam.to_screen([p[0] + n[0] * a + t[0] * b, p[1] + n[1] * a + t[1] * b]);
+        match o.kind.as_str() {
+            "ditch" => {
+                f.line(at(0.0, -m), at(m * 1.5, 0.0), 1.0, c);
+                f.line(at(m * 1.5, 0.0), at(0.0, m), 1.0, c);
+            }
+            "wire" => {
+                f.line(at(-m, -m), at(m, m), 1.0, c);
+                f.line(at(-m, m), at(m, -m), 1.0, c);
+            }
+            "abatis" => {
+                f.line(at(m * 1.5, -m), at(0.0, 0.0), 1.0, c);
+                f.line(at(0.0, 0.0), at(m * 1.5, m), 1.0, c);
+            }
+            "teeth" => {
+                f.line(at(-m, -m), at(m, 0.0), 1.0, c);
+                f.line(at(m, 0.0), at(-m, m), 1.0, c);
+                f.line(at(-m, m), at(-m, -m), 1.0, c);
+            }
+            _ => {
+                let r = (m / cam.mpp * 0.6) as f32;
+                f.circle_lines(cam.to_screen(*p), r.max(2.0), c);
+            }
+        }
+    }
+    for l in &o.lanes {
+        let (dx, dy) = (l.b[0] - l.a[0], l.b[1] - l.a[1]);
+        let len = (dx * dx + dy * dy).sqrt().max(1e-6);
+        // At least 3 px apart, so a lane reads when zoomed out.
+        let h = (l.width_m / 2.0).max(1.5 * cam.mpp);
+        let n = [-dy / len * h, dx / len * h];
+        let lane = Rgba(225, 215, 160, 230);
+        for s in [1.0, -1.0] {
+            let a = cam.to_screen([l.a[0] + n[0] * s, l.a[1] + n[1] * s]);
+            let b = cam.to_screen([l.b[0] + n[0] * s, l.b[1] + n[1] * s]);
+            if l.open { dashed(f, a, b, lane) } else { f.line(a, b, 1.5, lane) }
+        }
+        let mid = cam.to_screen([(l.a[0] + l.b[0]) / 2.0, (l.a[1] + l.b[1]) / 2.0]);
+        let label = if l.open { "LANE (CUTTING)" } else { "LANE" };
+        f.text(label, mid[0] + 6.0, mid[1] + 4.0, style::FONT_S, lane);
+    }
+    let mid = pts[pts.len() / 2];
+    let name = match o.kind.as_str() {
+        "ditch" => "AT DITCH",
+        "minefield" => "MINES",
+        "teeth" => "TEETH",
+        _ => o.name.as_str(),
+    };
+    f.text(name, mid[0] + 6.0, mid[1] - 14.0, style::FONT_S, c);
+}

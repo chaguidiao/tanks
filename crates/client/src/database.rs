@@ -230,7 +230,7 @@ pub fn entries(ds: &DataSet, tab: Tab, year: Option<i32>) -> Vec<(usize, String,
             ds.doctrine.iter().enumerate().map(|(k, d)| (k, d.name.to_uppercase(), d.id.to_uppercase())).collect()
         }
         Tab::Combat => {
-            let fixed = ["DETECTION", "PENETRATION", "DAMAGE", "HE EFFECTS", "SUPPRESSION"];
+            let fixed = ["DETECTION", "PENETRATION", "DAMAGE", "HE EFFECTS", "SUPPRESSION", "OBSTACLES & MINES"];
             let n = fixed.len();
             fixed
                 .iter()
@@ -303,6 +303,11 @@ fn vehicle_sheet(ds: &DataSet, v: &VehicleDef) -> Sheet {
         stat("FORDING (UNPREPARED)", &mo.fording_depth_m, m),
         stat("VERTICAL STEP", &mo.vertical_step_m, m),
         stat("TRENCH", &mo.trench_width_m, m),
+        calc(
+            "MILITARY LOAD CLASS",
+            format!("{:.0}", mo.combat_mass_kg.get() / 907.18),
+            "MASS IN SHORT TONS (TRACKED; MLC RULE OF THUMB, NO WIDTH CORRECTION)",
+        ),
         calc(
             "GROUND PRESSURE",
             format!("{pressure_kpa:.0} KPA"),
@@ -875,6 +880,71 @@ fn doctrine_sheet(d: &DoctrinePack) -> Sheet {
     }
 }
 
+/// Obstacle kinds, mines, breaching kits and the breach figures (M8d, `obstacles.ron`).
+fn obstacles_sheet(ds: &DataSet) -> Sheet {
+    let o = &ds.obstacles;
+    let mut lines = vec![section("LANES AND BREACHING")];
+    lines.extend([
+        stat("LANE WIDTH", &o.lane_width_m, m),
+        stat("PLOUGH STARTS SHORT / ENDS PAST", &o.lane_overrun_m, m),
+        stat("HAND BREACH, MINEFIELD", &o.hand_breach_mine_m_per_min, |x| format!("{x:.1} M/MIN")),
+        stat("FOLLOWERS MEET OF MINES MISSED", &o.lane_follow_factor, |x| format!("{:.0} %", x * 100.0)),
+        stat("BYPASS UP TO", &o.bypass_detour_factor, |x| format!("× {x:.1} THE ROUTE")),
+        stat("LANE INSTEAD OF BREACH UP TO", &o.breach_detour_factor, |x| format!("× {x:.1} THE ROUTE")),
+        stat("BREACH STOPS ABOVE SUPPRESSION", &o.breach_suppression_stop, plain),
+    ]);
+    for k in &o.kinds {
+        lines.push(section(&k.name));
+        let rule = match k.vehicle {
+            sim_data::VehicleRule::NoGo => "CLOSED UNTIL A LANE IS OPEN".to_owned(),
+            sim_data::VehicleRule::Slow(f) => format!("CROSSED AT {:.0} % SPEED", f * 100.0),
+            sim_data::VehicleRule::Gap => "CROSSED IF WITHIN TRENCH AND STEP".to_owned(),
+            sim_data::VehicleRule::Mined => "PASSABLE: MINE STRIKES".to_owned(),
+        };
+        lines.push(fact("VEHICLES", rule));
+        lines.push(stat("ON FOOT", &k.foot_factor, |x| {
+            if x <= 0.0 { "CLOSED".into() } else { format!("{:.0} % SPEED", x * 100.0) }
+        }));
+        lines.push(stat("WIDTH (MINEFIELD: DEPTH)", &k.width_m, m));
+        lines.push(stat("DEPTH / HEIGHT", &k.height_m, m));
+        lines.push(stat("SEEN AT UP TO", &k.detect_range_m, |x| format!("{x:.0} M")));
+        if let Some(h) = &k.hand_breach_s {
+            lines.push(stat("ENGINEERS OPEN A LANE IN", h, secs));
+        }
+        if k.kit_breach {
+            lines.push(fact("PLOUGH / ROLLER", "OPENS A LANE"));
+        }
+    }
+    for mi in &o.mines {
+        lines.push(section(&mi.name));
+        lines.push(fact("IN SERVICE", years(&mi.in_service)));
+        lines.push(stat("EFFECTIVE WIDTH", &mi.effective_width_m, m));
+        lines.push(stat("STRIKES THAT DESTROY", &mi.destroy_share, |x| format!("{:.0} %", x * 100.0)));
+        lines.push(stat("STRIKES THAT IMMOBILISE", &mi.immobilise_share, |x| format!("{:.0} %", x * 100.0)));
+    }
+    lines.push(calc(
+        "ENCOUNTER, 1 MINE/M, 100 M DEEP",
+        format!("{:.0} %", sim_data::encounter_probability(&[(1.0, 1.0)]) * 100.0),
+        "1 - EXP(-Σ LINEAR DENSITY × EFFECTIVE WIDTH) (FM 20-32)",
+    ));
+    for kit in &o.kits {
+        lines.push(section(&kit.name));
+        lines.push(fact("IN SERVICE", years(&kit.in_service)));
+        lines.push(fact("FITS", kit.fits.join(", ").to_uppercase()));
+        lines.push(stat("BREACHING SPEED", &kit.breach_speed_mps, kmh));
+        lines.push(stat("CLEARS PRESSURE MINES", &kit.clear_pressure, |x| format!("{:.0} %", x * 100.0)));
+        lines.push(stat("CLEARS FULL-WIDTH MINES", &kit.clear_full_width, |x| format!("{:.0} %", x * 100.0)));
+        if let Some(st) = &kit.strikes {
+            lines.push(stat("WRECKED AFTER", st, |x| format!("{x:.0} STRIKES")));
+        }
+    }
+    Sheet {
+        title: "OBSTACLES & MINES".into(),
+        sub: "FM 20-32, FM 90-7, FM 3-34.2: WHAT EACH KIND STOPS, MINE STRIKES, PLOUGHS AND ROLLERS".into(),
+        lines,
+    }
+}
+
 fn combat_sheet(ds: &DataSet, k: usize) -> Option<Sheet> {
     Some(match k {
         0 => {
@@ -1002,8 +1072,9 @@ fn combat_sheet(ds: &DataSet, k: usize) -> Option<Sheet> {
                 ],
             }
         }
-        k if k >= 5 => {
-            let b = ds.fires.batteries.get(k - 5)?;
+        5 => obstacles_sheet(ds),
+        k if k >= 6 => {
+            let b = ds.fires.batteries.get(k - 6)?;
             Sheet {
                 title: b.name.clone(),
                 sub: format!("MIRRORS {}", b.mirrors.to_uppercase()),

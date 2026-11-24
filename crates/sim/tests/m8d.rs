@@ -274,3 +274,30 @@ fn halt_on_obstacle_waits_for_orders() {
     assert!(ys(&sim, 4).iter().all(|y| *y < 790.0), "holds short");
     assert_eq!(sim.perceived(BLUE).platoons[0].obstacle_reaction, ai::picture::ObstacleReaction::Halt);
 }
+
+#[test]
+fn a_platoon_does_not_drive_through_its_own_minefield() {
+    let mut sim = setup(4, |sc| sc.sides[0].obstacles.push(minefield(&[[0.0, 800.0], [1600.0, 800.0]], 0.8)));
+    sim.submit(BLUE, pmove([700.0, 1400.0]));
+    let ev = run(&mut sim, 400.0);
+    let r = reports(&ev);
+    assert!(ys(&sim, 4).iter().all(|y| *y < 760.0), "{:?} {r:?}", ys(&sim, 4));
+}
+
+#[test]
+fn a_platoon_halted_at_a_minefield_breaches_when_told_to() {
+    // Default BYPASS: no way round, so it holds; ON OBSTACLE BREACH then sends the plough in.
+    let mut sim = setup(4, |sc| {
+        sc.sides[1].obstacles.push(minefield(&[[0.0, 800.0], [1600.0, 800.0]], 0.8));
+        sc.sides[0].units[0].kit = Some("plough_b".into());
+        sc.sides[0].obstacles.push(obstacle("wire", &[[0.0, 2300.0], [10.0, 2300.0]])); // Blue knows something
+    });
+    // Recce has reported the field.
+    sim.submit(BLUE, pmove([700.0, 1400.0]));
+    let mut ev = run(&mut sim, 240.0);
+    sim.submit(BLUE, Command::SetObstacleReaction { platoon: P1, reaction: ai::picture::ObstacleReaction::Breach });
+    ev.extend(run(&mut sim, 600.0));
+    let r = reports(&ev);
+    assert!(r.iter().any(|r| matches!(r, sim::PlatoonReport::LaneOpen { .. })), "{r:?}");
+    assert!(ys(&sim, 4).iter().filter(|y| **y > 900.0).count() >= 3, "{:?}", ys(&sim, 4));
+}

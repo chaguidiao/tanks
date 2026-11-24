@@ -373,6 +373,7 @@ impl SideState {
                 cargo: None,
                 recovery: None,
                 recovery_vehicle: w.tow[k].is_some(),
+                kit: None,
                 rounds,
                 ammo_selected,
                 era_left: w.era[k],

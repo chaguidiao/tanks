@@ -27,9 +27,13 @@ pub struct Lane {
     pub open: bool,
 }
 
+/// Routes are planned on 4 m cells, so a vehicle routed through a lane's cells keeps within this
+/// of its centre line (0.75 cell); planning and physics both use it.
+pub const LANE_MIN_HALF_M: f64 = 3.0;
+
 impl Lane {
     pub fn contains(&self, p: Vec2) -> bool {
-        seg_dist(p, self.a, self.b) <= self.half
+        seg_dist(p, self.a, self.b) <= self.half.max(LANE_MIN_HALF_M)
     }
 }
 
@@ -273,7 +277,7 @@ impl ObstacleField {
             }
             for &(i, j) in &ob.cells {
                 let c = [(i as f64 + 0.5) * self.cell_m, (j as f64 + 0.5) * self.cell_m];
-                if ob.lanes.iter().any(|l| seg_dist(c, l.a, l.b) <= l.half.max(self.cell_m * 0.75)) {
+                if ob.lanes.iter().any(|l| l.contains(c)) {
                     continue;
                 }
                 let (i, j) = (i as usize, j as usize);

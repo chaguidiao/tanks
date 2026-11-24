@@ -2235,6 +2235,15 @@ impl Sim {
                 .map(|(i, b)| b.view(i as u32, &self.data.fires.batteries[b.def], self.tick))
                 .collect();
             let si = dst.side.0 as usize;
+            if !self.obstacles.kits.is_empty() {
+                for u in dst.own.iter_mut() {
+                    if let Some(k) = self.world.index_of(u.id)
+                        && let Some(st) = self.obstacles.kits.get(&k)
+                    {
+                        u.kit = Some((self.data.obstacles.kits[st.kit].name.clone(), st.wrecked));
+                    }
+                }
+            }
             dst.obstacles = self
                 .obstacles
                 .list
